@@ -1,0 +1,326 @@
+Initialize Git:
+
+bashgit init
+
+Create README:
+
+bashcat > README.md << 'EOF'
+# AWS Security Journey
+
+## Day 1 - Feb 5, 2026
+
+### What I Did Today:
+- ✅ Created AWS account with MFA enabled
+- ✅ Set up billing alerts (threshold: $5)
+- ✅ Launched first EC2 instance (t2.micro, Amazon Linux 2023)
+- ✅ Configured Security Group (SSH from my IP only)
+- ✅ Connected via SSH successfully
+- ✅ Hardened SSH configuration (disabled root login)
+- ✅ Created security audit script
+
+### AWS Services Used:
+- EC2 (Elastic Compute Cloud)
+- VPC (Virtual Private Cloud)
+- Security Groups
+- CloudWatch (for billing alerts)
+
+### Key Learnings:
+1. Security Groups are stateful firewalls (like iptables but cloud-native)
+2. AWS Free Tier gives 750 hours/month of t2.micro (enough for 24/7 usage)
+3. Default Amazon Linux comes with many security best practices enabled
+4. Public key authentication is required (no password SSH)
+
+### Differences from RHEL:
+- Amazon Linux uses `yum` (similar to RHEL)
+- Default user is `ec2-user` (not root)
+- Cloud-init handles initial setup
+- Instance metadata service provides cloud-specific info
+
+### Tomorrow's Plan:
+- Start Stephane's course (IAM section)
+- Deep dive into IAM users, groups, policies
+- Hands-on: Create IAM users and test permissions
+
+### Time Spent: 4 hours
+### Status: ✅ Day 1 Complete!
+EOF
+
+Create Day 1 lab folder:
+
+bashmkdir -p labs/day1
+
+Document your EC2 hardening:
+
+bashcat > labs/day1/ec2-hardening.md << 'EOF'
+# Day 1 Lab: EC2 Instance Hardening
+
+## Objective
+Launch and secure an EC2 instance following security best practices.
+
+## Steps Performed
+
+### 1. Instance Launch
+- AMI: Amazon Linux 2023
+- Instance Type: t2.micro (Free Tier)
+- Security Group: SSH from my IP only
+- Key Pair: RSA key for authentication
+
+### 2. Security Hardening Applied
+```bash
+# Disabled root SSH login
+sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+sudo systemctl restart sshd
+
+# Updated all packages
+sudo yum update -y
+
+# Installed security tools
+sudo yum install -y nmap nc telnet
+```
+
+### 3. Security Audit Script Created
+Created `security-check.sh` to audit:
+- SSH configuration
+- Active users
+- Open ports
+- Recent login history
+
+## Security Posture
+✅ Root login disabled
+✅ SSH key-based authentication only
+✅ Firewall configured (Security Group)
+✅ System fully updated
+✅ Audit logging in place
+
+## Next Steps
+- Implement automated security scanning
+- Configure CloudWatch monitoring
+- Enable CloudTrail for audit logging
+EOF
+
+Copy your audit report from EC2:
+
+bash# In your local terminal (not EC2):
+scp -i ~/Downloads/aws-security-key.pem ec2-user@YOUR_INSTANCE_IP:~/day1-audit-report.txt labs/day1/
+
+Create .gitignore:
+
+bashcat > .gitignore << 'EOF'
+*.pem
+*.ppk
+*.key
+.DS_Store
+EOF
+
+Commit to Git (local for now):
+
+bashgit add .
+git commit -m "Day 1: First EC2 instance launched and hardened"
+
+Minute 150-180: GitHub + LinkedIn
+GitHub Setup:
+
+Go to github.com
+Sign up or log in
+Create new repository:
+
+Name: aws-security-journey
+Description: "My transition from Linux Security to AWS Cloud Security - Daily progress tracking"
+Public (so employers can see)
+Don't initialize with README (you already have one)
+
+
+Push your code:
+
+bash# In your aws-security-journey folder:
+git remote add origin https://github.com/YOUR_USERNAME/aws-security-journey.git
+git branch -M main
+git push -u origin main
+```
+
+**LinkedIn Post:**
+
+Log into LinkedIn and post:
+```
+🚀 Day 1: Starting My AWS Cloud Security Journey
+
+After 6 years of securing Linux systems and conducting security assessments, I'm transitioning to Cloud Security.
+
+Today's achievements:
+✅ Launched and hardened my first AWS EC2 instance
+✅ Configured security groups and IAM
+✅ Started AWS Certified Security Specialty prep
+✅ Created security audit automation script
+
+Target: AWS Certified Security - Specialty by April 2026
+
+Following along? Connect with me!
+
+#CloudSecurity #AWS #CyberSecurity #CEH #DevSecOps #CareerTransition
+
+[Link to your GitHub repo]
+
+CRITICAL: Stop Your EC2 Instance (Save Money)
+Before you finish today:
+bash# Exit from EC2
+exit
+
+# In AWS Console:
+# EC2 → Instances → Select your instance → Instance State → Stop
+# (Don't terminate - you'll use this tomorrow)
+```
+
+**Why?**
+- Running instance = charges after 750 hours
+- Stopped instance = NO charges (only storage ~₹10/month)
+- You can start it again tomorrow in 30 seconds
+
+**Daily habit:** Start when you need it, stop when done.
+
+---
+
+## **Day 1 Complete Checklist:**
+
+Go through this list:
+```
+☐ AWS account created
+☐ MFA enabled on root account
+☐ Billing alert set ($5 threshold)
+☐ Course purchased (Udemy) or started (AWS Skill Builder)
+☐ First EC2 instance launched
+☐ SSH connection successful
+☐ Security hardening applied
+☐ Security audit script created
+☐ Documentation written
+☐ GitHub repo created and pushed
+☐ LinkedIn post published
+☐ EC2 instance STOPPED (to save money)
+```
+
+**If you checked 10+:** 🎉 PERFECT DAY 1! 🎉
+
+**If you checked 7-9:** ✅ Great start! Finish remaining tomorrow.
+
+**If you checked <7:** Still good! Continue tomorrow where you left off.
+
+---
+
+## **What to Expect Tomorrow (Day 2):**
+
+**Your 4-hour block:**
+- Hour 1: Watch Stephane's course (IAM section 1)
+- Hour 2: Watch Stephane's course (IAM section 2)
+- Hour 3: Hands-on IAM lab (create users, groups, policies)
+- Hour 4: Document + 10 practice questions
+
+---
+
+## **Before You Sleep Tonight:**
+
+**Set these reminders on your phone:**
+```
+⏰ Daily 8:00 PM: "AWS Study Time - 4 hours"
+⏰ Daily 12:00 AM: "Stop EC2 instance if running"
+⏰ Sunday 8:00 PM: "Weekly review + LinkedIn post"
+
+Final Words for Day 1:
+You just:
+
+✅ Created your cloud environment
+✅ Applied security hardening (your strength!)
+✅ Started learning AWS
+✅ Made your commitment public (accountability)
+✅ Set up your learning infrastructure
+
+This is the foundation. Every day builds on this.
+Tomorrow, you'll dive into IAM - the core of AWS security.
+
+Need Help? Having Issues?
+Come back and tell me:
+
+✅ What worked well
+⚠️ Where you got stuck
+❓ Questions you have
+
+I'll troubleshoot and give you Day 2 guidance.
+
+NOW GO! START YOUR 4 HOURS! ⏱️
+Stop reading. Start doing.
+Your ₹20+ LPA cloud security career begins RIGHT NOW.
+See you tomorrow with your Day 1 completion report! 💪
+
+One more thing: Save this conversation. Bookmark it. You'll refer back to it.
+NOW GO! EXECUTE! 🚀
+
+
+
+--------------
+11/2/2026
+--------------
+
+---
+
+## **DOCUMENTATION (30 min)**
+
+Create a file (Notepad/Word/Google Doc) and document:
+```
+IAM HANDS-ON LABS COMPLETED
+===========================
+
+Lab 1: Users, Groups, Policies
+- Created 3 groups: Developers, Admins, ReadOnly
+- Created 3 users: alice, bob, charlie
+- Learning: Groups organize permissions
+
+Lab 2: Custom Policies
+- Created EC2-ViewOnly-NoTerminate policy
+- Learning: Deny always wins over Allow
+
+Lab 3: IAM Roles for EC2
+- Created EC2-S3-ReadOnly-Role
+- Attached to EC2, accessed S3 without access keys
+- Learning: Roles = secure way for services to access services
+
+Lab 4: Permission Boundaries
+- Applied boundary to alice
+- Learning: Boundaries LIMIT permissions, don't grant them
+
+Lab 5: MFA
+- Enabled MFA for bob
+- Learning: MFA protects against password compromise
+
+Time spent: 2.5 hours
+Confidence level: 8/10 on IAM ✅
+```
+
+---
+
+## **PRACTICE QUESTIONS (30 min)**
+
+### **Go to ExamTopics:**
+
+1. Visit: examtopics.com
+2. Search: "AWS Security Specialty SCS-C03"
+3. Find IAM questions
+4. Do 20 questions
+
+### **Track your score:**
+```
+IAM Practice: __/20 correct
+Topics to review: [list any you got wrong]
+```
+
+**Target: 16+/20 (80%+)**
+
+---
+
+## **COMPLETE CHECKLIST:**
+```
+☐ Lab 1: Users, Groups, Policies (30 min)
+☐ Lab 2: Custom IAM Policy (30 min)
+☐ Lab 3: IAM Roles for EC2 (45 min)
+☐ Lab 4: Permission Boundaries (15 min)
+☐ Lab 5: MFA (15 min)
+☐ Documentation created (30 min)
+☐ 20 practice questions done (30 min)
+☐ EC2 instance stopped ✅
