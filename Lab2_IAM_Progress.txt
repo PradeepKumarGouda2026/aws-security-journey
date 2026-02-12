@@ -1,0 +1,867 @@
+Noe lets move on to Advanced IAM concepts hands on
+
+06:26
+ADVANCED IAM HANDS-ON LABS
+Let's dive into advanced IAM concepts! These are critical for the exam and real-world scenarios.
+
+BEFORE YOU START:
+Make sure you're signed into AWS Console as ROOT or an admin user.
+
+AWS Console → IAM Dashboard
+LAB 6: SERVICE CONTROL POLICIES (SCPs) - AWS Organizations
+What are SCPs?
+Like permission boundaries, but for entire AWS accounts
+Applied at Organization/OU (Organizational Unit) level
+Even account admins can't bypass SCPs
+Used for compliance and governance
+Step 1: Enable AWS Organizations
+AWS Console → Search "AWS Organizations" → Organizations
+
+If not enabled:
+├─ Click "Create organization"
+├─ Email will be sent to root account email
+├─ Verify email
+└─ Organization created ✅
+
+If already enabled:
+└─ You'll see your organization structure
+Step 2: Understand Default Structure
+Root (Organization root - not your AWS root user!)
+└─ Your AWS Account (Management account)
+Note: For full SCP testing, you need multiple accounts. For learning, we'll understand the concept.
+
+Step 3: View Default SCPs
+Organizations → Policies → Service control policies
+
+You'll see:
+- FullAWSAccess (default SCP attached to root)
+
+Click on "FullAWSAccess" to view:
+json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "*",
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**This allows everything - it's the default.**
+
+---
+
+### **Step 4: Create a Restrictive SCP**
+```
+Service control policies → Create policy
+
+Policy name: DenyRootAccountUsage
+
+Description: Prevents use of root user for daily operations
+
+Policy (paste this JSON):
+json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyRootAccount",
+      "Effect": "Deny",
+      "Action": "*",
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "aws:PrincipalArn": "arn:aws:iam::*:root"
+        }
+      }
+    }
+  ]
+}
+```
+
+**Click "Create policy"**
+
+---
+
+### **Step 5: Create Another SCP - Deny Specific Regions**
+```
+Create policy
+
+Policy name: DenyNonMumbaiRegions
+
+Policy:
+json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyAllOutsideMumbai",
+      "Effect": "Deny",
+      "NotAction": [
+        "iam:*",
+        "organizations:*",
+        "route53:*",
+        "budgets:*",
+        "cloudfront:*",
+        "support:*",
+        "sts:*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:RequestedRegion": "ap-south-1"
+        }
+      }
+    }
+  ]
+}
+```
+
+**This prevents creating resources outside Mumbai region (cost control!)**
+
+**Create policy**
+
+---
+
+### **Step 6: Create SCP - Deny Deleting CloudTrail**
+```
+Policy name: ProtectCloudTrail
+
+Policy:
+json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyCloudTrailDeletion",
+      "Effect": "Deny",
+      "Action": [
+        "cloudtrail:DeleteTrail",
+        "cloudtrail:StopLogging",
+        "cloudtrail:UpdateTrail"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**This ensures audit logging can't be disabled (compliance requirement!)**
+
+---
+
+### **What You Learned:**
+
+**SCPs are different from IAM policies:**
+
+| Feature | IAM Policy | SCP |
+|---------|-----------|-----|
+| Applied to | Users, groups, roles | AWS accounts, OUs |
+| Can grant permissions | ✅ Yes | ❌ No (only deny/limit) |
+| Scope | Within one account | Across organization |
+| Who can bypass | Account admin | ❌ Nobody! |
+| Use case | Day-to-day access | Compliance guardrails |
+
+---
+
+**DOCUMENT THIS:**
+```
+LAB 6: Service Control Policies
+================================
+
+Created 3 SCPs:
+1. DenyRootAccountUsage - Prevents root user usage
+2. DenyNonMumbaiRegions - Restricts resources to Mumbai only
+3. ProtectCloudTrail - Prevents audit log tampering
+
+Key Learning:
+- SCPs are organization-wide guardrails
+- Even admins can't bypass them
+- Used for compliance and cost control
+- Default SCP: FullAWSAccess (allows everything)
+```
+
+---
+
+# **LAB 7: IAM ACCESS ANALYZER**
+
+## **What is it?**
+- Identifies resources shared with external entities
+- Finds overly permissive policies
+- Helps implement least privilege
+
+---
+
+### **Step 1: Enable IAM Access Analyzer**
+```
+IAM Console → Access Analyzer (left menu)
+
+If not enabled:
+├─ Click "Create analyzer"
+├─ Name: my-access-analyzer
+├─ Zone of trust: Current account
+└─ Create analyzer
+
+Wait 1-2 minutes for it to scan your account
+```
+
+---
+
+### **Step 2: View Findings**
+```
+Access Analyzer → Findings
+
+You might see findings like:
+- S3 bucket accessible from external account
+- IAM role with overly permissive trust policy
+- KMS key shared with another account
+```
+
+**For our test, let's CREATE a finding:**
+
+---
+
+### **Step 3: Create a Public S3 Bucket (to trigger finding)**
+```
+S3 Console → Create bucket
+
+Bucket name: public-test-bucket-YOURNAME-456
+Region: ap-south-1
+
+⚠️ UNCHECK "Block all public access"
+├─ Uncheck "Block all public access"
+├─ ✅ Acknowledge warning
+└─ Create bucket
+
+Add bucket policy to make it public:
+├─ Open bucket
+├─ Permissions tab
+├─ Bucket policy → Edit
+├─ Paste:
+json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::public-test-bucket-YOURNAME-456/*"
+    }
+  ]
+}
+```
+
+**Save changes**
+
+---
+
+### **Step 4: Check Access Analyzer Findings**
+```
+IAM → Access Analyzer → Findings
+
+Wait 5-10 minutes, then refresh
+
+You should see:
+┌─────────────────────────────────────────┐
+│ Finding: S3 Bucket                      │
+│ Resource: public-test-bucket-...        │
+│ Status: Active                          │
+│ Shared with: Internet (public access)   │
+│ Access level: Read                      │
+└─────────────────────────────────────────┘
+
+Click on the finding to see:
+- Which actions are public (s3:GetObject)
+- Who has access (*)
+- Recommendation: Restrict public access
+```
+
+---
+
+### **Step 5: Resolve the Finding**
+```
+Option 1: Remove public access
+├─ S3 → Bucket → Permissions
+├─ Bucket policy → Delete
+├─ Block public access → Edit → Block all
+└─ Save
+
+Access Analyzer will mark finding as "Resolved" in ~10 min
+
+Option 2: Archive the finding (if intentional)
+├─ Access Analyzer → Finding
+├─ Click "Archive"
+├─ Reason: "Intentionally public for website hosting"
+└─ Archive
+```
+
+---
+
+### **Step 6: Test with IAM Role External Access**
+```
+Create a cross-account trust policy (simulate):
+
+IAM → Roles → Create role
+
+Trusted entity: Another AWS account
+Account ID: 111122223333 (fake account ID)
+Next
+
+Permissions: AmazonS3ReadOnlyAccess
+Next
+
+Role name: ExternalAccountRole
+Create role
+
+Check Access Analyzer:
+└─ Will show this role is assumable by external account
+   (This is a finding if unintended!)
+```
+
+---
+
+**DOCUMENT THIS:**
+```
+LAB 7: IAM Access Analyzer
+===========================
+
+Setup:
+- Enabled Access Analyzer in my account
+- Zone of trust: Current account
+
+Tests performed:
+1. Created public S3 bucket
+   → Access Analyzer detected public access ✅
+   → Showed who has access and what actions
+
+2. Created role with external account trust
+   → Access Analyzer flagged cross-account access ✅
+
+Use cases:
+- Continuous monitoring for public resources
+- Detect unintended sharing
+- Compliance (PCI-DSS, HIPAA require this)
+
+Real-world: Run weekly reports, alert on new findings
+```
+
+---
+
+# **LAB 8: IAM POLICY SIMULATOR**
+
+## **What is it?**
+- Test IAM policies before applying them
+- See what actions are allowed/denied
+- Debug permission issues
+
+---
+
+### **Step 1: Open Policy Simulator**
+```
+Go to: https://policysim.aws.amazon.com/
+
+Or:
+IAM Console → Click username (top right) → "Policy Simulator"
+```
+
+---
+
+### **Step 2: Select User to Test**
+```
+Left panel: Users
+Select: alice (from Lab 1)
+
+Right panel shows:
+- All policies attached to alice
+- Permission boundaries (if set)
+```
+
+---
+
+### **Step 3: Simulate S3 Actions**
+```
+Select Service: S3
+
+Select Actions:
+├─ ✅ ListAllMyBuckets
+├─ ✅ GetObject
+├─ ✅ PutObject
+└─ ✅ DeleteBucket
+
+Click "Run Simulation"
+
+Results:
+┌──────────────────────────────────────┐
+│ ListAllMyBuckets    → ✅ Allowed     │
+│ GetObject           → ✅ Allowed     │
+│ PutObject           → ✅ Allowed     │
+│ DeleteBucket        → ✅ Allowed     │
+└──────────────────────────────────────┘
+
+(Because alice has PowerUserAccess via Developers group)
+```
+
+---
+
+### **Step 4: Test with Permission Boundary**
+```
+If you did Lab 4 (permission boundary on alice):
+
+Run same simulation again
+
+Results:
+┌──────────────────────────────────────┐
+│ ListAllMyBuckets    → ✅ Allowed     │
+│ GetObject           → ✅ Allowed     │
+│ PutObject           → ✅ Allowed     │
+│ DeleteBucket        → ✅ Allowed     │
+└──────────────────────────────────────┘
+
+But try EC2 actions:
+Select Service: EC2
+Select Actions:
+├─ ✅ DescribeInstances
+├─ ✅ RunInstances
+└─ ✅ TerminateInstances
+
+Results:
+┌──────────────────────────────────────┐
+│ DescribeInstances   → ✅ Allowed     │
+│                       (boundary allows Describe*)
+│ RunInstances        → ❌ Denied      │
+│                       (boundary doesn't allow)
+│ TerminateInstances  → ❌ Denied      │
+│                       (boundary blocks it)
+└──────────────────────────────────────┘
+```
+
+---
+
+### **Step 5: Test Specific Resources**
+```
+Service: S3
+Action: GetObject
+
+Specify resource ARN:
+arn:aws:s3:::my-test-bucket-YOURNAME/secret.txt
+
+Click "Run Simulation"
+
+See if specific bucket access is allowed
+```
+
+---
+
+### **Step 6: Test Conditions**
+```
+Service: S3
+Action: PutObject
+
+Add request context:
+├─ IP Address: 203.0.113.0 (example IP)
+├─ Date: 2026-02-11
+└─ MFA: false
+
+Run Simulation
+
+This tests if policy conditions affect access
+(e.g., "only from office IP" or "only with MFA")
+```
+
+---
+
+**DOCUMENT THIS:**
+```
+LAB 8: IAM Policy Simulator
+============================
+
+Tested scenarios:
+1. alice's S3 access
+   → All S3 actions allowed ✅
+
+2. alice's EC2 access (with permission boundary)
+   → DescribeInstances allowed ✅
+   → RunInstances/TerminateInstances denied ❌
+   → Proves boundary is working!
+
+3. Specific resource ARN testing
+   → Verified bucket-specific policies
+
+Use cases:
+- Debug "Access Denied" errors
+- Test policies before applying
+- Verify permission boundaries work
+- Train new team members on IAM
+```
+
+---
+
+# **LAB 9: IAM CREDENTIAL REPORT**
+
+## **What is it?**
+- Lists ALL IAM users in account
+- Shows password age, access key age, MFA status
+- Used for security audits
+
+---
+
+### **Step 1: Generate Report**
+```
+IAM Console → Credential report (left menu)
+
+Click "Download Report"
+
+A CSV file downloads with columns:
+- user
+- arn
+- user_creation_time
+- password_enabled
+- password_last_used
+- password_last_changed
+- password_next_rotation
+- mfa_active
+- access_key_1_active
+- access_key_1_last_rotated
+- access_key_1_last_used_date
+- access_key_2_active
+- ... (and more)
+```
+
+---
+
+### **Step 2: Analyze the Report**
+
+**Open in Excel/Google Sheets**
+
+**Look for security issues:**
+```
+❌ RED FLAGS:
+- password_last_used > 90 days (inactive user)
+- mfa_active = false (for admin users)
+- access_key_1_last_rotated > 90 days (old keys)
+- password_enabled = true but password_last_changed > 90 days
+
+✅ GOOD:
+- mfa_active = true
+- access_key_last_used = recent
+- password_last_changed < 90 days
+```
+
+---
+
+### **Step 3: Take Action on Findings**
+
+**Example findings:**
+```
+User: charlie
+mfa_active: false
+password_last_used: Never
+→ Action: Enable MFA or delete user (seems inactive)
+
+User: alice  
+access_key_1_last_rotated: 180 days ago
+→ Action: Rotate access key
+
+User: bob
+mfa_active: true
+password_last_changed: 15 days ago
+→ Action: None (compliant ✅)
+Step 4: Automate Analysis (Optional - Python)
+Create a script to flag issues:
+
+python
+import csv
+
+# Read credential report
+with open('credential_report.csv', 'r') as f:
+    reader = csv.DictReader(f)
+    
+    for user in reader:
+        # Check for users without MFA
+        if user['mfa_active'] == 'false':
+            print(f"⚠️ {user['user']} - MFA not enabled!")
+        
+        # Check for old access keys
+        if user['access_key_1_active'] == 'true':
+            # (Add logic to check age > 90 days)
+            print(f"⚠️ {user['user']} - Rotate access key!")
+```
+
+---
+
+**DOCUMENT THIS:**
+```
+LAB 9: IAM Credential Report
+=============================
+
+Generated credential report for account
+
+Findings:
+- Total users: 4 (root + alice + bob + charlie)
+- Users without MFA: 2 (alice, charlie)
+- Old access keys (>90 days): 0
+- Inactive users (no login >90 days): 1 (charlie)
+
+Actions taken:
+1. Enabled MFA for bob ✅ (Lab 5)
+2. To-do: Enable MFA for alice
+3. To-do: Review if charlie is still needed
+
+Best practice:
+- Run this report monthly
+- Automate with Lambda + SNS alerts
+- Part of security compliance (SOC 2, ISO 27001)
+```
+
+---
+
+# **LAB 10: CROSS-ACCOUNT IAM ROLE (Assume Role)**
+
+## **What is it?**
+- Allow users from Account A to access resources in Account B
+- No need to create duplicate users
+- Used in multi-account organizations
+
+**Note:** This requires 2 AWS accounts. We'll simulate with documentation.
+
+---
+
+### **Scenario:**
+```
+Account A (Dev): 123456789012
+Account B (Prod): 210987654321
+
+Goal: Allow developers from Account A to read S3 in Account B
+```
+
+---
+
+### **Step 1: Create Role in Account B (Prod)**
+```
+Sign into Account B
+
+IAM → Roles → Create role
+
+Trusted entity type: Another AWS account
+Account ID: 123456789012 (Account A's ID)
+✅ Require MFA (optional but recommended)
+Next
+
+Permissions: AmazonS3ReadOnlyAccess
+Next
+
+Role name: CrossAccount-S3-ReadOnly
+Create role
+```
+
+---
+
+### **Step 2: Note the Role ARN**
+```
+Click on role: CrossAccount-S3-ReadOnly
+
+Copy ARN:
+arn:aws:iam::210987654321:role/CrossAccount-S3-ReadOnly
+
+Save this - users in Account A will need it
+```
+
+---
+
+### **Step 3: Grant Assume Role Permission in Account A (Dev)**
+```
+Sign into Account A
+
+IAM → Users → alice → Add permissions
+
+Attach policy (create custom):
+
+Policy name: AssumeProductionS3Role
+
+Policy JSON:
+json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::210987654321:role/CrossAccount-S3-ReadOnly"
+    }
+  ]
+}
+```
+
+**This allows alice to "switch" into the production account role**
+
+---
+
+### **Step 4: Switch Role (As alice)**
+```
+Sign in as alice (Account A)
+
+Top right → Click username → Switch Role
+
+Account: 210987654321
+Role: CrossAccount-S3-ReadOnly
+Display Name: Production-ReadOnly
+Color: Red (to distinguish from dev account)
+
+Switch Role
+
+You're now in Account B's role!
+├─ Can access Account B's S3
+├─ Top bar shows "Production-ReadOnly @ 210987654321"
+└─ All actions are audited in Account B's CloudTrail
+
+To switch back:
+Top right → Switch Back to alice
+Step 5: Test Programmatic Assume Role (CLI)
+bash
+# Configure AWS CLI for Account A
+aws configure --profile dev
+# Enter Account A credentials
+
+# Assume role in Account B
+aws sts assume-role \
+  --role-arn arn:aws:iam::210987654321:role/CrossAccount-S3-ReadOnly \
+  --role-session-name alice-prod-session \
+  --profile dev
+
+# Output: Temporary credentials
+{
+  "Credentials": {
+    "AccessKeyId": "ASIA...",
+    "SecretAccessKey": "...",
+    "SessionToken": "...",
+    "Expiration": "2026-02-11T18:00:00Z"
+  }
+}
+
+# Use these temporary credentials to access Account B
+export AWS_ACCESS_KEY_ID=ASIA...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...
+
+# Now list S3 in Account B
+aws s3 ls
+```
+
+---
+
+**DOCUMENT THIS:**
+```
+LAB 10: Cross-Account IAM Roles
+================================
+
+Concept: AssumeRole for cross-account access
+
+Setup (requires 2 accounts):
+1. Account B (Prod) creates role with trust policy for Account A
+2. Account A grants users permission to assume that role
+3. Users "switch" into Account B's role
+
+Benefits:
+- No duplicate users across accounts
+- Centralized user management
+- Each assume generates audit trail
+- Temporary credentials (no long-term keys)
+
+Real-world use cases:
+- Dev account accessing Prod (read-only)
+- Security team accessing all accounts
+- Auditors reviewing resources
+- CI/CD pipelines deploying across accounts
+
+Trust Policy (in Account B role):
+"I trust Account A (123456789012)"
+"Users from Account A can assume me"
+
+Permission Policy (in Account A):
+"alice can assume roles in Account B"
+```
+
+---
+
+# **COMPLETE CHECKLIST: ADVANCED IAM LABS**
+```
+☐ Lab 6: Service Control Policies (SCPs)
+  ├─ Enabled AWS Organizations
+  ├─ Created 3 SCPs
+  └─ Understood SCP vs IAM policy difference
+
+☐ Lab 7: IAM Access Analyzer
+  ├─ Enabled Access Analyzer
+  ├─ Created public S3 bucket to trigger finding
+  ├─ Reviewed findings
+  └─ Resolved/archived finding
+
+☐ Lab 8: IAM Policy Simulator
+  ├─ Tested alice's permissions
+  ├─ Simulated S3 and EC2 actions
+  ├─ Verified permission boundary works
+  └─ Tested specific resources and conditions
+
+☐ Lab 9: IAM Credential Report
+  ├─ Generated report
+  ├─ Analyzed for security issues
+  ├─ Identified users without MFA
+  └─ Documented findings
+
+☐ Lab 10: Cross-Account Roles (Concept)
+  ├─ Understood AssumeRole mechanism
+  ├─ Know when to use it
+  └─ Understood trust policy vs permission policy
+```
+
+---
+
+# **PRACTICE QUESTIONS (30 min)**
+
+Do 20 questions on **Advanced IAM** from ExamTopics:
+
+Topics to search:
+- Service Control Policies
+- Permission boundaries
+- Cross-account access
+- IAM Access Analyzer
+- AssumeRole
+
+**Track your score:** __/20
+
+---
+
+# **SUMMARY: WHAT YOU'VE LEARNED**
+```
+Basic IAM (Labs 1-5):
+✅ Users, Groups, Policies
+✅ Custom policies
+✅ IAM Roles for services
+✅ Permission boundaries
+✅ MFA
+
+Advanced IAM (Labs 6-10):
+✅ Service Control Policies (org-wide guardrails)
+✅ IAM Access Analyzer (find oversharing)
+✅ Policy Simulator (test before applying)
+✅ Credential Report (audit users)
+✅ Cross-account roles (AssumeRole)
+
+You're now at 9/10 on IAM knowledge! 🎉
+AFTER COMPLETING:
+
+Come back and tell me:
+
+✅ Which labs you completed
+📊 Your practice question score
+🎯 What's confusing (if anything)
+📅 Ready for next section? (What's next in Stephane's course?)
+START WITH LAB 6 NOW!
+
+These advanced concepts separate okay candidates from excellent ones. Master these and you'll ace IAM questions on the exam! 🚀
+
+
