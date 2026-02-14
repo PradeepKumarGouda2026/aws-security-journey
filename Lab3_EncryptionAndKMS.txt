@@ -1,0 +1,795 @@
+# **KMS & ENCRYPTION HANDS-ON LABS**
+
+Perfect timing! Let's get your hands dirty with KMS. These labs are **critical** for the exam.
+
+---
+
+## **PREP: VERIFY YOU'RE IN MUMBAI REGION**
+
+```
+Top right corner → Select: Asia Pacific (Mumbai) ap-south-1
+
+(Your SCP blocks other regions, remember?)
+```
+
+---
+
+# **LAB 11: CREATE & USE KMS KEYS**
+
+## **Understanding KMS Keys:**
+
+```
+AWS Managed Keys (aws/service-name)
+├─ Created automatically by AWS services
+├─ Free
+├─ You can't manage (AWS does it)
+└─ Example: aws/s3, aws/rds
+
+Customer Managed Keys (CMK)
+├─ You create and manage
+├─ $1/month per key + usage charges
+├─ Full control (rotation, policies, deletion)
+└─ What we'll create today
+```
+
+---
+
+## **Step 1: Create Your First KMS Key**
+
+```
+AWS Console → Search "KMS" → Key Management Service
+
+Left menu: Customer managed keys
+
+Click "Create key"
+```
+
+---
+
+### **Configuration:**
+
+```
+Key type: Symmetric
+├─ ○ Symmetric
+└─ (Used for encryption/decryption - most common)
+
+Key usage: Encrypt and decrypt
+
+Advanced options:
+├─ Key material origin: KMS
+├─ Regionality: Single-Region key
+└─ Next
+```
+
+---
+
+### **Labels:**
+
+```
+Alias: my-first-kms-key
+
+Description: My first customer-managed KMS key for learning
+
+Tags:
+├─ Key: Environment, Value: Learning
+├─ Key: Owner, Value: YourName
+└─ Next
+```
+
+---
+
+### **Key Administrators:**
+
+```
+Key administrators (who can manage this key):
+
+✅ Check your root user
+✅ Check any admin IAM users you have
+
+⚠️ Key administrators can:
+- Update key policy
+- Enable/disable key
+- Schedule key deletion
+- Cannot use key to encrypt/decrypt (unless also in users section)
+
+Next
+```
+
+---
+
+### **Key Users:**
+
+```
+Key users (who can use this key to encrypt/decrypt):
+
+✅ Check: alice
+✅ Check: Your root user
+✅ Check any roles you created (EC2-S3-ReadOnly-Role)
+
+⚠️ Key users can:
+- Encrypt data with this key
+- Decrypt data encrypted with this key
+- Cannot manage the key itself
+
+Next
+```
+
+---
+
+### **Review & Create:**
+
+```
+Review the key policy (JSON):
+
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Enable IAM policies",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::ACCOUNT_ID:root"
+      },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "Allow use of the key",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::ACCOUNT_ID:user/alice",
+          "arn:aws:iam::ACCOUNT_ID:role/EC2-S3-ReadOnly-Role"
+        ]
+      },
+      "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+
+Click "Finish"
+```
+
+**Key created!** ✅
+
+---
+
+### **Note Key Details:**
+
+```
+Copy these (you'll need them):
+
+Key ID: 12345678-1234-1234-1234-123456789012
+Key ARN: arn:aws:kms:ap-south-1:ACCOUNT_ID:key/12345678-...
+Alias: alias/my-first-kms-key
+Status: Enabled
+```
+
+---
+
+## **Step 2: Enable Automatic Key Rotation**
+
+```
+Click on your key: my-first-kms-key
+
+Go to: Key rotation tab
+
+✅ Enable automatic key rotation
+├─ Rotation period: 365 days (default)
+└─ Save
+
+What this does:
+- AWS creates new cryptographic material every year
+- Old versions still work (for decrypting old data)
+- Transparent to your applications
+- Best practice for compliance!
+```
+
+---
+
+# **LAB 12: ENCRYPT S3 BUCKET WITH KMS**
+
+## **Step 1: Create Test S3 Bucket**
+
+```
+S3 Console → Create bucket
+
+Bucket name: kms-encrypted-bucket-YOURNAME-789
+Region: ap-south-1 (Mumbai)
+Block all public access: ✅ Keep checked
+
+Scroll to: Default encryption
+
+Encryption type:
+├─ ○ Server-side encryption with Amazon S3 managed keys (SSE-S3)
+└─ ● Server-side encryption with AWS KMS keys (SSE-KMS)
+
+AWS KMS key:
+├─ ○ Choose from your AWS KMS keys
+└─ Select: alias/my-first-kms-key
+
+Bucket Key: ✅ Enable
+(Reduces KMS costs by 99% - always enable!)
+
+Create bucket
+```
+
+---
+
+## **Step 2: Upload & Verify Encryption**
+
+```
+Open bucket: kms-encrypted-bucket-YOURNAME-789
+
+Upload → Add files → Choose any test file
+
+Upload settings:
+└─ Default encryption already set (uses your KMS key)
+
+Click Upload
+
+After upload:
+├─ Click on the uploaded file
+├─ Properties tab
+├─ Server-side encryption settings
+└─ You'll see:
+   Encryption: AWS-KMS
+   AWS KMS key ARN: arn:aws:kms:...my-first-kms-key
+```
+
+---
+
+## **Step 3: Test Decryption (Proves Key is Used)**
+
+```
+In S3 bucket:
+├─ Click file
+├─ Click "Open" or "Download"
+└─ File opens ✅
+
+Behind the scenes:
+1. S3 asks KMS: "Decrypt this file's data key"
+2. KMS checks: "Is this user allowed?" (key policy)
+3. If yes: KMS decrypts data key
+4. S3 uses data key to decrypt file
+5. You see the file
+
+This is ENVELOPE ENCRYPTION!
+```
+
+---
+
+## **Step 4: Test Access Denied Scenario**
+
+```
+Sign in as charlie (from IAM Lab 1):
+├─ charlie is in ReadOnly group
+├─ charlie was NOT added as KMS key user
+
+Try to download the file from kms-encrypted-bucket:
+└─ Error: Access Denied ❌
+
+Why?
+├─ charlie has S3 read permissions (from ReadOnly policy)
+├─ But charlie is NOT in KMS key policy
+└─ Can't decrypt = Can't access file!
+
+This proves KMS controls access!
+```
+
+---
+
+# **LAB 13: ENCRYPT EBS VOLUME WITH KMS**
+
+## **Step 1: Create Encrypted EBS Volume**
+
+```
+EC2 Console → Elastic Block Store → Volumes
+
+Create volume
+
+Volume type: General Purpose SSD (gp3)
+Size: 8 GiB (free tier)
+
+Availability Zone: ap-south-1a
+
+Encryption:
+✅ Encrypt this volume
+
+KMS key: 
+├─ Select: alias/my-first-kms-key
+└─ (Not default aws/ebs)
+
+Tags:
+├─ Key: Name, Value: MyEncryptedVolume
+└─ Create volume
+
+Volume created with encryption! ✅
+```
+
+---
+
+## **Step 2: Attach to EC2 Instance**
+
+```
+If you have EC2 running:
+
+Volumes → Select MyEncryptedVolume → Actions → Attach volume
+
+Instance: Select your EC2 instance
+Device name: /dev/sdf (default)
+Attach volume
+
+SSH into EC2:
+ssh -i aws-security-key.pem ec2-user@YOUR_IP
+
+Check if volume is attached:
+lsblk
+
+Output:
+NAME    MAJ:MIN RM SIZE RO TYPE MOUNTPOINT
+xvda    202:0    0   8G  0 disk 
+└─xvda1 202:1    0   8G  0 part /
+xvdf    202:80   0   8G  0 disk  ← Your encrypted volume
+
+Format and mount:
+sudo mkfs -t ext4 /dev/xvdf
+sudo mkdir /mnt/encrypted-data
+sudo mount /dev/xvdf /mnt/encrypted-data
+
+Create test file:
+echo "Secret data" | sudo tee /mnt/encrypted-data/secret.txt
+
+This file is encrypted at rest with your KMS key! ✅
+```
+
+---
+
+## **Step 3: Create Encrypted Snapshot**
+
+```
+EC2 Console → Snapshots → Create snapshot
+
+Resource type: Volume
+Volume: Select MyEncryptedVolume
+
+Description: Encrypted volume snapshot
+
+Tags:
+├─ Key: Name, Value: EncryptedSnapshot
+└─ Create snapshot
+
+Result:
+├─ Snapshot is automatically encrypted
+├─ Uses same KMS key as source volume
+└─ Anyone who wants to restore must have KMS permission
+```
+
+---
+
+# **LAB 14: KMS KEY POLICIES (ADVANCED)**
+
+## **Understanding Key Policies:**
+
+```
+KMS Key Policy = Resource-based policy
+(Like S3 bucket policy, but for KMS keys)
+
+Components:
+1. Principal: Who can use the key
+2. Action: What they can do (Encrypt, Decrypt, etc.)
+3. Resource: The key itself (usually "*" in key policy)
+4. Condition: Optional restrictions
+```
+
+---
+
+## **Step 1: View Current Key Policy**
+
+```
+KMS → Customer managed keys → my-first-kms-key
+
+Key policy tab
+
+Click "Switch to policy view" (if in default view)
+
+You'll see JSON policy (created when you made the key)
+```
+
+---
+
+## **Step 2: Add Condition - Encryption Context**
+
+```
+Key policy → Edit
+
+Find the statement for key users (Decrypt/Encrypt)
+
+Add a condition:
+
+{
+  "Sid": "Allow use of the key",
+  "Effect": "Allow",
+  "Principal": {
+    "AWS": "arn:aws:iam::ACCOUNT_ID:user/alice"
+  },
+  "Action": [
+    "kms:Decrypt",
+    "kms:Encrypt",
+    "kms:GenerateDataKey*"
+  ],
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": {
+      "kms:EncryptionContext:Project": "SecretProject"
+    }
+  }
+}
+
+Save changes
+
+What this does:
+- alice can ONLY use the key if encryption context includes "Project=SecretProject"
+- Adds additional access control layer
+- Used for audit trails
+```
+
+---
+
+## **Step 3: Test Encryption Context**
+
+```
+AWS CLI (from your computer or EC2):
+
+# Encrypt WITH correct context (should work):
+echo "Secret data" > test.txt
+
+aws kms encrypt \
+  --key-id alias/my-first-kms-key \
+  --plaintext fileb://test.txt \
+  --encryption-context Project=SecretProject \
+  --output text \
+  --query CiphertextBlob > encrypted.txt
+
+# Encrypt WITHOUT context (should fail):
+aws kms encrypt \
+  --key-id alias/my-first-kms-key \
+  --plaintext fileb://test.txt \
+  --output text
+
+# Error: AccessDeniedException
+# The encryption context must include Project=SecretProject!
+```
+
+---
+
+# **LAB 15: KMS GRANTS (TEMPORARY PERMISSIONS)**
+
+## **What are Grants?**
+
+```
+Grant = Temporary, programmatic permission to use a key
+
+Use cases:
+- Allow Lambda to decrypt data for one execution
+- Grant EC2 instance access for specific task
+- Delegate KMS permissions without changing key policy
+
+Unlike key policy:
+✅ Can be created/revoked programmatically
+✅ Temporary (can be time-limited)
+✅ Don't require editing key policy
+```
+
+---
+
+## **Step 1: Create a Grant (CLI)**
+
+```bash
+# Get your key ID
+aws kms list-keys
+
+# Create grant for EC2 role to use the key
+aws kms create-grant \
+  --key-id 12345678-1234-1234-1234-123456789012 \
+  --grantee-principal arn:aws:iam::ACCOUNT_ID:role/EC2-S3-ReadOnly-Role \
+  --operations Encrypt Decrypt GenerateDataKey
+
+# Output:
+{
+  "GrantToken": "AQpAM2RhODI...",
+  "GrantId": "abcdef123456..."
+}
+
+# Save the GrantId - you'll need it to revoke
+```
+
+---
+
+## **Step 2: Test the Grant**
+
+```bash
+# From EC2 instance with EC2-S3-ReadOnly-Role:
+
+# This should now work (grant gives permission):
+aws kms encrypt \
+  --key-id alias/my-first-kms-key \
+  --plaintext "Test data" \
+  --output text \
+  --query CiphertextBlob
+```
+
+---
+
+## **Step 3: Revoke the Grant**
+
+```bash
+# Revoke grant (removes permission):
+aws kms revoke-grant \
+  --key-id 12345678-1234-1234-1234-123456789012 \
+  --grant-id abcdef123456...
+
+# Now EC2 role can't use the key anymore
+# Try encryption again - should fail!
+```
+
+---
+
+# **LAB 16: ENVELOPE ENCRYPTION (UNDERSTAND THE CONCEPT)**
+
+## **Visual: How Envelope Encryption Works**
+
+```
+You want to encrypt 1GB file:
+
+WRONG WAY (doesn't scale):
+File (1GB) → Send to KMS → KMS encrypts → Return encrypted file
+├─ Problem: 1GB over network to KMS
+├─ Problem: KMS has 4KB API limit
+└─ Won't work! ❌
+
+RIGHT WAY (envelope encryption):
+1. Request data key from KMS
+   └─ KMS generates 256-bit data key
+   └─ Returns BOTH:
+      - Plaintext data key
+      - Encrypted data key (encrypted with CMK)
+
+2. Use plaintext data key to encrypt 1GB file locally
+   └─ Fast! No network transfer
+
+3. Delete plaintext data key from memory
+   └─ Security!
+
+4. Store encrypted file + encrypted data key together
+
+When decrypting:
+1. Send encrypted data key to KMS
+2. KMS decrypts it with CMK
+3. Returns plaintext data key
+4. Use plaintext data key to decrypt file locally
+5. Delete plaintext data key
+```
+
+---
+
+## **Hands-On: Envelope Encryption**
+
+```bash
+# Step 1: Generate data key
+aws kms generate-data-key \
+  --key-id alias/my-first-kms-key \
+  --key-spec AES_256
+
+# Output:
+{
+  "CiphertextBlob": "AQIDAHi...",  ← Encrypted data key (store this!)
+  "Plaintext": "base64...",         ← Plaintext data key (use then delete!)
+  "KeyId": "arn:aws:kms:..."
+}
+
+# Step 2: Use plaintext data key to encrypt data locally
+# (In real app, you'd use crypto library with the plaintext key)
+
+# Step 3: Delete plaintext from memory
+# unset PLAINTEXT_KEY
+
+# Step 4: Store encrypted data + CiphertextBlob together
+
+# When you need to decrypt:
+aws kms decrypt \
+  --ciphertext-blob fileb://encrypted-data-key.bin
+
+# Returns plaintext data key
+# Use it to decrypt your data locally
+# Delete plaintext key again
+```
+
+---
+
+# **COMPLETE LAB CHECKLIST:**
+
+```
+☐ Lab 11: Created customer-managed KMS key
+  ├─ Symmetric key
+  ├─ Key rotation enabled
+  ├─ Key policy configured
+  └─ Key alias created
+
+☐ Lab 12: Encrypted S3 bucket with KMS
+  ├─ Created encrypted bucket
+  ├─ Uploaded encrypted file
+  ├─ Tested decryption
+  └─ Tested access denied (user without KMS permission)
+
+☐ Lab 13: Encrypted EBS volume with KMS
+  ├─ Created encrypted volume
+  ├─ Attached to EC2
+  ├─ Mounted and used
+  └─ Created encrypted snapshot
+
+☐ Lab 14: KMS key policies
+  ├─ Viewed key policy
+  ├─ Added encryption context condition
+  └─ Tested conditional access
+
+☐ Lab 15: KMS grants
+  ├─ Created grant
+  ├─ Tested temporary permission
+  └─ Revoked grant
+
+☐ Lab 16: Envelope encryption (concept)
+  ├─ Generated data key
+  ├─ Understood the flow
+  └─ Know when/why to use it
+```
+
+---
+
+# **DOCUMENTATION (30 MIN):**
+
+```markdown
+# KMS & ENCRYPTION LABS
+## Date: [Today]
+
+### Lab 11: KMS Key Creation
+- Created customer-managed key: my-first-kms-key
+- Key ID: 12345678-...
+- Enabled automatic rotation (365 days)
+- Configured key administrators and users
+
+### Lab 12: S3 Encryption
+- Bucket: kms-encrypted-bucket-YOURNAME-789
+- Encryption: SSE-KMS with custom key
+- Bucket Key enabled (cost optimization)
+- Tested: Users without KMS permission = Access Denied
+
+### Lab 13: EBS Encryption
+- Created 8GB encrypted volume
+- Attached to EC2, formatted, mounted
+- All data written is encrypted at rest
+- Snapshot automatically encrypted
+
+### Lab 14: Key Policies
+- Added encryption context requirement
+- Only requests with "Project=SecretProject" allowed
+- Provides additional access control + audit trail
+
+### Lab 15: KMS Grants
+- Temporary, programmatic permissions
+- Created grant for EC2 role
+- Tested and revoked
+- Better than editing key policy for temporary access
+
+### Lab 16: Envelope Encryption
+- Data key generated by KMS
+- File encrypted locally with data key
+- Encrypted data key stored with file
+- Scalable (no large data to KMS)
+
+## Key Learnings:
+1. **CMK vs Data Key:**
+   - CMK (Customer Master Key): Never leaves KMS
+   - Data Key: Used to encrypt actual data
+
+2. **Key Policy is Critical:**
+   - Must allow both IAM and KMS permissions
+   - Can add conditions (encryption context)
+
+3. **Encryption at Rest:**
+   - S3: SSE-KMS
+   - EBS: Encrypted volumes
+   - RDS: Encrypted databases (same concept)
+
+4. **Automatic Rotation:**
+   - Best practice: Enable for compliance
+   - Old versions still decrypt old data
+   - Transparent to applications
+
+## Real-World Use Cases:
+- Encrypt sensitive customer data
+- Compliance (HIPAA, PCI-DSS require encryption)
+- Audit who accessed what (CloudTrail + KMS)
+- Encryption context for multi-tenant systems
+
+## Exam Tips:
+- Envelope encryption = most common pattern
+- KMS never sees your plaintext data (data keys do the work)
+- Key policy + IAM policy both evaluated
+- Grants for temporary access
+- Encryption context for additional security
+
+## Time Spent: 3 hours
+## Confidence: 8/10 on KMS ✅
+```
+
+---
+
+# **PRACTICE QUESTIONS (30 MIN):**
+
+Go to ExamTopics → KMS questions
+
+Do 20 questions on:
+- KMS key types
+- Envelope encryption
+- Key policies vs IAM policies
+- Encryption at rest (S3, EBS, RDS)
+- Key rotation
+
+**Track score:** __/20
+
+**Target:** 16+/20 (80%+)
+
+---
+
+# **CLEANUP (SAVE MONEY):**
+
+```
+Optional cleanup:
+
+1. S3 bucket:
+   ├─ Delete all objects
+   └─ Delete bucket
+
+2. EBS volume:
+   ├─ Detach from EC2
+   └─ Delete volume
+
+3. Snapshots:
+   └─ Delete snapshot
+
+4. KMS key:
+   ⚠️ DON'T DELETE YET!
+   (You'll use it tomorrow for Secrets Manager lab)
+   (Also, KMS keys have 30-day deletion waiting period)
+```
+
+---
+
+# **AFTER COMPLETION:**
+
+**Come back and tell me:**
+1. ✅ Which labs you completed
+2. 📊 Practice question score
+3. ⚠️ Any challenges or confusions
+4. 🎯 Ready for tomorrow (Secrets Manager)?
+
+---
+
+**Tomorrow (Day 10): Secrets Manager & Parameter Store**
+- Watch course section (~1 hour)
+- Hands-on labs with secrets
+- Integrate with your KMS key!
+
+---
+
+**START LAB 11 NOW!** 
+
+KMS is one of the most tested topics on the exam. Master this and you're halfway to passing! 🔐🚀
+
+**GO!** ⏱️
