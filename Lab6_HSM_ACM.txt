@@ -1,0 +1,802 @@
+date - 18/2/2026
+------------------
+
+# **CloudHSM & ACM HANDS-ON LABS - LET'S GO! 🚀**
+
+Great! You've watched the theory. Now let's do the hands-on.
+
+---
+
+## **TODAY'S LABS (4 LABS - LIGHTER DAY!)**
+
+```
+Lab 26: CloudHSM (Conceptual - understand vs KMS)
+Lab 27: ACM - Request SSL/TLS Certificate
+Lab 28: ACM - DNS Validation
+Lab 29: ACM - Certificate Details & Renewal
+
+Total time: ~2 hours (much lighter than yesterday!)
+```
+
+---
+
+# **LAB 26: CloudHSM (CONCEPTUAL ONLY)**
+
+## **Why Conceptual Only?**
+
+**Cost:** CloudHSM costs **$1.60/hour = $38/day = $1,152/month**
+
+Way too expensive for learning! We'll understand the concepts instead.
+
+---
+
+## **CloudHSM vs KMS - THE KEY COMPARISON**
+
+### **Side-by-Side Table:**
+
+| Feature | AWS KMS | AWS CloudHSM |
+|---------|---------|--------------|
+| **Control** | AWS manages hardware | You manage hardware |
+| **Encryption** | Shared tenant | Dedicated hardware |
+| **Compliance** | FIPS 140-2 Level 2 | FIPS 140-2 Level 3 |
+| **Keys** | AWS owns HSM | You own HSM |
+| **Multi-tenancy** | Shared | Single tenant |
+| **Integration** | Native AWS services | Custom applications |
+| **APIs** | AWS KMS API | Industry-standard (PKCS#11, JCE, CNG) |
+| **Cost** | $1/key/month | $1.60/hour (~$1,152/month) |
+| **Use case** | 99% of use cases | Regulatory compliance |
+| **Key storage** | AWS managed | You control |
+| **High availability** | Automatic (multi-AZ) | You configure cluster |
+
+---
+
+## **When to Use CloudHSM:**
+
+### **Use CloudHSM if:**
+```
+✅ Contractual/regulatory requirement for FIPS 140-2 Level 3
+✅ Need single-tenant HSM
+✅ Need to prove sole control of keys
+✅ Custom cryptographic operations
+✅ Industry-standard APIs (PKCS#11, JCE)
+✅ Compliance: PCI-DSS, HIPAA strict requirements
+
+Examples:
+- Payment processing (PCI-DSS requirement)
+- Healthcare (HIPAA strict interpretation)
+- Government contracts (FIPS 140-2 Level 3 mandated)
+- Financial services (prove key ownership)
+```
+
+### **Use KMS if:**
+```
+✅ Everything else! (99% of use cases)
+✅ AWS service integration (S3, EBS, RDS)
+✅ Cost-sensitive
+✅ Automatic high availability
+✅ Simple key management
+✅ FIPS 140-2 Level 2 is acceptable
+
+Examples:
+- Encrypt S3 buckets
+- Encrypt EBS volumes
+- Encrypt databases
+- Secrets Manager
+- Most enterprise workloads
+```
+
+---
+
+## **Architecture Comparison:**
+
+### **KMS Architecture:**
+```
+Your Application
+    ↓
+KMS API (AWS managed)
+    ↓
+HSM (AWS managed, shared)
+    ↓
+Your encrypted data
+
+You control: API calls
+AWS controls: Everything else
+```
+
+### **CloudHSM Architecture:**
+```
+Your Application
+    ↓
+CloudHSM Client (you install)
+    ↓
+HSM Cluster (you manage, dedicated)
+    ↓
+Your encrypted data
+
+You control: HSM cluster, keys, policies
+AWS controls: Hardware maintenance only
+```
+
+---
+
+## **Key Exam Facts:**
+
+### **MEMORIZE THIS:**
+
+```
+FIPS 140-2 Levels:
+├─ Level 1: Software encryption
+├─ Level 2: KMS (tamper-evident hardware)
+├─ Level 3: CloudHSM (tamper-resistant hardware)
+└─ Level 4: (not offered by AWS)
+
+CloudHSM:
+├─ Single-tenant HSM
+├─ You manage keys and HSM
+├─ PKCS#11, JCE, CNG APIs
+├─ Must create HA cluster (multi-AZ)
+├─ $1.60/hour per HSM
+├─ Minimum 2 HSMs for HA = $3.20/hour
+
+KMS:
+├─ Multi-tenant (secure isolation)
+├─ AWS manages everything
+├─ KMS API only
+├─ Automatic HA
+├─ $1/key/month
+├─ Integrated with all AWS services
+```
+
+---
+
+## **Document This Lab:**
+
+```markdown
+### Lab 26: CloudHSM (Conceptual)
+
+**Understanding:**
+CloudHSM provides dedicated, single-tenant HSM for strict compliance requirements.
+
+**CloudHSM vs KMS:**
+- CloudHSM: FIPS 140-2 Level 3, single-tenant, $1,152/month
+- KMS: FIPS 140-2 Level 2, multi-tenant, $1/key/month
+- Use CloudHSM: Only when compliance REQUIRES it
+- Use KMS: For 99% of use cases
+
+**When CloudHSM Required:**
+- PCI-DSS strict compliance
+- Contractual obligation for Level 3
+- Need to prove sole control of encryption keys
+- Custom crypto operations not supported by KMS
+
+**Architecture:**
+- Create HSM cluster (min 2 HSMs for HA)
+- Deploy in multiple AZs
+- Install CloudHSM client on EC2
+- Manage keys yourself
+- Industry-standard APIs (PKCS#11, JCE, CNG)
+
+**Cost Analysis:**
+- 2 HSMs (minimum for HA): $3.20/hour = $2,304/month
+- vs KMS: 100 keys = $100/month
+- CloudHSM is 23x more expensive!
+
+**Hands-on:** Skipped (too expensive for learning)
+**Knowledge:** Conceptual understanding sufficient for exam
+
+**Exam tip:** If question says "FIPS 140-2 Level 3" → Answer is CloudHSM
+```
+
+---
+
+# **LAB 27: ACM - REQUEST SSL/TLS CERTIFICATE**
+
+## **What is ACM?**
+
+**AWS Certificate Manager:**
+- Request SSL/TLS certificates (FREE!)
+- Use with CloudFront, ALB, API Gateway
+- Automatic renewal (every 13 months)
+- No cost for certificates used with AWS services
+
+---
+
+## **Lab 27.1: Request Public Certificate**
+
+### **Step 1: Open ACM Console**
+
+```
+AWS Console → Search "Certificate Manager" → Certificate Manager
+
+Make sure you're in: us-east-1 (N. Virginia)
+(Required for CloudFront certificates)
+
+Click "Request a certificate"
+```
+
+---
+
+### **Step 2: Choose Certificate Type**
+
+```
+Certificate type:
+├─ ○ Request a public certificate ← Select this
+└─ ○ Request a private certificate
+
+Click "Next"
+```
+
+---
+
+### **Step 3: Configure Domain Names**
+
+```
+Fully qualified domain names:
+
+If you own a domain:
+├─ Enter: yourdomain.com
+├─ Add: *.yourdomain.com (wildcard for subdomains)
+└─ Example: example.com, *.example.com
+
+If you DON'T own a domain (for learning):
+├─ Enter: test.example.com (will fail validation, but we'll see the process)
+└─ We'll document the process conceptually
+
+Click "Next"
+```
+
+---
+
+### **Step 4: Select Validation Method**
+
+```
+Validation method:
+
+○ DNS validation (recommended) ← Select this
+├─ Add CNAME record to your DNS
+├─ Automatic renewal works
+├─ Best for production
+
+○ Email validation
+├─ Email sent to domain owner
+├─ Manual renewal
+└─ Use only if you can't modify DNS
+
+Select: DNS validation
+
+Click "Request"
+```
+
+---
+
+### **Step 5: Certificate Requested**
+
+```
+Status: Pending validation
+
+You'll see:
+├─ Certificate ID
+├─ Domain names
+├─ Validation status: Pending
+└─ CNAME records to add to DNS
+
+✅ Certificate requested!
+```
+
+---
+
+## **Lab 27.2: Understanding the Validation Process**
+
+**What happens next (if you owned the domain):**
+
+```
+1. ACM provides CNAME record:
+   Name: _abc123.yourdomain.com
+   Value: _xyz789.acm-validations.aws
+
+2. You add this to your DNS (Route 53, GoDaddy, etc.)
+
+3. ACM verifies you control the domain
+
+4. Certificate status: Issued ✅
+
+5. Use certificate with CloudFront, ALB, etc.
+```
+
+---
+
+## **Lab 27.3: Simulate with Route 53 (If You Want)**
+
+**If you want to complete full validation, you can:**
+
+### **Option A: Register Free Domain (Optional)**
+
+```
+1. Use Freenom.com or similar (free domains)
+2. Register: yourname.tk or similar
+3. Update DNS nameservers to Route 53
+4. Request certificate for yourname.tk
+5. Add CNAME validation record
+6. Certificate gets validated! ✅
+
+Cost: FREE
+Time: 30 minutes
+```
+
+### **Option B: Use Route 53 Hosted Zone (Costs $0.50/month)**
+
+```
+1. Route 53 → Create hosted zone
+2. Domain: testdomain123.com (fake domain, won't work externally)
+3. Request ACM certificate for testdomain123.com
+4. Add validation CNAME to Route 53
+5. See the process (won't fully validate without real domain)
+
+Cost: $0.50/month for hosted zone
+```
+
+### **Option C: Document Conceptually (Recommended)**
+
+```
+Skip actual validation
+Document the process
+Understand: DNS validation, CNAME records, automatic renewal
+Move on to next section
+```
+
+---
+
+## **RECOMMENDED: Document Without Domain**
+
+Most people learning don't own domains, so let's document the process:
+
+```markdown
+### Lab 27: ACM Certificate Request
+
+**Request submitted:**
+- Certificate type: Public
+- Domain: test.example.com (conceptual)
+- Validation method: DNS validation
+- Status: Pending validation
+
+**Validation Process (Conceptual):**
+
+1. ACM generates unique CNAME record:
+   ```
+   Name: _abc123def456.test.example.com
+   Value: _xyz789uvw012.acm-validations.aws.
+   ```
+
+2. Add this CNAME to DNS provider (Route 53, GoDaddy, Cloudflare)
+
+3. ACM monitors DNS for this record
+
+4. When found, certificate status: Issued ✅
+
+5. Certificate valid for 13 months
+
+6. ACM automatically renews (if DNS validation record still exists)
+
+**Use Cases:**
+- CloudFront distribution (HTTPS)
+- Application Load Balancer (HTTPS)
+- API Gateway custom domain
+- Elastic Beanstalk
+
+**Key Features:**
+- FREE certificates
+- Automatic renewal
+- Managed by AWS
+- Cannot export private key (AWS-managed only)
+
+**Certificate Details:**
+- Algorithm: RSA 2048-bit
+- Signature: SHA-256
+- Renewal: Automatic at 60 days before expiry
+- Transparency: Logged to CT logs
+
+**Limitations:**
+- Cannot use with EC2 directly (use ALB instead)
+- Cannot export certificate (for use outside AWS)
+- Must use with supported AWS services
+
+**Exam Tips:**
+- DNS validation = automatic renewal ✅
+- Email validation = manual renewal ❌
+- Free for AWS services
+- us-east-1 required for CloudFront
+```
+
+---
+
+# **LAB 28: ACM CERTIFICATE DETAILS**
+
+## **Lab 28.1: Explore Certificate Details**
+
+Even without a validated certificate, we can explore ACM features:
+
+```
+ACM Console → Certificate Manager
+
+Click on your pending certificate (if any)
+
+You'll see:
+├─ Certificate status: Pending validation
+├─ Domains
+├─ In use: No
+├─ Type: Amazon issued
+├─ Public key info
+├─ Signature algorithm
+└─ Certificate transparency
+```
+
+---
+
+## **Lab 28.2: Certificate Renewal**
+
+**How automatic renewal works:**
+
+```
+Timeline:
+├─ Day 0: Certificate issued (valid 395 days)
+├─ Day 335: ACM starts renewal process (60 days before expiry)
+├─ ACM checks: DNS validation record still exists?
+│   ├─ YES: Renews automatically ✅
+│   └─ NO: Sends email alert ⚠️
+└─ Day 395: Old certificate expires, new one active
+
+Requirements for auto-renewal:
+✅ DNS validation method (email validation is manual)
+✅ Certificate in use by AWS resource
+✅ Validation CNAME still in DNS
+```
+
+---
+
+## **Lab 28.3: ACM with CloudFront (Conceptual)**
+
+**How to use ACM certificate:**
+
+```
+1. Request certificate in us-east-1 (required for CloudFront)
+
+2. Validate domain ownership
+
+3. CloudFront → Create distribution
+
+4. Custom SSL certificate:
+   └─ Select your ACM certificate
+
+5. Users access: https://yourdomain.com
+   └─ Traffic encrypted with your certificate
+
+6. ACM handles renewal automatically
+```
+
+---
+
+## **Lab 28.4: ACM Limitations**
+
+**What ACM CANNOT do:**
+
+```
+❌ Export private key
+├─ Cannot use certificate outside AWS
+├─ Cannot install on non-AWS servers
+└─ AWS-managed private keys only
+
+❌ Use with EC2 directly
+├─ EC2 doesn't support ACM
+├─ Must use ALB or CloudFront
+└─ Or generate your own certificate
+
+❌ Wildcard for multiple levels
+├─ *.example.com works for: sub.example.com ✅
+├─ But NOT for: deep.sub.example.com ❌
+└─ Need separate certificate or multi-level wildcard
+
+❌ Use in all regions
+├─ Certificate is regional
+├─ us-east-1 for CloudFront (global)
+└─ Other regions for ALB, API Gateway
+```
+
+---
+
+# **LAB 29: IMPORT EXTERNAL CERTIFICATE (OPTIONAL)**
+
+## **When to Import:**
+
+```
+Use cases:
+- You already have certificate from other CA
+- Need certificate for non-AWS resources too
+- Certificate authority not supported by ACM
+- Need to export private key
+```
+
+---
+
+## **How to Import:**
+
+```
+ACM Console → Import certificate
+
+Required:
+├─ Certificate body (PEM format)
+├─ Certificate private key
+└─ Certificate chain (optional)
+
+Example:
+```
+
+```
+Certificate body:
+-----BEGIN CERTIFICATE-----
+MIIDXTCCAkWgAwIBAgIJAKZ...
+-----END CERTIFICATE-----
+
+Private key:
+-----BEGIN RSA PRIVATE KEY-----
+MIIEpAIBAAKCAQEA2L7h...
+-----END RSA PRIVATE KEY-----
+
+Certificate chain (if any):
+-----BEGIN CERTIFICATE-----
+MIIDXTCCAkWgAwIBAgIJAKZ...
+-----END CERTIFICATE-----
+```
+
+```
+⚠️ NOTE: Imported certificates do NOT auto-renew!
+You must manually renew and re-import.
+```
+
+---
+
+# **COMPLETE LAB CHECKLIST:**
+
+```
+☐ Lab 26: CloudHSM (Conceptual)
+  ├─ Understood CloudHSM vs KMS
+  ├─ Know when to use each
+  ├─ Memorized FIPS levels
+  └─ Cost comparison documented
+
+☐ Lab 27: ACM Certificate Request
+  ├─ Requested certificate (pending validation)
+  ├─ Understood DNS validation process
+  ├─ Know automatic renewal workflow
+  └─ Documented conceptually (no domain needed)
+
+☐ Lab 28: ACM Certificate Details
+  ├─ Explored certificate properties
+  ├─ Understood renewal process
+  ├─ Know CloudFront integration
+  └─ Documented limitations
+
+☐ Lab 29: Import Certificate (Optional)
+  └─ Understood when/how to import
+```
+
+---
+
+# **KEY EXAM CONCEPTS:**
+
+## **CloudHSM:**
+
+```
+Q: Need FIPS 140-2 Level 3 compliance?
+A: Use CloudHSM
+
+Q: Need to export encryption keys?
+A: Use CloudHSM (KMS doesn't allow export)
+
+Q: Standard AWS service encryption?
+A: Use KMS (cheaper, easier, integrated)
+
+Q: PCI-DSS requires dedicated HSM?
+A: Use CloudHSM
+```
+
+---
+
+## **ACM:**
+
+```
+Q: Need SSL certificate for CloudFront?
+A: Use ACM in us-east-1
+
+Q: Want automatic certificate renewal?
+A: Use DNS validation (not email)
+
+Q: Need certificate for EC2 instance?
+A: Cannot use ACM directly, use ALB + ACM or generate own cert
+
+Q: Certificate costs?
+A: FREE when used with AWS services
+
+Q: Export private key?
+A: Cannot with ACM-issued certs (import your own if needed)
+```
+
+---
+
+# **DOCUMENTATION (15 MIN):**
+
+```markdown
+# Day 12: CloudHSM & ACM
+## Date: Feb 17, 2026
+
+### Labs Completed: 4/4
+
+**Lab 26: CloudHSM (Conceptual) ✅**
+
+**CloudHSM vs KMS Comparison:**
+- CloudHSM: FIPS 140-2 Level 3, dedicated, $1.60/hour
+- KMS: FIPS 140-2 Level 2, shared, $1/key/month
+- CloudHSM: 23x more expensive than KMS
+
+**When to use CloudHSM:**
+- Regulatory requirement for Level 3
+- Need single-tenant HSM
+- Custom crypto operations
+- Industry-standard APIs needed
+
+**When to use KMS:**
+- 99% of use cases
+- AWS service integration
+- Cost-sensitive
+- Automatic HA
+
+---
+
+**Lab 27: ACM Certificate Request ✅**
+
+**Process:**
+1. Requested public certificate
+2. Selected DNS validation
+3. Received CNAME validation record
+4. Would add to DNS (if owned domain)
+5. Certificate validates automatically
+
+**Key Features:**
+- FREE certificates
+- Automatic renewal (60 days before expiry)
+- DNS validation recommended
+- Cannot export private key
+
+---
+
+**Lab 28: ACM Certificate Details ✅**
+
+**Certificate Properties:**
+- Algorithm: RSA 2048-bit
+- Signature: SHA-256
+- Validity: 395 days
+- Renewal: Automatic with DNS validation
+
+**Automatic Renewal:**
+- Starts 60 days before expiry
+- Requires DNS validation record present
+- Transparent to applications
+- Email validation = manual renewal
+
+**Use Cases:**
+- CloudFront (must be us-east-1)
+- Application Load Balancer
+- API Gateway custom domains
+- Elastic Beanstalk
+
+**Limitations:**
+- Cannot use with EC2 directly
+- Cannot export certificate
+- Regional (except CloudFront)
+- No manual CSR support
+
+---
+
+**Lab 29: Import Certificate (Conceptual) ✅**
+
+**When to import:**
+- Already have certificate from other CA
+- Need to use outside AWS too
+- Need to export private key
+
+**Process:**
+- Provide certificate body (PEM)
+- Provide private key
+- Provide certificate chain
+- ⚠️ No automatic renewal!
+
+### Real-World Applications:
+
+**CloudHSM:**
+- Payment processing (PCI-DSS Level 3)
+- Government contracts (FIPS mandate)
+- Healthcare (strict HIPAA interpretation)
+- Proof of sole key ownership
+
+**ACM:**
+- All HTTPS websites on AWS
+- CloudFront distributions
+- Load balancers
+- API Gateway custom domains
+- Free, automatic, managed
+
+### Exam Tips:
+
+**CloudHSM:**
+- Question mentions "FIPS 140-2 Level 3" → CloudHSM
+- "Dedicated HSM" → CloudHSM
+- "Single tenant" → CloudHSM
+- "Export keys" → CloudHSM
+- Everything else → KMS
+
+**ACM:**
+- "CloudFront certificate" → ACM in us-east-1
+- "Automatic renewal" → DNS validation
+- "Free SSL" → ACM
+- "EC2 certificate" → Cannot use ACM (trick question!)
+- "Export private key" → Import own cert (ACM-issued cannot export)
+
+**Cost Comparison:**
+- CloudHSM: $1,152/month (2 HSMs minimum)
+- KMS: $1/month per key
+- ACM: FREE (when used with AWS services)
+
+### Practice Questions: __/15
+### Time Spent: 2 hours
+### Confidence: 8/10 ✅
+
+### Next: RDS/DynamoDB Encryption (Day 13)
+```
+
+---
+
+# **PRACTICE QUESTIONS (15 MIN):**
+
+```
+ExamTopics → Search:
+
+- CloudHSM
+- KMS vs CloudHSM
+- FIPS 140-2
+- ACM
+- SSL/TLS certificates
+- Certificate validation
+
+Do 15 questions
+
+Track score: __/15
+Target: 12+/15 (80%+)
+```
+
+---
+
+# **GIT COMMIT:**
+
+```bash
+cd aws-security-journey
+
+cat > labs/day12-cloudhsm-acm.md << 'EOF'
+[Paste documentation]
+EOF
+
+git add .
+git commit -m "Day 12: CloudHSM & ACM complete - conceptual understanding, certificate management"
+git push
+```
+
+---
+
+**THAT'S IT FOR TODAY!**
+
+Much lighter than yesterday! Just 2 hours vs 4 hours. 🎉
+
+**Come back and tell me:**
+1. ✅ Practice score (__/15)
+2. ✅ Documentation done?
+3. 🚀 Ready for RDS/DynamoDB encryption tomorrow?
+
+**You're at 30% of the course!** Crushing it! 💪🚀

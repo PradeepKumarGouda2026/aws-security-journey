@@ -872,6 +872,7 @@ aws s3api delete-object \
 ### Confidence: 9/10 on S3 Security ✅
 ### Object Lock bucket retained: Proves feature works!
 
+### Next: CloudHSM & ACM (Day 12)
 
 
 **S3 Security is LAYERED:**
