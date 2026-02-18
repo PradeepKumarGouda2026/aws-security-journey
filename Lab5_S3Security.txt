@@ -1,0 +1,875 @@
+S3 SECURITY HANDS-ON LABS
+
+S3 SECURITY HANDS-ON LABS - LET'S GO! 🚀
+Excellent! You've watched the theory. Now let's apply it with real labs.
+
+TODAY'S LABS - S3 SECURITY (7 LABS)
+Lab 19: S3 Bucket Policies vs IAM Policies
+Lab 20: Block Public Access
+Lab 21: S3 Encryption (SSE-S3, SSE-KMS, SSE-C)
+Lab 22: S3 Object Lock & Versioning
+Lab 23: S3 Access Points
+Lab 24: Presigned URLs
+Lab 25: MFA Delete
+
+Total time: ~3 hours
+
+LAB 19: S3 BUCKET POLICIES vs IAM POLICIES
+Understanding the Difference:
+IAM Policy (Identity-based):
+- Attached to users/roles
+- Controls what THIS user can do
+- "Alice can access S3"
+
+Bucket Policy (Resource-based):
+- Attached to S3 bucket
+- Controls who can access THIS bucket
+- "This bucket allows Alice"
+
+Both must allow = Access granted
+
+Lab 19.1: Create Test Bucket
+1. S3 Console → Create bucket
+
+2. Bucket name: security-lab-bucket-YOURNAME-123
+   (Must be globally unique)
+
+3. Region: us-east-1 (or ap-south-1)
+
+4. Block Public Access settings:
+   ✅ Keep all 4 boxes CHECKED (for now)
+
+5. Bucket Versioning: Disable (for now)
+
+6. Default encryption: Disable (we'll test this in Lab 21)
+
+7. Create bucket
+
+✅ Bucket created!
+
+Lab 19.2: Upload Test Objects
+1. Open bucket: security-lab-bucket-YOURNAME-123
+
+2. Upload → Add files
+
+3. Select 2-3 test files (any files from your computer)
+
+4. Upload
+
+✅ Objects uploaded
+
+Lab 19.3: Test IAM Policy (Without Bucket Policy)
+bash# CloudShell (signed in as your user)
+
+# Try to list objects
+aws s3 ls s3://security-lab-bucket-YOURNAME-123/
+
+# Should work ✅ (you're the bucket owner)
+
+# Try to download
+aws s3 cp s3://security-lab-bucket-YOURNAME-123/test.txt .
+
+# Should work ✅
+```
+
+---
+
+## **Lab 19.4: Add Bucket Policy (Deny Specific User)**
+```
+1. S3 Console → Your bucket → Permissions tab
+
+2. Bucket policy → Edit
+
+3. Paste this policy (replace YOUR-ACCOUNT-ID):
+json{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowOwnerFullControl",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::YOUR-ACCOUNT-ID:root"
+      },
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::security-lab-bucket-YOURNAME-123",
+        "arn:aws:s3:::security-lab-bucket-YOURNAME-123/*"
+      ]
+    },
+    {
+      "Sid": "DenyAliceAccess",
+      "Effect": "Deny",
+      "Principal": {
+        "AWS": "arn:aws:iam::YOUR-ACCOUNT-ID:user/alice"
+      },
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::security-lab-bucket-YOURNAME-123",
+        "arn:aws:s3:::security-lab-bucket-YOURNAME-123/*"
+      ]
+    }
+  ]
+}
+```
+```
+4. Save changes
+
+✅ Bucket policy applied!
+```
+
+**What this does:**
+- Allows account owner (root) full access
+- Explicitly DENIES alice (even if she has IAM S3 permissions)
+- Deny always wins!
+
+---
+
+## **Lab 19.5: Create Public Read Bucket Policy**
+
+Create a second bucket for this test:
+```
+1. Create bucket: public-read-test-YOURNAME-456
+
+2. ⚠️ UNCHECK all Block Public Access settings
+   (We'll make this public for testing)
+
+3. ✅ Acknowledge warning
+
+4. Create bucket
+
+5. Upload a test file
+
+6. Permissions → Bucket policy → Edit:
+json{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublicReadGetObject",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::public-read-test-YOURNAME-456/*"
+    }
+  ]
+}
+```
+```
+7. Save changes
+
+8. Test public access:
+   - Click on uploaded file
+   - Copy "Object URL"
+   - Open in incognito browser
+   - File should be accessible! ✅
+
+✅ Public bucket policy working!
+```
+
+---
+
+# **LAB 20: BLOCK PUBLIC ACCESS**
+
+## **Understanding Block Public Access (BPA):**
+```
+4 Settings (all should be ON for security):
+
+1. Block public access to buckets and objects granted through NEW ACLs
+2. Block public access to buckets and objects granted through ANY ACLs
+3. Block public access to buckets and objects granted through NEW public bucket policies
+4. Block public and cross-account access to buckets and objects through ANY public bucket policies
+
+When ALL are ON:
+- No public access possible
+- Overrides bucket policies
+- Account-level AND bucket-level settings
+```
+
+---
+
+## **Lab 20.1: Test Block Public Access**
+```
+1. Go to your public bucket: public-read-test-YOURNAME-456
+
+2. Permissions → Block public access (bucket settings)
+
+3. Click Edit
+
+4. ✅ Check ALL 4 boxes:
+   - Block public access to buckets and objects granted through new access control lists (ACLs)
+   - Block public access to buckets and objects granted through any access control lists (ACLs)
+   - Block public access to buckets and objects granted through new public bucket or access point policies
+   - Block public and cross-account access to buckets and objects through any public bucket or access point policies
+
+5. Save changes
+
+6. Type "confirm" → Confirm
+
+7. Test public URL again (in incognito browser)
+   → Should show AccessDenied ❌
+
+✅ Block Public Access working!
+```
+
+**Key Learning:** BPA overrides bucket policies! Even though bucket policy says "allow public", BPA blocks it.
+
+---
+
+## **Lab 20.2: Account-Level Block Public Access**
+```
+1. S3 Console → Left sidebar → Block Public Access settings for this account
+
+2. Click Edit
+
+3. ✅ All 4 boxes should be checked
+
+4. If not, check them and save
+
+✅ This applies to ALL buckets in your account!
+
+Best Practice: Keep these ON at account level, only disable at bucket level when truly needed (like hosting static website)
+```
+
+---
+
+# **LAB 21: S3 ENCRYPTION**
+
+## **Three Encryption Types:**
+```
+SSE-S3 (Server-Side Encryption with S3-managed keys):
+- AWS manages keys
+- AES-256 encryption
+- FREE
+- Default for new buckets
+
+SSE-KMS (Server-Side Encryption with KMS):
+- You control keys via KMS
+- Audit trail in CloudTrail
+- Can use custom KMS keys
+- Costs: KMS API calls
+
+SSE-C (Server-Side Encryption with Customer-provided keys):
+- You manage keys outside AWS
+- You provide key with each request
+- AWS encrypts/decrypts
+- No key storage in AWS
+```
+
+---
+
+## **Lab 21.1: Enable Default Encryption (SSE-S3)**
+```
+1. Go to: security-lab-bucket-YOURNAME-123
+
+2. Properties tab
+
+3. Scroll to: Default encryption
+
+4. Click Edit
+
+5. Encryption type:
+   └─ Server-side encryption with Amazon S3 managed keys (SSE-S3)
+
+6. Bucket Key: ✅ Enable
+   (Reduces KMS costs by 99% if you later switch to KMS)
+
+7. Save changes
+
+8. Upload a new file → Properties → Encryption
+   → Should show: Amazon S3 managed keys (SSE-S3) ✅
+```
+
+---
+
+## **Lab 21.2: Enable SSE-KMS Encryption**
+```
+1. Same bucket → Properties → Default encryption → Edit
+
+2. Encryption type:
+   └─ Server-side encryption with AWS Key Management Service keys (SSE-KMS)
+
+3. AWS KMS key:
+   └─ Choose from your AWS KMS keys
+   └─ Select: alias/aws/s3 (AWS managed, FREE)
+       OR your custom KMS key (if not deleted)
+
+4. Bucket Key: ✅ Enable
+
+5. Save changes
+
+6. Upload a new file
+
+7. Check encryption:
+   - Click file → Properties → Encryption
+   - Should show: AWS-KMS with key ARN ✅
+
+✅ SSE-KMS encryption working!
+
+Lab 21.3: Test SSE-C (Customer-Provided Keys) via CLI
+bash# CloudShell
+
+# Generate a 256-bit encryption key
+openssl rand -base64 32 > my-encryption-key.txt
+
+# View the key
+cat my-encryption-key.txt
+# Output: abc123xyz... (32-byte base64 key)
+
+# Create test file
+echo "Sensitive data encrypted with my own key" > secret.txt
+
+# Upload with SSE-C
+aws s3 cp secret.txt \
+  s3://security-lab-bucket-YOURNAME-123/secret-ssec.txt \
+  --sse-c AES256 \
+  --sse-c-key fileb://my-encryption-key.txt
+
+# Upload successful ✅
+
+# Try to download WITHOUT key (should fail)
+aws s3 cp \
+  s3://security-lab-bucket-YOURNAME-123/secret-ssec.txt \
+  downloaded.txt
+
+# Error: The object was stored using a form of Server Side Encryption ❌
+
+# Download WITH key (should work)
+aws s3 cp \
+  s3://security-lab-bucket-YOURNAME-123/secret-ssec.txt \
+  downloaded.txt \
+  --sse-c AES256 \
+  --sse-c-key fileb://my-encryption-key.txt
+
+# Success! ✅
+cat downloaded.txt
+# Output: Sensitive data encrypted with my own key
+
+✅ SSE-C working! You control the keys!
+```
+
+---
+
+## **Lab 21.4: Enforce Encryption with Bucket Policy**
+```
+Bucket policy → Edit → Add this statement:
+json{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyUnencryptedObjectUploads",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::security-lab-bucket-YOURNAME-123/*",
+      "Condition": {
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": [
+            "AES256",
+            "aws:kms"
+          ]
+        }
+      }
+    }
+  ]
+}
+What this does: Rejects any upload that doesn't specify encryption!
+Test:
+bash# Upload without encryption header
+echo "test" > unencrypted.txt
+aws s3 cp unencrypted.txt s3://security-lab-bucket-YOURNAME-123/
+
+# Should fail: Access Denied ❌
+
+# Upload with encryption
+aws s3 cp unencrypted.txt \
+  s3://security-lab-bucket-YOURNAME-123/ \
+  --sse AES256
+
+# Should work! ✅
+```
+
+---
+
+# **LAB 22: S3 OBJECT LOCK & VERSIONING**
+
+## **What is Object Lock?**
+```
+Write-Once-Read-Many (WORM) model:
+- Objects cannot be deleted or overwritten
+- Used for compliance (SEC, FINRA, HIPAA)
+- Two modes:
+  1. Governance mode: Some users can override
+  2. Compliance mode: NO ONE can delete (not even root!)
+```
+
+---
+
+## **Lab 22.1: Create Bucket with Object Lock**
+```
+1. S3 Console → Create bucket
+
+2. Bucket name: object-lock-test-YOURNAME-789
+
+3. ⚠️ Object Lock:
+   ✅ Enable
+
+4. Create bucket
+
+5. Bucket versioning is automatically enabled (required for Object Lock)
+
+✅ Object Lock bucket created!
+```
+
+---
+
+## **Lab 22.2: Upload Object with Retention**
+```
+1. Open bucket: object-lock-test-YOURNAME-789
+
+2. Upload a test file
+
+3. Properties tab → Object Lock
+
+4. Click: Edit retention
+
+5. Retention mode: Governance mode
+
+6. Retain until date: [Today + 1 day]
+   Example: Feb 14, 2026
+
+7. Save
+
+✅ Object locked until tomorrow!
+```
+
+---
+
+## **Lab 22.3: Try to Delete Locked Object**
+```
+1. Select the object
+
+2. Click Delete
+
+3. Type object name to confirm
+
+4. Delete
+
+5. Error: "Access Denied" ❌
+
+✅ Object Lock preventing deletion!
+
+Lab 22.4: Delete with Governance Bypass
+bash# CloudShell
+
+# Try normal delete (should fail)
+aws s3api delete-object \
+  --bucket object-lock-test-YOURNAME-789 \
+  --key test.txt
+
+# Error: Access Denied ❌
+
+# Delete with bypass (only works in Governance mode)
+aws s3api delete-object \
+  --bucket object-lock-test-YOURNAME-789 \
+  --key test.txt \
+  --bypass-governance-retention
+
+# ⚠️ This requires s3:BypassGovernanceRetention permission
+# May fail if your user doesn't have it
+
+# In Compliance mode, even this wouldn't work!
+```
+
+---
+
+## **Lab 22.5: Legal Hold**
+```
+1. Upload new object
+
+2. Properties → Object Lock
+
+3. Legal hold: On
+
+4. Save
+
+5. Try to delete → Access Denied ❌
+
+6. Remove legal hold → Legal hold: Off → Save
+
+7. Now can delete ✅
+
+Legal hold = indefinite lock (no expiration date)
+Compliance = time-based lock
+```
+
+---
+
+# **LAB 23: S3 ACCESS POINTS**
+
+## **What are Access Points?**
+```
+Instead of:
+- One complex bucket policy with many conditions
+
+Use:
+- Multiple access points, each with simple policy
+- finance-ap: Finance team access to /finance/*
+- analytics-ap: Analytics team access to /data/*
+- Simpler permissions management!
+```
+
+---
+
+## **Lab 23.1: Create Access Point**
+```
+1. S3 Console → Access Points (left sidebar)
+
+2. Create access point
+
+3. Access point name: finance-access-point
+
+4. Bucket: security-lab-bucket-YOURNAME-123
+
+5. Network origin: Internet
+
+6. Block Public Access: Keep all ON
+
+7. Access point policy: Leave empty (for now)
+
+8. Create access point
+
+✅ Access point created!
+```
+
+---
+
+## **Lab 23.2: Add Access Point Policy**
+```
+1. Click on: finance-access-point
+
+2. Permissions → Access point policy → Edit
+
+3. Paste:
+json{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::YOUR-ACCOUNT-ID:user/alice"
+      },
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:us-east-1:YOUR-ACCOUNT-ID:accesspoint/finance-access-point",
+        "arn:aws:s3:us-east-1:YOUR-ACCOUNT-ID:accesspoint/finance-access-point/object/*"
+      ]
+    }
+  ]
+}
+```
+```
+4. Save
+
+✅ alice can now access bucket ONLY through this access point
+
+Lab 23.3: Use Access Point
+bash# CloudShell
+
+# Get Access Point ARN
+aws s3control get-access-point \
+  --account-id YOUR-ACCOUNT-ID \
+  --name finance-access-point
+
+# List objects via access point
+aws s3 ls arn:aws:s3:us-east-1:YOUR-ACCOUNT-ID:accesspoint/finance-access-point/
+
+# Download via access point
+aws s3 cp \
+  arn:aws:s3:us-east-1:YOUR-ACCOUNT-ID:accesspoint/finance-access-point/test.txt \
+  .
+
+✅ Access through access point working!
+```
+
+---
+
+# **LAB 24: PRESIGNED URLs**
+
+## **What are Presigned URLs?**
+```
+Temporary URLs that grant access to private S3 objects:
+- URL expires after X seconds/minutes/hours
+- Anyone with URL can access (no AWS credentials needed)
+- Use case: Share private file temporarily
+
+Lab 24.1: Generate Presigned URL
+bash# CloudShell
+
+# Upload private file
+echo "This is private data" > private-file.txt
+aws s3 cp private-file.txt s3://security-lab-bucket-YOURNAME-123/
+
+# Generate presigned URL (valid for 1 hour)
+aws s3 presign \
+  s3://security-lab-bucket-YOURNAME-123/private-file.txt \
+  --expires-in 3600
+
+# Output:
+https://security-lab-bucket-YOURNAME-123.s3.amazonaws.com/private-file.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...&X-Amz-Expires=3600...
+
+# Copy this URL
+# Open in incognito browser
+# File downloads! ✅ (even though bucket is private)
+
+# Wait 1 hour → URL expires → Access Denied ❌
+
+Lab 24.2: Presigned URL for Upload
+bash# Generate presigned URL for UPLOAD (PUT)
+aws s3 presign \
+  s3://security-lab-bucket-YOURNAME-123/uploaded-file.txt \
+  --expires-in 300
+
+# Anyone with this URL can upload to this specific path
+# (Valid for 5 minutes)
+
+# Test upload:
+curl -X PUT \
+  --upload-file test.txt \
+  "PRESIGNED_URL_HERE"
+
+✅ File uploaded via presigned URL!
+```
+
+---
+
+# **LAB 25: MFA DELETE**
+
+## **What is MFA Delete?**
+```
+Requires MFA (multi-factor authentication) to:
+- Permanently delete object versions
+- Suspend versioning on bucket
+
+Extra security layer for critical data!
+```
+
+---
+
+## **Lab 25.1: Enable Versioning**
+```
+1. S3 Console → security-lab-bucket-YOURNAME-123
+
+2. Properties → Bucket Versioning → Edit
+
+3. Bucket Versioning: Enable
+
+4. Save
+
+✅ Versioning enabled
+
+Lab 25.2: Enable MFA Delete (ROOT ACCOUNT ONLY)
+⚠️ IMPORTANT: MFA Delete can ONLY be enabled by ROOT account via CLI!
+bash# Sign in as ROOT user (not IAM user)
+# AWS Console → Sign out → Sign in as Root user
+
+# Open CloudShell as root
+
+# Get MFA device serial number
+aws iam list-mfa-devices
+
+# Output shows:
+{
+  "MFADevices": [
+    {
+      "SerialNumber": "arn:aws:iam::YOUR-ACCOUNT-ID:mfa/root-account-mfa-device",
+      ...
+    }
+  ]
+}
+
+# Enable MFA Delete
+aws s3api put-bucket-versioning \
+  --bucket security-lab-bucket-YOURNAME-123 \
+  --versioning-configuration Status=Enabled,MFADelete=Enabled \
+  --mfa "arn:aws:iam::YOUR-ACCOUNT-ID:mfa/root-account-mfa-device 123456"
+  # Replace 123456 with current MFA code from your Google Authenticator
+
+✅ MFA Delete enabled!
+
+Lab 25.3: Test MFA Delete
+bash# Upload file
+aws s3 cp test.txt s3://security-lab-bucket-YOURNAME-123/
+
+# Upload again (creates new version)
+aws s3 cp test.txt s3://security-lab-bucket-YOURNAME-123/
+
+# Try to delete version WITHOUT MFA (should fail)
+aws s3api delete-object \
+  --bucket security-lab-bucket-YOURNAME-123 \
+  --key test.txt \
+  --version-id VERSION_ID_HERE
+
+# Error: MFA authentication required ❌
+
+# Delete WITH MFA
+aws s3api delete-object \
+  --bucket security-lab-bucket-YOURNAME-123 \
+  --key test.txt \
+  --version-id VERSION_ID_HERE \
+  --mfa "MFA_SERIAL 123456"
+
+✅ Deleted with MFA!
+```
+
+---
+
+# **COMPLETE LAB CHECKLIST:**
+```
+☐ Lab 19: Bucket Policies vs IAM Policies
+  ├─ Created test bucket
+  ├─ Tested IAM access
+  ├─ Added bucket policy
+  ├─ Created public bucket policy
+  └─ Understood policy evaluation
+
+☐ Lab 20: Block Public Access
+  ├─ Tested BPA settings
+  ├─ Blocked public access at bucket level
+  ├─ Checked account-level BPA
+  └─ Verified BPA overrides bucket policies
+
+☐ Lab 21: S3 Encryption
+  ├─ Enabled SSE-S3 encryption
+  ├─ Enabled SSE-KMS encryption
+  ├─ Tested SSE-C (customer keys)
+  └─ Enforced encryption with bucket policy
+
+☐ Lab 22: Object Lock
+  ├─ Created Object Lock bucket
+  ├─ Uploaded with retention
+  ├─ Tested deletion (blocked)
+  ├─ Tested governance bypass
+  └─ Tested legal hold
+
+☐ Lab 23: Access Points
+  ├─ Created access point
+  ├─ Added access point policy
+  └─ Used access point to access objects
+
+☐ Lab 24: Presigned URLs
+  ├─ Generated presigned GET URL
+  ├─ Generated presigned PUT URL
+  └─ Tested expiration
+
+☐ Lab 25: MFA Delete
+  ├─ Enabled versioning
+  ├─ Enabled MFA Delete (as root)
+  └─ Tested MFA-protected deletion
+  
+  
+  
+
+-----------------------------
+
+### Lab 20: Block Public Access - Two Levels
+
+**Lab 20.1: Bucket-Level BPA**
+- Scope: Single bucket (public-read-test-YOURNAME-456)
+- Action: Enabled all 4 BPA settings
+- Result: Blocked public access for THAT bucket
+- Use case: Granular control per bucket
+
+**Lab 20.2: Account-Level BPA**
+- Scope: Entire AWS account
+- Action: Enabled via CLI (UI not accessible)
+- Command: `aws s3control put-public-access-block --account-id ...`
+- Result: Blocked public access for ALL buckets
+- Use case: Blanket security policy
+
+**Key Difference:**
+- Bucket-level = Individual bucket protection
+- Account-level = Account-wide protection (strongest)
+
+**Hierarchy:** Account-level > Bucket-level > Bucket Policy > ACL
+
+**Best Practice:** Enable BOTH levels in production
+
+
+------------------------------------
+18/2/2025 - 6.20 Am
+----------------------------------
+# Day 11: S3 Security Deep Dive - COMPLETE ✅
+## Date: Feb 17, 2026
+
+### Labs Completed: 7/7
+
+**Lab 19: Bucket Policies vs IAM Policies ✅**
+- Both must allow = access granted
+- Bucket policy can deny even if IAM allows
+
+**Lab 20: Block Public Access ✅**
+- Account-level (via CLI): Strongest protection
+- Bucket-level: Per-bucket control
+- BPA overrides all bucket policies
+
+**Lab 21: S3 Encryption ✅**
+- SSE-S3: AWS-managed keys (free, default)
+- SSE-KMS: Customer-managed keys (audit trail)
+- SSE-C: Customer-provided keys (skipped - policy conflict)
+- Enforced encryption via bucket policy
+
+**Lab 22: Object Lock ✅**
+- WORM compliance model
+- Governance mode: Can bypass with permission
+- Compliance mode: Cannot delete until retention expires
+- Retention working perfectly (bucket still locked!)
+
+**Lab 23: Access Points ✅**
+- Simplified permission management
+- Used s3api commands (not s3 cp)
+- finance-access-point created and tested
+
+**Lab 24: Presigned URLs ✅**
+- Temporary access to private objects
+- No AWS credentials needed
+- URL expires after set time
+
+**Lab 25: MFA Delete ⏭️**
+- Skipped hands-on (technical issues)
+- Understood conceptually: ROOT only, CLI only
+
+### Key Exam Concepts:
+
+**Policy Evaluation Order:**
+1. Explicit DENY → Block
+2. Account-level BPA → Override
+3. Bucket-level BPA → Override
+4. Bucket policy + IAM policy → Both must allow
+
+**Encryption:**
+- SSE-S3: Best for most use cases
+- SSE-KMS: When audit trail needed
+- SSE-C: When you control keys (rare)
+- Client-side: Encrypt before upload
+
+**Object Lock:**
+- Governance: Can bypass with s3:BypassGovernanceRetention
+- Compliance: Cannot bypass (even root!)
+- Legal Hold: Indefinite (no expiration)
+- Use case: Compliance (SEC, FINRA, HIPAA)
+
+**Real-World:**
+- Always enable BPA at account level
+- Default encryption on all buckets
+- Object Lock for regulated data
+- Access Points for complex permissions
+- Presigned URLs for temporary sharing
+
+### Practice Score: __/20
+### Time Spent: 3 hours
+### Confidence: 9/10 on S3 Security ✅
+### Object Lock bucket retained: Proves feature works!
+
+### Next: CloudHSM & ACM (Day 12)
