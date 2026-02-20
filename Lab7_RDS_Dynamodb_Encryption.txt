@@ -764,3 +764,151 @@ aws ec2 create-vpc-endpoint \
 3. Ready for practice questions?
 
 **Let's encrypt those databases!** 🔐🚀
+
+
+------------------------------------
+
+# Day 13: RDS & DynamoDB Encryption
+## Date: Feb 17, 2026
+
+### Labs Completed: 6/6
+
+**Lab 30: RDS Encryption at Rest ✅**
+- Created encrypted RDS database with KMS
+- Encrypted existing database via snapshot method
+- Verified encryption in console and CLI
+- Key learning: Cannot enable encryption on existing DB directly
+
+**Lab 31: RDS Encryption in Transit ✅**
+- Downloaded RDS root certificate (global-bundle.pem)
+- Connected with SSL/TLS (--ssl flag)
+- Enforced SSL with parameter group (require_secure_transport=ON)
+- Verified with SHOW STATUS LIKE 'Ssl_cipher'
+
+**Lab 32: RDS Backup Encryption ✅**
+- Enabled automated backups (7-day retention)
+- Created manual snapshot
+- Verified snapshots inherit encryption from source DB
+- Key learning: Encrypted DB = Encrypted backups automatically
+
+**Lab 33: RDS IAM Database Authentication ✅**
+- Enabled IAM DB authentication on RDS
+- Created database user with AWSAuthenticationPlugin
+- Generated 15-minute authentication token
+- Connected without password using IAM credentials
+
+**Lab 34: DynamoDB Encryption at Rest ✅**
+- Created table with default encryption (AWS owned key)
+- Created table with KMS encryption (aws/dynamodb)
+- Verified encryption with describe-table
+- Key learning: DynamoDB ALWAYS encrypted (cannot disable)
+
+**Lab 35: DynamoDB Encryption in Transit ✅**
+- Verified HTTPS-only enforcement
+- Created VPC endpoint for DynamoDB (traffic stays in AWS network)
+- Key learning: All DynamoDB traffic uses TLS 1.2+
+
+---
+
+### Key Concepts:
+
+**RDS Encryption:**
+
+**At Rest:**
+- Enable during creation (cannot enable later on existing DB)
+- To encrypt existing: Snapshot → Copy with encryption → Restore
+- Uses KMS (aws/rds or custom key)
+- Encrypts: Data, backups, snapshots, logs, replicas
+
+**In Transit:**
+- SSL/TLS connections
+- Download RDS certificate bundle
+- Connect with --ssl flag
+- Enforce with require_secure_transport parameter
+
+**IAM Authentication:**
+- No password needed
+- 15-minute temporary token
+- Better security (no hardcoded passwords)
+- Audit trail in CloudTrail
+
+---
+
+**DynamoDB Encryption:**
+
+**At Rest:**
+- ALWAYS encrypted (mandatory)
+- Two options:
+  1. AWS owned key (default, FREE, no audit)
+  2. Customer managed key (KMS, audit trail, $1/month)
+- Cannot disable encryption
+
+**In Transit:**
+- ALWAYS HTTPS (TLS 1.2+)
+- Cannot use HTTP
+- VPC endpoint keeps traffic within AWS network
+
+---
+
+### Real-World Applications:
+
+**RDS Encryption:**
+- Financial data: Encrypted at rest (compliance)
+- Healthcare: HIPAA requires encryption + audit trail
+- E-commerce: Credit cards encrypted at rest and in transit
+- Disaster recovery: Encrypted snapshots for backups
+
+**IAM Database Authentication:**
+- Lambda functions accessing RDS (no password management)
+- Temporary contractor access (token expires automatically)
+- Audit compliance (CloudTrail logs all access)
+- Password rotation not needed
+
+**DynamoDB Encryption:**
+- Session data: Encrypted by default
+- User profiles: KMS for audit trail
+- Gaming leaderboards: Default encryption sufficient
+- Financial transactions: KMS + VPC endpoint
+
+---
+
+### Exam Tips:
+
+**RDS:**
+- "Encrypt existing unencrypted DB" → Snapshot + Copy with encryption + Restore
+- "Enforce SSL" → Parameter group with require_secure_transport=ON
+- "No password in code" → IAM database authentication
+- "Audit database access" → IAM auth + CloudTrail
+- Encrypted DB → Backups/snapshots automatically encrypted
+
+**DynamoDB:**
+- Always encrypted at rest (cannot disable)
+- Always HTTPS in transit (cannot disable)
+- KMS option for audit trail (vs default AWS owned key)
+- VPC endpoint for extra security (no internet)
+
+**Cost:**
+- RDS encryption: No extra cost (same as unencrypted)
+- DynamoDB default encryption: FREE
+- DynamoDB KMS encryption: $1/key/month
+- IAM authentication: FREE
+
+**Common Mistakes:**
+- ❌ Trying to enable encryption on existing RDS (must use snapshot method)
+- ❌ Thinking DynamoDB can be unencrypted (always encrypted)
+- ❌ Forgetting SSL certificate for RDS connections
+- ❌ Not knowing IAM auth tokens expire in 15 minutes
+
+### Cleanup Completed:
+- ✅ All RDS instances deleted
+- ✅ All RDS snapshots deleted
+- ✅ RDS parameter group deleted
+- ✅ RDS security group deleted
+- ✅ DynamoDB tables deleted
+- ✅ Cost savings: ~$40-50/month
+
+### Practice Score: __/20
+### Time Spent: 3 hours
+### Confidence: 9/10 ✅
+
+### Next: Week 2 Review + Project (Day 14)
