@@ -1,0 +1,766 @@
+# **DAY 13: RDS & DynamoDB ENCRYPTION HANDS-ON! 🚀**
+
+Let's encrypt some databases!
+
+---
+
+## **TODAY'S LABS (6 LABS)**
+
+```
+Lab 30: RDS Encryption at Rest
+Lab 31: RDS Encryption in Transit (SSL/TLS)
+Lab 32: RDS Automated Backups Encryption
+Lab 33: RDS IAM Database Authentication
+Lab 34: DynamoDB Encryption at Rest
+Lab 35: DynamoDB Encryption in Transit
+
+Total time: ~3 hours
+```
+
+---
+
+# **PREP: WATCH COURSE FIRST (1.5 HOURS)**
+
+Before labs, watch Stephane's sections on:
+- RDS Security
+- DynamoDB Security
+- Database encryption
+
+**Come back here after watching!**
+
+---
+
+# **LAB 30: RDS ENCRYPTION AT REST**
+
+## **What You'll Learn:**
+- Encrypt RDS database with KMS
+- Encrypt existing database (via snapshot)
+- Performance impact (none!)
+
+---
+
+## **Lab 30.1: Create Encrypted RDS Database**
+
+### **Step 1: Launch RDS Instance**
+
+```
+RDS Console → Databases → Create database
+
+Engine: MySQL
+├─ Engine version: MySQL 8.0.x (latest)
+└─ Next
+
+Templates: 
+└─ Free tier ✅ (if available)
+   OR Dev/Test (if free tier exhausted)
+
+Settings:
+├─ DB instance identifier: encrypted-mysql-db
+├─ Master username: admin
+├─ Master password: SecurePassword123!
+└─ Confirm password
+
+DB instance class:
+└─ db.t3.micro (free tier) or db.t4g.micro
+
+Storage:
+├─ Storage type: General Purpose SSD (gp2)
+├─ Allocated storage: 20 GiB
+└─ ❌ Uncheck: Enable storage autoscaling
+   (To stay in free tier limits)
+
+⚠️ IMPORTANT - Encryption:
+├─ ✅ Enable encryption ← CHECK THIS!
+├─ KMS key: 
+│   └─ (default) aws/rds ← Use this (FREE)
+│      OR select your custom KMS key
+└─ Next
+
+Connectivity:
+├─ VPC: Default
+├─ Public access: Yes (for testing)
+├─ VPC security group: Create new
+│   └─ Name: rds-mysql-sg
+└─ Availability Zone: No preference
+
+Additional configuration:
+├─ Initial database name: testdb
+├─ ❌ Uncheck: Enable automated backups
+│   (To avoid extra storage costs for learning)
+├─ ❌ Uncheck: Enable Enhanced monitoring
+└─ Next
+
+Estimated monthly costs:
+└─ Should show: $0.00 (if within free tier)
+   OR ~$15/month (if past free tier)
+
+⚠️ WARNING: If cost shows >$0, you're past free tier!
+Consider skipping RDS labs or accepting the cost.
+
+Click "Create database"
+
+⏱️ Wait 5-10 minutes for database to be available
+```
+
+---
+
+### **Step 2: Verify Encryption**
+
+```bash
+# CloudShell
+
+# Get database details
+aws rds describe-db-instances \
+  --db-instance-identifier encrypted-mysql-db \
+  --query 'DBInstances[0].[StorageEncrypted,KmsKeyId]' \
+  --output table
+
+# Output shows:
+-----------------------------------
+|   DescribeDBInstances           |
++----------+----------------------+
+|  True    |  arn:aws:kms:...    |
++----------+----------------------+
+
+✅ Encryption verified!
+```
+
+---
+
+### **Step 3: Check Encryption in Console**
+
+```
+RDS Console → Databases → encrypted-mysql-db
+
+Configuration tab:
+
+Look for:
+├─ Storage encrypted: Yes ✅
+└─ Master key: aws/rds (or your custom key)
+
+✅ Database encrypted at rest!
+```
+
+---
+
+## **Lab 30.2: Encrypt Existing Unencrypted Database**
+
+**Scenario:** You have an old unencrypted database and need to encrypt it.
+
+**Problem:** Cannot enable encryption on existing RDS instance!
+
+**Solution:** Create encrypted snapshot → Restore to new encrypted instance
+
+---
+
+### **Step 1: Create Unencrypted Database (Simulate Old DB)**
+
+```
+RDS Console → Create database
+
+Settings:
+├─ DB instance identifier: unencrypted-mysql-db
+├─ Master username: admin
+├─ Master password: SecurePassword123!
+
+Encryption:
+└─ ❌ UNCHECK "Enable encryption" ← Simulate old DB
+
+Everything else: Same as before
+
+Create database
+
+⏱️ Wait for creation
+```
+
+---
+
+### **Step 2: Create Snapshot of Unencrypted DB**
+
+```
+RDS Console → Databases
+
+Select: unencrypted-mysql-db
+
+Actions → Take snapshot
+
+Snapshot name: unencrypted-db-snapshot-2026-02-17
+
+Create snapshot
+
+⏱️ Wait 2-5 minutes
+```
+
+---
+
+### **Step 3: Copy Snapshot with Encryption**
+
+```
+RDS Console → Snapshots
+
+Select: unencrypted-db-snapshot-2026-02-17
+
+Actions → Copy snapshot
+
+New snapshot settings:
+├─ New snapshot identifier: encrypted-db-snapshot-2026-02-17
+├─ ✅ Enable encryption ← IMPORTANT!
+├─ KMS key: aws/rds (or your key)
+└─ Copy snapshot
+
+⏱️ Wait 2-5 minutes
+```
+
+---
+
+### **Step 4: Restore Encrypted Snapshot**
+
+```
+Snapshots → Select: encrypted-db-snapshot-2026-02-17
+
+Actions → Restore snapshot
+
+Settings:
+├─ DB instance identifier: encrypted-from-snapshot-db
+├─ DB instance class: db.t3.micro
+├─ Storage: 20 GiB
+├─ Public access: Yes
+└─ Restore DB instance
+
+⏱️ Wait 5-10 minutes
+
+Result:
+✅ New database is encrypted!
+✅ Data copied from unencrypted DB
+✅ Original unencrypted DB still exists (delete it later)
+```
+
+---
+
+### **Step 5: Verify New DB is Encrypted**
+
+```bash
+# Check encryption status
+aws rds describe-db-instances \
+  --db-instance-identifier encrypted-from-snapshot-db \
+  --query 'DBInstances[0].StorageEncrypted' \
+  --output text
+
+# Output: True ✅
+```
+
+---
+
+## **Lab 30.3: Test Database Connection**
+
+```bash
+# Get database endpoint
+ENDPOINT=$(aws rds describe-db-instances \
+  --db-instance-identifier encrypted-mysql-db \
+  --query 'DBInstances[0].Endpoint.Address' \
+  --output text)
+
+echo "Database endpoint: $ENDPOINT"
+
+# If you have MySQL client installed (on EC2 or local):
+mysql -h $ENDPOINT -u admin -p
+
+# Enter password: SecurePassword123!
+
+# Once connected:
+mysql> SHOW DATABASES;
+mysql> USE testdb;
+mysql> CREATE TABLE test (id INT, data VARCHAR(100));
+mysql> INSERT INTO test VALUES (1, 'Encrypted data!');
+mysql> SELECT * FROM test;
+mysql> EXIT;
+
+✅ Data is encrypted at rest automatically!
+(You don't see any difference - encryption is transparent)
+```
+
+---
+
+# **LAB 31: RDS ENCRYPTION IN TRANSIT (SSL/TLS)**
+
+## **What is Encryption in Transit?**
+
+```
+At Rest: Data encrypted on disk (KMS)
+In Transit: Data encrypted over network (SSL/TLS)
+
+RDS supports SSL/TLS connections:
+├─ Client connects with SSL
+├─ Traffic encrypted between client and database
+└─ Prevents man-in-the-middle attacks
+```
+
+---
+
+## **Lab 31.1: Download RDS Certificate**
+
+```bash
+# Download RDS root certificate
+wget https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+
+# This certificate validates RDS server identity
+```
+
+---
+
+## **Lab 31.2: Connect with SSL**
+
+```bash
+# Connect to RDS with SSL
+mysql -h $ENDPOINT -u admin -p \
+  --ssl-ca=global-bundle.pem \
+  --ssl-mode=REQUIRED
+
+# Enter password
+
+# Verify SSL is active:
+mysql> SHOW STATUS LIKE 'Ssl_cipher';
+
+# Output shows:
++---------------+--------------------+
+| Variable_name | Value              |
++---------------+--------------------+
+| Ssl_cipher    | ECDHE-RSA-AES128-  |
++---------------+--------------------+
+
+✅ SSL/TLS encryption active!
+```
+
+---
+
+## **Lab 31.3: Enforce SSL Connections**
+
+**Force ALL connections to use SSL:**
+
+```bash
+# Create parameter group
+aws rds create-db-parameter-group \
+  --db-parameter-group-name mysql-require-ssl \
+  --db-parameter-group-family mysql8.0 \
+  --description "MySQL parameter group requiring SSL"
+
+# Modify parameter to require SSL
+aws rds modify-db-parameter-group \
+  --db-parameter-group-name mysql-require-ssl \
+  --parameters "ParameterName=require_secure_transport,ParameterValue=ON,ApplyMethod=immediate"
+
+# Apply parameter group to database
+aws rds modify-db-instance \
+  --db-instance-identifier encrypted-mysql-db \
+  --db-parameter-group-name mysql-require-ssl \
+  --apply-immediately
+
+# Reboot database (required for parameter change)
+aws rds reboot-db-instance \
+  --db-instance-identifier encrypted-mysql-db
+
+⏱️ Wait 2-3 minutes for reboot
+
+# Now try to connect WITHOUT SSL:
+mysql -h $ENDPOINT -u admin -p
+
+# Should fail: "SSL connection required" ❌
+
+# Connect WITH SSL works:
+mysql -h $ENDPOINT -u admin -p --ssl-ca=global-bundle.pem
+
+✅ SSL enforced!
+```
+
+---
+
+# **LAB 32: RDS AUTOMATED BACKUPS ENCRYPTION**
+
+## **How Backups Work:**
+
+```
+Automated Backups:
+├─ Daily snapshots
+├─ Transaction logs (point-in-time recovery)
+├─ Retention: 1-35 days
+└─ Encryption: Same as source database
+
+If DB is encrypted → Backups are encrypted ✅
+If DB is unencrypted → Backups are unencrypted ❌
+```
+
+---
+
+## **Lab 32.1: Enable Automated Backups**
+
+```
+RDS Console → encrypted-mysql-db → Modify
+
+Backup:
+├─ Backup retention period: 7 days
+├─ Backup window: No preference
+└─ ✅ Enable automatic backups
+
+Continue → Modify DB instance
+
+⏱️ Backups will start tonight
+```
+
+---
+
+## **Lab 32.2: Verify Backup Encryption**
+
+```bash
+# Wait for first backup (happens within 24 hours)
+# Or create manual snapshot:
+
+# Create manual snapshot
+aws rds create-db-snapshot \
+  --db-instance-identifier encrypted-mysql-db \
+  --db-snapshot-identifier manual-encrypted-snapshot
+
+# Check snapshot encryption
+aws rds describe-db-snapshots \
+  --db-snapshot-identifier manual-encrypted-snapshot \
+  --query 'DBSnapshots[0].[Encrypted,KmsKeyId]' \
+  --output table
+
+# Output:
+-----------------------------------
+|   True    |  arn:aws:kms:...   |
+-----------------------------------
+
+✅ Snapshot is encrypted!
+```
+
+---
+
+# **LAB 33: RDS IAM DATABASE AUTHENTICATION**
+
+## **What is IAM Database Authentication?**
+
+```
+Traditional:
+├─ Connect with username/password
+├─ Password stored in application
+└─ Security risk if hardcoded
+
+IAM Authentication:
+├─ No password needed!
+├─ Uses IAM credentials
+├─ Temporary token (15 minutes)
+└─ More secure, auditable
+```
+
+---
+
+## **Lab 33.1: Enable IAM Authentication**
+
+```
+RDS Console → encrypted-mysql-db → Modify
+
+Database authentication:
+└─ ✅ Enable IAM DB authentication
+
+Continue → Apply immediately → Modify
+
+⏱️ Wait 2-3 minutes
+```
+
+---
+
+## **Lab 33.2: Create IAM User for Database Access**
+
+```bash
+# Create database user (from MySQL client)
+mysql -h $ENDPOINT -u admin -p --ssl-ca=global-bundle.pem
+
+# Create user with IAM authentication
+mysql> CREATE USER 'iamuser' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';
+mysql> GRANT ALL PRIVILEGES ON testdb.* TO 'iamuser'@'%';
+mysql> FLUSH PRIVILEGES;
+mysql> EXIT;
+```
+
+---
+
+## **Lab 33.3: Create IAM Policy for Database Access**
+
+```bash
+# Create IAM policy
+cat > rds-iam-auth-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "rds-db:connect",
+      "Resource": "arn:aws:rds-db:us-east-1:ACCOUNT_ID:dbuser:DB-RESOURCE-ID/iamuser"
+    }
+  ]
+}
+EOF
+
+# Get DB resource ID
+DB_RESOURCE_ID=$(aws rds describe-db-instances \
+  --db-instance-identifier encrypted-mysql-db \
+  --query 'DBInstances[0].DbiResourceId' \
+  --output text)
+
+echo "DB Resource ID: $DB_RESOURCE_ID"
+
+# Update policy with actual values
+# Then create it:
+aws iam create-policy \
+  --policy-name RDSIAMAuth \
+  --policy-document file://rds-iam-auth-policy.json
+
+# Attach to your IAM user
+aws iam attach-user-policy \
+  --user-name YOUR_IAM_USER \
+  --policy-arn arn:aws:iam::ACCOUNT_ID:policy/RDSIAMAuth
+```
+
+---
+
+## **Lab 33.4: Connect Using IAM Authentication**
+
+```bash
+# Generate authentication token
+TOKEN=$(aws rds generate-db-auth-token \
+  --hostname $ENDPOINT \
+  --port 3306 \
+  --username iamuser \
+  --region us-east-1)
+
+echo "Token: $TOKEN"
+
+# Connect using token as password
+mysql -h $ENDPOINT \
+  --user=iamuser \
+  --password="$TOKEN" \
+  --ssl-ca=global-bundle.pem \
+  --enable-cleartext-plugin
+
+✅ Connected with IAM authentication!
+(No hardcoded password needed!)
+```
+
+---
+
+# **LAB 34: DynamoDB ENCRYPTION AT REST**
+
+## **DynamoDB Encryption:**
+
+```
+ALWAYS encrypted at rest!
+├─ Cannot disable encryption
+├─ Two options:
+│   ├─ AWS owned key (default, FREE)
+│   └─ Customer managed key (KMS, audit trail)
+└─ Encryption is transparent
+```
+
+---
+
+## **Lab 34.1: Create DynamoDB Table with Default Encryption**
+
+```
+DynamoDB Console → Tables → Create table
+
+Table details:
+├─ Table name: EncryptedUsers
+├─ Partition key: userId (String)
+└─ No sort key
+
+Table settings:
+└─ Use default settings
+
+Encryption at rest:
+├─ ● Owned by Amazon DynamoDB ← Default (FREE)
+└─ ○ AWS managed key (aws/dynamodb)
+
+Create table
+
+⏱️ Wait 1 minute
+
+✅ Table created with default encryption!
+```
+
+---
+
+## **Lab 34.2: Create Table with KMS Encryption**
+
+```
+Create table
+
+Table name: EncryptedOrders
+
+Partition key: orderId (String)
+
+Encryption at rest:
+├─ ○ Owned by Amazon DynamoDB
+└─ ● AWS managed key ← Select this
+   OR
+   ● Customer managed key → Select your KMS key
+
+Create table
+
+✅ Table encrypted with KMS!
+(Provides CloudTrail audit logs)
+```
+
+---
+
+## **Lab 34.3: Verify Encryption**
+
+```bash
+# Check table encryption
+aws dynamodb describe-table \
+  --table-name EncryptedOrders \
+  --query 'Table.SSEDescription' \
+  --output json
+
+# Output:
+{
+  "Status": "ENABLED",
+  "SSEType": "KMS",
+  "KMSMasterKeyArn": "arn:aws:kms:us-east-1:...:key/..."
+}
+
+✅ KMS encryption verified!
+```
+
+---
+
+## **Lab 34.4: Add Data to Encrypted Table**
+
+```bash
+# Put item in table
+aws dynamodb put-item \
+  --table-name EncryptedOrders \
+  --item '{
+    "orderId": {"S": "order-001"},
+    "customerName": {"S": "John Doe"},
+    "total": {"N": "99.99"},
+    "creditCard": {"S": "4111-1111-1111-1111"}
+  }'
+
+# Get item back
+aws dynamodb get-item \
+  --table-name EncryptedOrders \
+  --key '{"orderId": {"S": "order-001"}}'
+
+# Output shows data (decrypted automatically)
+{
+  "Item": {
+    "orderId": {"S": "order-001"},
+    "customerName": {"S": "John Doe"},
+    ...
+  }
+}
+
+✅ Encryption/decryption is transparent!
+(You don't see any difference)
+```
+
+---
+
+# **LAB 35: DynamoDB ENCRYPTION IN TRANSIT**
+
+## **How It Works:**
+
+```
+DynamoDB API:
+├─ ALL connections use HTTPS
+├─ TLS 1.2+ required
+├─ Cannot disable encryption in transit
+└─ Automatic, no configuration needed
+
+✅ Always encrypted in transit!
+```
+
+---
+
+## **Lab 35.1: Verify HTTPS Enforcement**
+
+```bash
+# Try HTTP (should fail)
+curl http://dynamodb.us-east-1.amazonaws.com/
+
+# Output: Connection refused or redirect to HTTPS
+
+# HTTPS works:
+curl https://dynamodb.us-east-1.amazonaws.com/
+
+✅ Only HTTPS allowed!
+```
+
+---
+
+## **Lab 35.2: VPC Endpoint for DynamoDB (Extra Security)**
+
+**Why:** Keep DynamoDB traffic within AWS network (doesn't go over internet)
+
+```bash
+# Create VPC endpoint for DynamoDB
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-XXXXXXXX \
+  --service-name com.amazonaws.us-east-1.dynamodb \
+  --route-table-ids rtb-XXXXXXXX
+
+# Now DynamoDB traffic stays within AWS network
+# Even more secure than internet HTTPS!
+
+✅ VPC endpoint created!
+```
+
+---
+
+# **COMPLETE LAB CHECKLIST:**
+
+```
+☐ Lab 30: RDS Encryption at Rest
+  ├─ Created encrypted RDS database
+  ├─ Encrypted existing database via snapshot
+  └─ Verified encryption status
+
+☐ Lab 31: RDS Encryption in Transit
+  ├─ Downloaded RDS certificate
+  ├─ Connected with SSL/TLS
+  └─ Enforced SSL connections
+
+☐ Lab 32: RDS Backup Encryption
+  ├─ Enabled automated backups
+  ├─ Created manual snapshot
+  └─ Verified snapshot encryption
+
+☐ Lab 33: RDS IAM Authentication
+  ├─ Enabled IAM DB authentication
+  ├─ Created IAM database user
+  ├─ Generated authentication token
+  └─ Connected without password
+
+☐ Lab 34: DynamoDB Encryption at Rest
+  ├─ Created table with default encryption
+  ├─ Created table with KMS encryption
+  ├─ Verified encryption settings
+  └─ Added encrypted data
+
+☐ Lab 35: DynamoDB Encryption in Transit
+  ├─ Verified HTTPS enforcement
+  └─ Created VPC endpoint (optional)
+```
+
+---
+
+**START WITH LAB 30 NOW!** 
+
+⚠️ **Important:** Check if you have RDS free tier left before creating databases!
+
+**Come back after completing labs and tell me:**
+1. Which labs you completed
+2. Any challenges
+3. Ready for practice questions?
+
+**Let's encrypt those databases!** 🔐🚀
