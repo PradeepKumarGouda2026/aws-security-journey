@@ -1,0 +1,108 @@
+# **🚀 WEEK 3: LOGGING, MONITORING & DETECTION 🚀**
+
+**Welcome to the most EXCITING week of AWS Security!**
+
+This week you'll learn to **catch threats in real-time** and **respond automatically**! 🎯
+
+---
+
+## **WEEK 3 OVERVIEW**
+
+```
+Week 3: Detection & Response
+February 18-24, 2026
+
+Focus: Logging, Monitoring, Threat Detection
+Exam Weight: 30% of certification!
+
+Days 15-21:
+├─ Day 15: CloudTrail (Complete audit trail)
+├─ Day 16: CloudWatch for Security (Logs, metrics, alarms)
+├─ Day 17: Amazon GuardDuty (AI threat detection)
+├─ Day 18: Amazon Macie (Sensitive data discovery)
+├─ Day 19: AWS Inspector (Vulnerability scanning)
+├─ Day 20: AWS Security Hub (Central dashboard)
+└─ Day 21: Week 3 Review + Detection Project
+
+Total: 7 days, ~30 labs, detection mastery!
+```
+
+---
+
+## **WHY WEEK 3 IS CRITICAL:**
+
+```
+Detection & Response = 30% of exam questions!
+
+Real-world impact:
+- Detect threats in MINUTES (not months)
+- Automate incident response
+- Compliance audit trails
+- Prevent data breaches
+- Meet SOC 2, HIPAA, PCI-DSS requirements
+
+Without detection:
+❌ Breaches go unnoticed for 207 days (industry average)
+❌ No compliance evidence
+❌ Can't prove "who did what when"
+❌ Reactive instead of proactive
+
+With detection:
+✅ Real-time threat alerts
+✅ Automated remediation
+✅ Complete audit trail
+✅ Pass compliance audits
+✅ Prevent breaches before damage
+```
+
+---
+
+# **DAY 15: CLOUDTRAIL DEEP DIVE**
+
+## **What is CloudTrail?**
+
+```
+CloudTrail = Complete history of AWS API calls
+
+Every action in AWS:
+- Who: Which user/role
+- What: Which API call
+- When: Exact timestamp
+- Where: Source IP, region
+- Result: Success or failure
+- Details: Request parameters
+
+Examples:
+- alice created S3 bucket "sensitive-data" at 2:34 PM
+- bob deleted EC2 instance i-abc123 from 203.0.113.5
+- Lambda function accessed Secrets Manager at 3:15 AM
+- Root user logged in without MFA ⚠️
+```
+
+---
+
+## **WATCH COURSE FIRST (1 HOUR)**
+
+Before hands-on, watch Stephane's CloudTrail section:
+
+```
+Topics covered:
+├─ CloudTrail fundamentals
+├─ Management events vs Data events
+├─ Trail creation (single-region vs multi-region)
+├─ CloudTrail Insights (anomaly detection)
+├─ Log file validation
+├─ S3 bucket for log storage
+├─ CloudWatch integration
+└─ Security best practices
+
+Watch at 1.5x speed: ~40 minutes
+Take notes on key concepts
+```
+
+---
+
+## **AFTER WATCHING, COME BACK FOR LABS!**
+
+---
+

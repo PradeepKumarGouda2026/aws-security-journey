@@ -1,0 +1,477 @@
+# **CLOUDTRAIL HANDS-ON LABS (7 LABS)**
+
+```
+Lab 41: Create CloudTrail Trail
+Lab 42: Explore CloudTrail Events
+Lab 43: CloudTrail Insights
+Lab 44: Log File Validation
+Lab 45: CloudTrail + CloudWatch Integration
+Lab 46: Query Logs with Athena
+Lab 47: Detect Suspicious Activity
+
+Time: ~2.5 hours
+```
+
+---
+
+## **LAB 41: CREATE CLOUDTRAIL TRAIL**
+
+### **Understanding Trail Types:**
+
+```
+Organization Trail:
+- Logs ALL accounts in AWS Organization
+- Centralized logging
+- Best for enterprises
+
+Single Account Trail:
+- Logs one AWS account only
+- Good for learning/small setups
+
+Multi-Region Trail:
+- Logs all regions
+- Recommended (default)
+- Single trail covers everything
+
+Single-Region Trail:
+- Logs one region only
+- Legacy, not recommended
+```
+
+---
+
+### **Lab 41.1: Create Your First Trail**
+
+```
+CloudTrail Console → Trails → Create trail
+
+Trail name: security-audit-trail
+
+Trail settings:
+├─ ✅ Enable for all accounts in my organization
+│   (If you don't have Organization, uncheck)
+├─ Storage location:
+│   ├─ Create new S3 bucket: ✅
+│   └─ Bucket name: cloudtrail-logs-YOURNAME-2026
+└─ Log file SSE-KMS encryption:
+    ├─ ✅ Enabled (recommended)
+    └─ Use existing KMS key OR create new
+
+Additional settings:
+├─ Log file validation: ✅ Enabled
+│   (Detects log tampering)
+├─ SNS notification: ❌ Disabled (for now)
+└─ CloudWatch Logs: ❌ Disabled (Lab 45)
+
+Management events:
+├─ Read/Write events: ✅ All
+├─ Exclude AWS KMS events: ❌ (we want to see them)
+└─ Exclude Amazon RDS Data API events: ❌
+
+Data events:
+├─ S3: ❌ Not configured yet (expensive!)
+│   (We'll configure specific buckets later)
+└─ Lambda: ❌ Not configured yet
+
+Insights events:
+└─ ❌ Not enabled yet (Lab 43)
+
+Create trail
+
+✅ Trail created!
+```
+
+---
+
+### **Lab 41.2: Verify Trail Configuration**
+
+```bash
+# CloudShell
+
+# Describe trail
+aws cloudtrail describe-trails \
+  --trail-name-list security-audit-trail
+
+# Output shows:
+{
+  "trailList": [
+    {
+      "Name": "security-audit-trail",
+      "S3BucketName": "cloudtrail-logs-yourname-2026",
+      "IncludeGlobalServiceEvents": true,
+      "IsMultiRegionTrail": true,
+      "LogFileValidationEnabled": true,
+      "HasCustomEventSelectors": false,
+      "HasInsightSelectors": false,
+      "IsOrganizationTrail": false
+    }
+  ]
+}
+
+✅ Trail is logging!
+```
+
+---
+
+### **Lab 41.3: View S3 Bucket Structure**
+
+```bash
+# List CloudTrail logs in S3
+aws s3 ls s3://cloudtrail-logs-yourname-2026/
+
+# Structure:
+AWSLogs/
+└── ACCOUNT-ID/
+    └── CloudTrail/
+        └── REGION/
+            └── YYYY/
+                └── MM/
+                    └── DD/
+                        └── ACCOUNT-ID_CloudTrail_REGION_YYYYMMDDTHHmmZ_HASH.json.gz
+
+Example:
+AWSLogs/160326772135/CloudTrail/us-east-1/2026/02/18/
+160326772135_CloudTrail_us-east-1_20260218T1430Z_abc123.json.gz
+
+# Download a log file
+aws s3 cp s3://cloudtrail-logs-yourname-2026/AWSLogs/.../file.json.gz .
+
+# Decompress
+gunzip file.json.gz
+
+# View
+cat file.json | jq '.'
+
+✅ Logs are being written!
+```
+
+---
+
+## **LAB 42: EXPLORE CLOUDTRAIL EVENTS**
+
+### **Lab 42.1: View Event History (Last 90 Days)**
+
+```
+CloudTrail Console → Event history
+
+This shows:
+- Last 90 days of management events
+- Free (no trail needed!)
+- Cannot be deleted
+- Cannot view data events here
+
+Columns:
+├─ Event name: CreateBucket, PutObject, etc.
+├─ User name: Which IAM user/role
+├─ Event time: When it happened
+├─ Resource type: S3, EC2, IAM, etc.
+└─ Resource name: Bucket name, instance ID, etc.
+
+Try it:
+1. Click any event
+2. View JSON details
+3. See request parameters
+4. See response elements
+
+✅ 90-day free history!
+```
+
+---
+
+### **Lab 42.2: Search Event History**
+
+```
+Event history → Filter
+
+Search by:
+├─ Event name: CreateBucket
+├─ User name: alice
+├─ Resource type: AWS::S3::Bucket
+└─ Time range: Last 1 hour
+
+Example searches:
+
+1. Find all S3 bucket creations:
+   Event name: CreateBucket
+
+2. Find all actions by user alice:
+   User name: alice
+
+3. Find all failed API calls:
+   Error code: AccessDenied
+
+4. Find all root user activities:
+   User name: Root
+
+5. Find all MFA-less root logins:
+   Event name: ConsoleLogin
+   User name: Root
+   (Check JSON for MFA status)
+
+✅ Powerful search!
+```
+
+---
+
+### **Lab 42.3: Understand Event Structure**
+
+Download an event and examine the JSON:
+
+```json
+{
+  "Records": [
+    {
+      "eventVersion": "1.08",
+      "userIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDAI...",
+        "arn": "arn:aws:iam::160326772135:user/alice",
+        "accountId": "160326772135",
+        "userName": "alice"
+      },
+      "eventTime": "2026-02-18T14:30:00Z",
+      "eventSource": "s3.amazonaws.com",
+      "eventName": "CreateBucket",
+      "awsRegion": "us-east-1",
+      "sourceIPAddress": "203.0.113.45",
+      "userAgent": "aws-cli/2.x",
+      "requestParameters": {
+        "bucketName": "my-new-bucket",
+        "CreateBucketConfiguration": {
+          "LocationConstraint": "us-east-1"
+        }
+      },
+      "responseElements": null,
+      "requestID": "ABC123...",
+      "eventID": "xyz789...",
+      "readOnly": false,
+      "eventType": "AwsApiCall",
+      "managementEvent": true,
+      "recipientAccountId": "160326772135",
+      "eventCategory": "Management"
+    }
+  ]
+}
+```
+
+**Key fields to know:**
+
+```
+userIdentity:
+- type: IAMUser, AssumedRole, Root, AWSService
+- userName: alice, bob, Root
+- arn: Full ARN of the identity
+
+eventTime: UTC timestamp
+
+eventName: API call (CreateBucket, DeleteObject, etc.)
+
+sourceIPAddress: Where request came from
+- IP address for users
+- AWS service name for service calls
+
+requestParameters: What was in the request
+
+responseElements: What AWS returned
+
+errorCode: If call failed (AccessDenied, etc.)
+
+readOnly: true = read, false = write/delete
+
+eventType:
+- AwsApiCall: Normal API call
+- AwsServiceEvent: AWS internal event
+- AwsConsoleSignIn: Console login
+
+managementEvent vs dataEvent:
+- Management: Control plane (CreateBucket)
+- Data: Data plane (PutObject, GetObject)
+```
+
+---
+
+## **LAB 43: CLOUDTRAIL INSIGHTS**
+
+### **What are Insights?**
+
+```
+CloudTrail Insights = AI anomaly detection
+
+Detects unusual API activity:
+- Spike in failed API calls
+- Unusual number of EC2 terminations
+- Surge in IAM permission changes
+- Abnormal S3 delete operations
+
+How it works:
+1. CloudTrail learns normal baseline (7 days)
+2. Detects deviations from baseline
+3. Generates Insight event
+4. Sends alert
+
+Cost: $0.35 per 100,000 write events analyzed
+```
+
+---
+
+### **Lab 43.1: Enable Insights**
+
+```
+CloudTrail Console → Trails → security-audit-trail
+
+Insights events:
+├─ ✅ Enable Insights events
+└─ Event types:
+    ├─ ✅ API call rate insights (write events)
+    └─ ✅ API error rate insights
+
+Save changes
+
+⏱️ Insights start learning baseline (7 days)
+
+After 7 days:
+- Unusual activity detected
+- Insight event generated
+- Available in Event history
+```
+
+---
+
+### **Lab 43.2: Simulate Insight Event (Optional)**
+
+```bash
+# Create unusual API activity spike
+# (This may trigger Insight after baseline established)
+
+# Rapid S3 bucket creation (unusual)
+for i in {1..50}; do
+  aws s3 mb s3://insight-test-bucket-$i-$RANDOM 2>/dev/null
+done
+
+# Wait 10 minutes
+
+# Rapid deletion (unusual)
+for i in {1..50}; do
+  aws s3 rb s3://insight-test-bucket-$i-* 2>/dev/null
+done
+
+⚠️ This costs money for Insights analysis!
+⚠️ For learning, just understand the concept
+
+In production:
+- Insight would detect this spike
+- Generate alert
+- Security team investigates
+```
+
+---
+
+### **Lab 43.3: View Insights (After 7 Days)**
+
+```
+CloudTrail Console → Dashboard → Insights
+
+Shows:
+├─ Insight event timeline
+├─ API call rate anomalies
+├─ Error rate anomalies
+└─ Affected resources
+
+Click an Insight:
+├─ Baseline activity level
+├─ Anomalous activity level
+├─ Time period
+├─ Which APIs
+└─ Which users
+
+Example Insight:
+"DeleteObject API calls increased by 300%"
+- Baseline: 10 calls/hour
+- Anomaly: 400 calls/hour
+- User: alice
+- Time: 2026-02-18 14:00-15:00
+- Investigation needed! 🚨
+```
+
+---
+
+## **LAB 44: LOG FILE VALIDATION**
+
+### **What is Log File Validation?**
+
+```
+Problem: Attacker deletes CloudTrail logs to hide tracks
+
+Solution: Log file validation
+- CloudTrail creates digest files
+- Digest = cryptographic hash of logs
+- Stored separately
+- Cannot modify logs without detection
+- Proves logs haven't been tampered with
+
+Digest files:
+- Created every hour
+- Hash of all log files from that hour
+- Chain of hashes (like blockchain!)
+- Cannot be altered without detection
+```
+
+---
+
+### **Lab 44.1: Enable Validation (Already Enabled)**
+
+```
+We enabled this in Lab 41!
+
+To verify:
+CloudTrail → Trails → security-audit-trail
+
+Log file validation: ✅ Enabled
+
+S3 bucket structure now includes:
+AWSLogs/ACCOUNT/CloudTrail/REGION/YYYY/MM/DD/
+├── log.json.gz (actual logs)
+└── digest/ (validation files)
+
+Digest files:
+ACCOUNT_CloudTrail-Digest_REGION_YYYYMMDD_HASH.json.gz
+```
+
+---
+
+### **Lab 44.2: Validate Log Files**
+
+```bash
+# Install CloudTrail log validation tool
+# (AWS provides Python script)
+
+# Download validation script
+wget https://s3.amazonaws.com/cloudtrail-digest-validator/cloudtrail-digest-validator.zip
+unzip cloudtrail-digest-validator.zip
+cd cloudtrail-digest-validator
+
+# Validate logs
+python cloudtrail_digest_validator.py \
+  --trail-arn arn:aws:cloudtrail:us-east-1:ACCOUNT:trail/security-audit-trail \
+  --start-time 2026-02-18T00:00:00Z \
+  --end-time 2026-02-18T23:59:59Z
+
+# Output:
+✅ All log files validated successfully
+✅ No tampering detected
+✅ Chain of custody intact
+
+# If logs were modified:
+❌ Validation failed!
+❌ Hash mismatch detected
+❌ Log files may have been tampered with
+🚨 Security incident!
+```
+
+---
+
+**TAKE A BREAK! You've completed the first 4 CloudTrail labs!** ☕
+
+**Next:** CloudWatch integration, Athena queries, and suspicious activity detection!
+
+**Ready to continue?** Let me know and I'll give you Labs 45-47! 🚀
