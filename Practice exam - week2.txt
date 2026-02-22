@@ -1,0 +1,433 @@
+WEEK 2 PRACTICE EXAM - 50 QUESTIONS 🎯
+Let's test your Week 2 knowledge!
+
+EXAM INSTRUCTIONS:
+⏱️ Time Limit: 65 minutes (1.3 min per question)
+📊 Passing Score: 40/50 (80%)
+📝 Format: Multiple choice (choose ONE best answer)
+🚫 No notes allowed!
+✅ Mark difficult questions for review
+
+SETUP:
+1. Get paper and pen (track answers)
+2. Set timer for 65 minutes
+3. Clear workspace (no distractions)
+4. No looking at notes until finished!
+5. Answer format: Write question number + letter (A/B/C/D)
+
+START TIMER NOW! ⏱️
+
+DOMAIN 1: KMS & ENCRYPTION (10 Questions)
+Question 1:
+A company needs to encrypt data in S3 with full control over encryption keys and the ability to audit all key usage. Which solution meets these requirements?
+A) SSE-S3
+B) SSE-KMS with AWS managed key (aws/s3)
+C) SSE-KMS with customer managed key
+D) SSE-C
+
+Question 2:
+An application needs to encrypt a 10 GB file. Uploading the entire file to KMS fails. What should you do?
+A) Split the file into smaller chunks
+B) Use envelope encryption with GenerateDataKey
+C) Increase KMS API limits
+D) Use SSE-C instead of KMS
+
+Question 3:
+A security policy requires that encryption keys be rotated annually. Which AWS service provides automatic key rotation?
+A) AWS Certificate Manager
+B) AWS KMS for customer managed keys
+C) AWS Secrets Manager
+D) Both B and C
+
+Question 4:
+What happens to data encrypted with a KMS key after the key is rotated?
+A) Data must be re-encrypted with the new key
+B) Data becomes inaccessible
+C) Old data can still be decrypted, new data uses new key
+D) All previous versions are deleted
+
+Question 5:
+A user has AdministratorAccess IAM policy but cannot use a specific KMS key. What is the most likely cause?
+A) The KMS key is in a different region
+B) The key policy doesn't allow the user
+C) KMS is experiencing an outage
+D) The user needs to enable MFA
+
+Question 6:
+What is the difference between a CMK and a data key in KMS?
+A) CMK encrypts data directly, data key manages the CMK
+B) CMK never leaves KMS, data key is used to encrypt data
+C) They are the same thing
+D) CMK is for S3, data key is for RDS
+
+Question 7:
+A Lambda function needs temporary access to use a KMS key for 2 hours. What is the BEST approach?
+A) Add Lambda to the key policy
+B) Create a KMS grant
+C) Give Lambda AdministratorAccess
+D) Create a new IAM user for Lambda
+
+Question 8:
+What does encryption context in KMS provide?
+A) Faster encryption performance
+B) Additional authentication data and audit trail
+C) Multi-region encryption
+D) Automatic key rotation
+
+Question 9:
+A company must prove sole control of encryption keys for compliance. Which service should they use?
+A) AWS KMS
+B) AWS CloudHSM
+C) AWS Certificate Manager
+D) AWS Secrets Manager
+
+Question 10:
+What is the KMS API request limit for small requests?
+A) 100 requests per second
+B) 1,000 requests per second
+C) 5,500 requests per second (varies by region)
+D) Unlimited
+
+DOMAIN 2: SECRETS & PARAMETERS (5 Questions)
+Question 11:
+A company needs to store database passwords with automatic rotation every 30 days. Which service should they use?
+A) Parameter Store
+B) Secrets Manager
+C) KMS
+D) S3 with encryption
+
+Question 12:
+What is the cost difference between Secrets Manager and Parameter Store (Standard)?
+A) Both are free
+B) Secrets Manager is $0.40/secret/month, Parameter Store is free
+C) Parameter Store is $1/parameter, Secrets Manager is free
+D) Both cost $0.40/month
+
+Question 13:
+How should configuration parameters be organized in Parameter Store for multiple environments?
+A) Separate AWS accounts for each environment
+B) Use hierarchical paths like /prod/database/host
+C) Store in DynamoDB instead
+D) Use tags to separate environments
+
+Question 14:
+A Lambda function retrieves a secret from Secrets Manager. What IAM permission is required?
+A) secretsmanager:GetSecret
+B) secretsmanager:GetSecretValue
+C) secretsmanager:DescribeSecret
+D) kms:Decrypt
+
+Question 15:
+What happens to the old password when Secrets Manager rotates a secret?
+A) It's immediately deleted
+B) It's stored as AWSPREVIOUS for rollback
+C) It's moved to a backup vault
+D) It's encrypted and archived
+
+DOMAIN 3: S3 SECURITY (10 Questions)
+Question 16:
+What is the order of policy evaluation for S3 access?
+A) Bucket policy → IAM policy → Block Public Access
+B) IAM policy → Bucket policy → Block Public Access
+C) Explicit Deny → Block Public Access → Bucket policy + IAM
+D) Block Public Access → Bucket policy → IAM policy
+
+Question 17:
+A bucket has a public bucket policy, but objects are not accessible publicly. What is the most likely cause?
+A) S3 is experiencing an outage
+B) Block Public Access is enabled
+C) The objects are encrypted
+D) Versioning is enabled
+
+Question 18:
+What is the difference between SSE-S3 and SSE-KMS?
+A) SSE-S3 is faster
+B) SSE-KMS provides CloudTrail audit logs
+C) SSE-S3 is more secure
+D) SSE-KMS is free, SSE-S3 costs money
+
+Question 19:
+A company needs to prevent deletion of objects for 7 years for compliance. Which feature should they use?
+A) S3 Versioning
+B) S3 Object Lock in Compliance mode
+C) S3 Lifecycle policies
+D) MFA Delete
+
+Question 20:
+What is the difference between Governance and Compliance mode in S3 Object Lock?
+A) Governance is free, Compliance costs money
+B) Governance can be bypassed with special permissions, Compliance cannot
+C) Compliance is faster
+D) They are the same
+
+Question 21:
+A user needs temporary access to download a private S3 object. What should you create?
+A) Bucket policy allowing public access
+B) Presigned URL with expiration
+C) IAM user for the external party
+D) Make the object public
+
+Question 22:
+What is the purpose of S3 Access Points?
+A) Faster data transfer
+B) Simplified permissions for different access patterns
+C) Cheaper storage
+D) Automatic encryption
+
+Question 23:
+A bucket policy denies all requests without encryption. What header must be included in uploads?
+A) x-amz-encryption: true
+B) x-amz-server-side-encryption: AES256
+C) Content-Encryption: KMS
+D) Encryption-Required: yes
+
+Question 24:
+What does MFA Delete protect against?
+A) Accidental object uploads
+B) Permanent deletion of object versions
+C) Unauthorized bucket creation
+D) Data exfiltration
+
+Question 25:
+Which S3 encryption method requires you to provide the key with each request?
+A) SSE-S3
+B) SSE-KMS
+C) SSE-C
+D) CSE-KMS
+
+DOMAIN 4: CERTIFICATES & HSM (5 Questions)
+Question 26:
+What is the key difference between CloudHSM and KMS?
+A) CloudHSM is cheaper
+B) CloudHSM is FIPS 140-2 Level 3, KMS is Level 2
+C) KMS is single-tenant, CloudHSM is multi-tenant
+D) CloudHSM is managed by AWS, KMS is managed by you
+
+Question 27:
+When is CloudHSM required instead of KMS?
+A) When you need to encrypt S3 data
+B) When compliance requires FIPS 140-2 Level 3
+C) When you want to save money
+D) When using Lambda functions
+
+Question 28:
+ACM certificates are free when used with which services?
+A) EC2 instances
+B) CloudFront and Application Load Balancer
+C) All AWS services
+D) Only Lambda
+
+Question 29:
+What validation method enables automatic certificate renewal in ACM?
+A) Email validation
+B) DNS validation
+C) HTTP validation
+D) Manual validation
+
+Question 30:
+Can you export the private key of an ACM-issued certificate?
+A) Yes, through the console
+B) Yes, through the CLI
+C) No, private keys are managed by AWS
+D) Yes, but only for certificates older than 30 days
+
+DOMAIN 5: DATABASE ENCRYPTION (10 Questions)
+Question 31:
+How do you encrypt an existing unencrypted RDS database?
+A) Enable encryption in the RDS console
+B) Modify the instance and select encryption
+C) Take a snapshot, copy it with encryption, restore from encrypted snapshot
+D) It's not possible to encrypt existing databases
+
+Question 32:
+A security policy requires all RDS connections to use SSL/TLS. How do you enforce this?
+A) Configure security groups
+B) Enable encryption on the RDS instance
+C) Set require_secure_transport=ON in parameter group
+D) Use IAM database authentication
+
+Question 33:
+What is the benefit of IAM database authentication for RDS?
+A) Faster connections
+B) No need to manage database passwords
+C) Free of charge
+D) Automatic backups
+
+Question 34:
+How long are IAM database authentication tokens valid?
+A) 5 minutes
+B) 15 minutes
+C) 1 hour
+D) 24 hours
+
+Question 35:
+If an RDS database is encrypted, what else is automatically encrypted?
+A) Only the database data
+B) Data, backups, snapshots, and replicas
+C) Only snapshots
+D) Nothing else, each must be configured separately
+
+Question 36:
+Can you disable encryption on a DynamoDB table?
+A) Yes, in the console
+B) Yes, through the CLI
+C) No, DynamoDB is always encrypted
+D) Yes, but only for new tables
+
+Question 37:
+What is the difference between AWS owned keys and customer managed keys for DynamoDB?
+A) AWS owned keys are free, customer managed provide audit trail
+B) Customer managed keys are faster
+C) AWS owned keys are more secure
+D) They are the same
+
+Question 38:
+How is data encrypted in transit for DynamoDB?
+A) You must configure SSL
+B) All DynamoDB API calls use HTTPS by default
+C) Encryption in transit is not supported
+D) You need to use VPN
+
+Question 39:
+What command generates an authentication token for RDS IAM authentication?
+A) aws rds create-auth-token
+B) aws rds generate-db-auth-token
+C) aws iam get-database-token
+D) aws kms generate-token
+
+Question 40:
+A company wants to keep RDS traffic within the AWS network. What should they use?
+A) Internet Gateway
+B) NAT Gateway
+C) VPC Endpoint
+D) Direct Connect
+
+DOMAIN 6: MIXED SCENARIOS (10 Questions)
+Question 41:
+A Lambda function needs to access S3, RDS, and Secrets Manager. What is the BEST security practice?
+A) Give Lambda AdministratorAccess
+B) Create an IAM role with least privilege permissions for only these services
+C) Use root credentials
+D) Create an IAM user for the Lambda
+
+Question 42:
+Which service provides a complete audit trail of all AWS API calls?
+A) CloudWatch
+B) CloudTrail
+C) AWS Config
+D) VPC Flow Logs
+
+Question 43:
+A security team needs to ensure no S3 bucket in the organization can ever be made public. What should they do?
+A) Create a bucket policy on each bucket
+B) Enable Block Public Access at the account level
+C) Use CloudWatch alarms
+D) Create an SCP denying public buckets
+
+Question 44:
+What is defense in depth?
+A) Using only one strong security control
+B) Layering multiple security controls
+C) Encrypting data three times
+D) Having deep security knowledge
+
+Question 45:
+A company must retain CloudTrail logs for 7 years for compliance. Where should they store the logs?
+A) CloudWatch Logs
+B) S3 with Glacier Deep Archive and Object Lock
+C) DynamoDB
+D) RDS
+
+Question 46:
+Which encryption occurs without any configuration or cost?
+A) S3 default encryption
+B) EBS encryption
+C) RDS encryption
+D) DynamoDB encryption (with AWS owned keys)
+
+Question 47:
+A critical application needs 99.99% availability. Which RDS feature provides this?
+A) Read replicas
+B) Multi-AZ deployment
+C) Automated backups
+D) Encryption
+
+Question 48:
+What is the maximum retention period for RDS automated backups?
+A) 7 days
+B) 30 days
+C) 35 days
+D) 90 days
+
+Question 49:
+A company wants to detect if someone exports large amounts of data from DynamoDB. What should they use?
+A) CloudWatch metrics and alarms
+B) S3 access logs
+C) VPC Flow Logs
+D) AWS Config
+
+Question 50:
+Which compliance standard requires FIPS 140-2 Level 3 encryption?
+A) HIPAA
+B) PCI-DSS
+C) SOC 2
+D) None, it's optional for all
+
+⏱️ TIME'S UP! STOP HERE!
+
+ANSWER KEY:
+Don't look until you've answered all questions!
+<details>
+<summary>Click to reveal answers</summary>
+```
+1. C - SSE-KMS with customer managed key (audit trail + control)
+2. B - Use envelope encryption (KMS has 4KB limit)
+3. D - Both KMS and Secrets Manager auto-rotate
+4. C - Old data still decrypts, new data uses new key
+5. B - Key policy must allow the user
+6. B - CMK never leaves KMS, data key encrypts data
+7. B - Create a KMS grant (temporary, programmatic)
+8. B - Additional authentication data and audit trail
+9. B - AWS CloudHSM (single-tenant, sole control)
+10. C - Varies by region, ~5,500 requests/sec
+
+B - Secrets Manager (auto-rotation built-in)
+B - Secrets Manager $0.40/month, Parameter Store free
+B - Hierarchical paths (/env/service/param)
+B - secretsmanager:GetSecretValue
+B - Stored as AWSPREVIOUS for rollback
+C - Explicit Deny → BPA → Bucket policy + IAM
+B - Block Public Access is enabled
+B - SSE-KMS provides CloudTrail audit logs
+B - S3 Object Lock in Compliance mode
+B - Governance can be bypassed, Compliance cannot
+B - Presigned URL with expiration
+B - Simplified permissions for different access patterns
+B - x-amz-server-side-encryption: AES256
+B - Permanent deletion of object versions
+C - SSE-C (customer-provided keys)
+B - CloudHSM is FIPS Level 3, KMS is Level 2
+B - Compliance requires FIPS Level 3
+B - CloudFront and ALB (not EC2!)
+B - DNS validation (auto-renewal)
+C - No, private keys are managed by AWS
+C - Snapshot → Copy with encryption → Restore
+C - Set require_secure_transport=ON in parameter group
+B - No need to manage database passwords
+B - 15 minutes
+B - Data, backups, snapshots, and replicas
+C - No, DynamoDB is always encrypted
+A - AWS owned keys free, customer managed = audit trail
+B - All DynamoDB API calls use HTTPS by default
+B - aws rds generate-db-auth-token
+C - VPC Endpoint
+B - IAM role with least privilege
+B - CloudTrail
+B - Enable Block Public Access at account level (+ SCP is even better!)
+B - Layering multiple security controls
+B - S3 with Glacier Deep Archive and Object Lock
+D - DynamoDB encryption with AWS owned keys
+B - Multi-AZ deployment
+C - 35 days
+A - CloudWatch metrics and alarms
+D - None, it's optional (but some orgs require it)
