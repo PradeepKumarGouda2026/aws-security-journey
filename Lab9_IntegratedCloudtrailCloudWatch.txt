@@ -1,0 +1,731 @@
+LAB 45: CLOUDTRAIL + CLOUDWATCH INTEGRATION 🔗
+Now let's send CloudTrail logs to CloudWatch for real-time monitoring and alerting!
+
+Why CloudWatch Integration?
+CloudTrail to S3:
+- Long-term storage
+- Audit compliance
+- Historical analysis
+- Delayed (5-15 minutes)
+
+CloudTrail to CloudWatch:
+- Real-time alerts! ⚡
+- Metric filters
+- Automated alarms
+- Immediate response
+
+Use both together for complete solution!
+
+Lab 45.1: Enable CloudWatch Logs
+CloudTrail Console → Trails → security-audit-trail → Edit
+
+CloudWatch Logs:
+├─ ✅ Enabled
+├─ Log group:
+│   └─ New: CloudTrail/security-audit-trail
+└─ IAM role:
+    └─ New: CloudTrailRoleForCloudWatchLogs_security-audit-trail
+
+AWS will:
+1. Create CloudWatch Log Group
+2. Create IAM role for CloudTrail
+3. Start streaming logs to CloudWatch
+
+Save changes
+
+✅ CloudTrail now streams to CloudWatch!
+
+Lab 45.2: Verify Logs in CloudWatch
+CloudWatch Console → Logs → Log groups
+
+Find: CloudTrail/security-audit-trail
+
+Click on log group
+
+You'll see:
+├─ Log streams (one per region/hour)
+├─ Recent events
+└─ Real-time logs flowing
+
+Click any log stream:
+- See CloudTrail events
+- Searchable
+- Real-time (seconds delay)
+
+✅ Logs streaming to CloudWatch!
+
+Lab 45.3: Create Metric Filter - Root Login Detection
+CloudWatch Console → Log groups → CloudTrail/security-audit-trail
+
+Actions → Create metric filter
+
+Step 1: Define pattern
+
+Filter pattern:
+{ $.userIdentity.type = "Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType != "AwsServiceEvent" }
+
+This detects:
+- Root user activity
+- NOT service-initiated
+- Actual root user actions
+
+Test pattern:
+├─ Select log stream
+├─ Test pattern
+└─ Should show root user events (if any)
+
+Next
+
+Step 2: Assign metric
+
+Filter name: RootAccountUsage
+
+Metric namespace: CloudTrailMetrics
+
+Metric name: RootAccountUsageCount
+
+Metric value: 1
+
+Default value: 0
+
+Create metric filter
+
+✅ Root login detection active!
+
+Lab 45.4: Create Alarm for Root Login
+CloudWatch Console → Alarms → Create alarm
+
+Select metric:
+├─ CloudTrailMetrics
+└─ RootAccountUsageCount
+
+Conditions:
+├─ Threshold type: Static
+├─ Whenever RootAccountUsageCount is: Greater than
+└─ than: 0
+
+Next
+
+Configure actions:
+├─ Alarm state trigger: In alarm
+├─ SNS topic:
+│   ├─ Create new topic: SecurityAlerts
+│   └─ Email: your-email@example.com
+└─ Create topic
+
+Next
+
+Alarm name: RootAccountUsageAlarm
+
+Alarm description: Alert when root user is used
+
+Create alarm
+
+✅ Alarm created!
+
+Check your email:
+- AWS SNS subscription confirmation
+- Click "Confirm subscription"
+
+✅ Now you'll get email when root user logs in!
+
+Lab 45.5: Create More Metric Filters
+Failed Console Login Attempts:
+Filter pattern:
+{ $.eventName = "ConsoleLogin" && $.errorMessage = "Failed authentication" }
+
+Metric: ConsoleLoginFailures
+Alarm: > 3 in 5 minutes
+
+Detects: Brute force attempts
+
+Unauthorized API Calls:
+Filter pattern:
+{ $.errorCode = "AccessDenied" || $.errorCode = "UnauthorizedOperation" }
+
+Metric: UnauthorizedAPICalls
+Alarm: > 5 in 5 minutes
+
+Detects: Permission issues or reconnaissance
+
+S3 Bucket Policy Changes:
+Filter pattern:
+{ $.eventName = "PutBucketPolicy" || $.eventName = "DeleteBucketPolicy" || $.eventName = "PutBucketAcl" }
+
+Metric: S3BucketPolicyChanges
+Alarm: > 0
+
+Detects: Bucket permission changes
+
+IAM Policy Changes:
+Filter pattern:
+{ $.eventName = "PutUserPolicy" || $.eventName = "PutGroupPolicy" || $.eventName = "PutRolePolicy" || $.eventName = "CreatePolicy" || $.eventName = "DeletePolicy" || $.eventName = "CreatePolicyVersion" || $.eventName = "DeletePolicyVersion" || $.eventName = "AttachUserPolicy" || $.eventName = "AttachGroupPolicy" || $.eventName = "AttachRolePolicy" }
+
+Metric: IAMPolicyChanges
+Alarm: > 0
+
+Detects: Permission escalation attempts
+
+Security Group Changes:
+Filter pattern:
+{ $.eventName = "AuthorizeSecurityGroupIngress" || $.eventName = "AuthorizeSecurityGroupEgress" || $.eventName = "RevokeSecurityGroupIngress" || $.eventName = "RevokeSecurityGroupEgress" || $.eventName = "CreateSecurityGroup" || $.eventName = "DeleteSecurityGroup" }
+
+Metric: SecurityGroupChanges
+Alarm: > 0
+
+Detects: Firewall rule modifications
+
+Network Gateway Changes:
+Filter pattern:
+{ $.eventName = "CreateInternetGateway" || $.eventName = "AttachInternetGateway" || $.eventName = "DeleteInternetGateway" || $.eventName = "DetachInternetGateway" }
+
+Metric: NetworkGatewayChanges
+Alarm: > 0
+
+Detects: Network exposure changes
+
+KMS Key Deletion:
+Filter pattern:
+{ $.eventName = "DisableKey" || $.eventName = "ScheduleKeyDeletion" }
+
+Metric: KMSKeyDeletion
+Alarm: > 0
+
+Detects: Potential data loss or ransomware
+
+Lab 45.6: Create All Metric Filters (Script)
+bash#!/bin/bash
+
+LOG_GROUP="CloudTrail/security-audit-trail"
+NAMESPACE="CloudTrailMetrics"
+
+# Root account usage (already created)
+# Skipping...
+
+# Failed console logins
+aws logs put-metric-filter \
+  --log-group-name "$LOG_GROUP" \
+  --filter-name "ConsoleLoginFailures" \
+  --filter-pattern '{ $.eventName = "ConsoleLogin" && $.errorMessage = "Failed authentication" }' \
+  --metric-transformations \
+    metricName=ConsoleLoginFailures,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0
+
+# Unauthorized API calls
+aws logs put-metric-filter \
+  --log-group-name "$LOG_GROUP" \
+  --filter-name "UnauthorizedAPICalls" \
+  --filter-pattern '{ $.errorCode = "AccessDenied" || $.errorCode = "UnauthorizedOperation" }' \
+  --metric-transformations \
+    metricName=UnauthorizedAPICalls,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0
+
+# S3 bucket policy changes
+aws logs put-metric-filter \
+  --log-group-name "$LOG_GROUP" \
+  --filter-name "S3BucketPolicyChanges" \
+  --filter-pattern '{ $.eventName = "PutBucketPolicy" || $.eventName = "DeleteBucketPolicy" || $.eventName = "PutBucketAcl" }' \
+  --metric-transformations \
+    metricName=S3BucketPolicyChanges,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0
+
+# IAM policy changes
+aws logs put-metric-filter \
+  --log-group-name "$LOG_GROUP" \
+  --filter-name "IAMPolicyChanges" \
+  --filter-pattern '{ $.eventName = "PutUserPolicy" || $.eventName = "PutGroupPolicy" || $.eventName = "PutRolePolicy" || $.eventName = "CreatePolicy" || $.eventName = "DeletePolicy" }' \
+  --metric-transformations \
+    metricName=IAMPolicyChanges,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0
+
+# Security group changes
+aws logs put-metric-filter \
+  --log-group-name "$LOG_GROUP" \
+  --filter-name "SecurityGroupChanges" \
+  --filter-pattern '{ $.eventName = "AuthorizeSecurityGroupIngress" || $.eventName = "AuthorizeSecurityGroupEgress" || $.eventName = "RevokeSecurityGroupIngress" || $.eventName = "RevokeSecurityGroupEgress" }' \
+  --metric-transformations \
+    metricName=SecurityGroupChanges,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0
+
+# Network gateway changes
+aws logs put-metric-filter \
+  --log-group-name "$LOG_GROUP" \
+  --filter-name "NetworkGatewayChanges" \
+  --filter-pattern '{ $.eventName = "CreateInternetGateway" || $.eventName = "AttachInternetGateway" || $.eventName = "DeleteInternetGateway" }' \
+  --metric-transformations \
+    metricName=NetworkGatewayChanges,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0
+
+# KMS key deletion
+aws logs put-metric-filter \
+  --log-group-name "$LOG_GROUP" \
+  --filter-name "KMSKeyDeletion" \
+  --filter-pattern '{ $.eventName = "DisableKey" || $.eventName = "ScheduleKeyDeletion" }' \
+  --metric-transformations \
+    metricName=KMSKeyDeletion,metricNamespace=$NAMESPACE,metricValue=1,defaultValue=0
+
+echo "✅ All metric filters created!"
+
+# List filters
+aws logs describe-metric-filters \
+  --log-group-name "$LOG_GROUP" \
+  --query 'metricFilters[].filterName' \
+  --output table
+
+Lab 45.7: Test Metric Filters
+bash# Test by creating activity that triggers filters
+
+# 1. Test unauthorized API call
+aws s3 ls s3://bucket-you-dont-have-access-to
+
+# Wait 2-3 minutes
+# Check CloudWatch metric: UnauthorizedAPICalls
+
+# 2. Test security group change
+aws ec2 create-security-group \
+  --group-name test-metric-filter \
+  --description "Testing CloudWatch metric"
+
+# Wait 2-3 minutes
+# Check CloudWatch metric: SecurityGroupChanges
+
+# 3. View metrics
+aws cloudwatch get-metric-statistics \
+  --namespace CloudTrailMetrics \
+  --metric-name UnauthorizedAPICalls \
+  --start-time $(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum
+
+# Should show data points if triggered!
+
+✅ Metric filters working!
+```
+
+---
+
+# **LAB 46: QUERY LOGS WITH ATHENA**
+
+## **What is Athena?**
+```
+Amazon Athena:
+- SQL queries on S3 data
+- Serverless (no infrastructure)
+- Pay per query ($5 per TB scanned)
+- Perfect for CloudTrail log analysis
+
+Use cases:
+- Who accessed what data?
+- Which IPs made most API calls?
+- Failed authentication attempts
+- Compliance reports
+- Security investigations
+```
+
+---
+
+## **Lab 46.1: Set Up Athena for CloudTrail**
+```
+Athena Console → Query editor
+
+First time setup:
+├─ Settings → Manage
+├─ Query result location:
+│   └─ s3://aws-athena-query-results-ACCOUNT-REGION/
+└─ Save
+
+Note: If bucket doesn't exist, create it:
+aws s3 mb s3://aws-athena-query-results-$(aws sts get-caller-identity --query Account --output text)-us-east-1
+
+Lab 46.2: Create Athena Database and Table
+sql-- Create database
+CREATE DATABASE IF NOT EXISTS cloudtrail_logs;
+
+-- Use database
+USE cloudtrail_logs;
+
+-- Create table for CloudTrail logs
+CREATE EXTERNAL TABLE cloudtrail_logs_table (
+    eventversion STRING,
+    useridentity STRUCT
+        type:STRING,
+        principalid:STRING,
+        arn:STRING,
+        accountid:STRING,
+        invokedby:STRING,
+        accesskeyid:STRING,
+        userName:STRING,
+        sessioncontext:STRUCT
+            attributes:STRUCT
+                mfaauthenticated:STRING,
+                creationdate:STRING>,
+            sessionissuer:STRUCT<
+                type:STRING,
+                principalId:STRING,
+                arn:STRING,
+                accountId:STRING,
+                userName:STRING>>>,
+    eventtime STRING,
+    eventsource STRING,
+    eventname STRING,
+    awsregion STRING,
+    sourceipaddress STRING,
+    useragent STRING,
+    errorcode STRING,
+    errormessage STRING,
+    requestparameters STRING,
+    responseelements STRING,
+    additionaleventdata STRING,
+    requestid STRING,
+    eventid STRING,
+    resources ARRAY<STRUCT
+        ARN:STRING,
+        accountId:STRING,
+        type:STRING>>,
+    eventtype STRING,
+    apiversion STRING,
+    readonly STRING,
+    recipientaccountid STRING,
+    serviceeventdetails STRING,
+    sharedeventid STRING,
+    vpcendpointid STRING
+)
+COMMENT 'CloudTrail table for s3://cloudtrail-logs-yourname-2026'
+ROW FORMAT SERDE 'com.amazon.emr.hive.serde.CloudTrailSerde'
+STORED AS INPUTFORMAT 'com.amazon.emr.cloudtrail.CloudTrailInputFormat'
+OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+LOCATION 's3://cloudtrail-logs-yourname-2026/AWSLogs/ACCOUNT-ID/CloudTrail/';
+
+-- Replace:
+-- cloudtrail-logs-yourname-2026 with your bucket
+-- ACCOUNT-ID with your account ID (160326772135)
+Run this query in Athena
+✅ Table created!
+
+Lab 46.3: Query CloudTrail Logs
+Query 1: Recent Events
+sql-- Last 100 events
+SELECT
+    eventtime,
+    eventname,
+    useridentity.username,
+    sourceipaddress,
+    awsregion
+FROM cloudtrail_logs_table
+WHERE eventtime > '2026-02-18'
+ORDER BY eventtime DESC
+LIMIT 100;
+
+Query 2: Root User Activity
+sql-- All root user actions
+SELECT
+    eventtime,
+    eventname,
+    sourceipaddress,
+    useragent,
+    requestparameters
+FROM cloudtrail_logs_table
+WHERE useridentity.type = 'Root'
+    AND eventtime > '2026-02-01'
+ORDER BY eventtime DESC;
+
+Query 3: Failed Authentication Attempts
+sql-- Failed console logins
+SELECT
+    eventtime,
+    eventname,
+    useridentity.username,
+    sourceipaddress,
+    errormessage
+FROM cloudtrail_logs_table
+WHERE eventname = 'ConsoleLogin'
+    AND errorcode = 'Failed'
+    AND eventtime > '2026-02-01'
+ORDER BY eventtime DESC;
+
+Query 4: Unauthorized API Calls
+sql-- Access denied events
+SELECT
+    eventtime,
+    eventname,
+    useridentity.username,
+    sourceipaddress,
+    errorcode,
+    errormessage
+FROM cloudtrail_logs_table
+WHERE errorcode IN ('AccessDenied', 'UnauthorizedOperation')
+    AND eventtime > '2026-02-01'
+ORDER BY eventtime DESC
+LIMIT 100;
+
+Query 5: S3 Bucket Deletions
+sql-- Deleted S3 buckets
+SELECT
+    eventtime,
+    eventname,
+    useridentity.username,
+    sourceipaddress,
+    requestparameters
+FROM cloudtrail_logs_table
+WHERE eventname = 'DeleteBucket'
+    AND eventtime > '2026-02-01'
+ORDER BY eventtime DESC;
+
+Query 6: IAM Permission Changes
+sql-- IAM policy modifications
+SELECT
+    eventtime,
+    eventname,
+    useridentity.username,
+    sourceipaddress,
+    requestparameters
+FROM cloudtrail_logs_table
+WHERE eventname IN (
+    'PutUserPolicy',
+    'PutGroupPolicy',
+    'PutRolePolicy',
+    'AttachUserPolicy',
+    'AttachGroupPolicy',
+    'AttachRolePolicy',
+    'CreatePolicy',
+    'DeletePolicy'
+)
+AND eventtime > '2026-02-01'
+ORDER BY eventtime DESC;
+
+Query 7: Most Active Users
+sql-- Top 10 users by API call count
+SELECT
+    useridentity.username,
+    COUNT(*) as api_call_count
+FROM cloudtrail_logs_table
+WHERE eventtime > '2026-02-01'
+    AND useridentity.username IS NOT NULL
+GROUP BY useridentity.username
+ORDER BY api_call_count DESC
+LIMIT 10;
+
+Query 8: Most Common API Calls
+sql-- Top 20 API calls
+SELECT
+    eventname,
+    COUNT(*) as call_count
+FROM cloudtrail_logs_table
+WHERE eventtime > '2026-02-01'
+GROUP BY eventname
+ORDER BY call_count DESC
+LIMIT 20;
+
+Query 9: Activity by IP Address
+sql-- API calls per source IP
+SELECT
+    sourceipaddress,
+    COUNT(*) as request_count,
+    COUNT(DISTINCT eventname) as unique_apis,
+    COUNT(DISTINCT useridentity.username) as unique_users
+FROM cloudtrail_logs_table
+WHERE eventtime > '2026-02-01'
+    AND sourceipaddress IS NOT NULL
+GROUP BY sourceipaddress
+ORDER BY request_count DESC
+LIMIT 20;
+
+Query 10: After-Hours Activity
+sql-- Activity outside business hours (6 PM - 8 AM UTC)
+SELECT
+    eventtime,
+    eventname,
+    useridentity.username,
+    sourceipaddress
+FROM cloudtrail_logs_table
+WHERE eventtime > '2026-02-01'
+    AND (
+        CAST(date_format(from_iso8601_timestamp(eventtime), '%H') AS INTEGER) >= 18
+        OR CAST(date_format(from_iso8601_timestamp(eventtime), '%H') AS INTEGER) <= 8
+    )
+ORDER BY eventtime DESC
+LIMIT 100;
+```
+
+---
+
+## **Lab 46.4: Save Queries**
+```
+Athena Console → Saved queries
+
+For each query above:
+├─ Name: descriptive name
+├─ Description: what it detects
+└─ Save
+
+Examples:
+- "Security - Root User Activity"
+- "Security - Failed Logins"
+- "Security - Unauthorized Access"
+- "Compliance - IAM Changes"
+
+✅ Reusable query library!
+
+LAB 47: DETECT SUSPICIOUS ACTIVITY
+Lab 47.1: Reconnaissance Detection
+Pattern: Attacker probing for permissions
+sql-- Detect reconnaissance (many failed API calls from same IP)
+SELECT
+    sourceipaddress,
+    useridentity.username,
+    COUNT(*) as failed_attempts,
+    COUNT(DISTINCT eventname) as unique_apis_tried,
+    MIN(eventtime) as first_attempt,
+    MAX(eventtime) as last_attempt
+FROM cloudtrail_logs_table
+WHERE errorcode IN ('AccessDenied', 'UnauthorizedOperation')
+    AND eventtime > date_add('day', -1, current_timestamp)
+GROUP BY sourceipaddress, useridentity.username
+HAVING COUNT(*) > 10
+ORDER BY failed_attempts DESC;
+Red flags:
+
+Many failed attempts from same IP
+Testing multiple different APIs
+Short time window (burst)
+
+
+Lab 47.2: Privilege Escalation Detection
+sql-- Detect privilege escalation attempts
+SELECT
+    eventtime,
+    useridentity.username,
+    eventname,
+    sourceipaddress,
+    requestparameters,
+    errorcode
+FROM cloudtrail_logs_table
+WHERE eventname IN (
+    'CreateAccessKey',
+    'CreateLoginProfile',
+    'UpdateLoginProfile',
+    'AttachUserPolicy',
+    'AttachRolePolicy',
+    'PutUserPolicy',
+    'PutRolePolicy',
+    'CreatePolicy',
+    'CreatePolicyVersion',
+    'SetDefaultPolicyVersion',
+    'PassRole',
+    'UpdateAssumeRolePolicy'
+)
+AND eventtime > date_add('day', -7, current_timestamp)
+ORDER BY eventtime DESC;
+Red flags:
+
+User creating access keys for other users
+Attaching AdministratorAccess policy
+Creating login profiles for service accounts
+
+
+Lab 47.3: Data Exfiltration Detection
+sql-- Detect potential data exfiltration
+SELECT
+    eventtime,
+    eventname,
+    useridentity.username,
+    sourceipaddress,
+    requestparameters,
+    COUNT(*) OVER (
+        PARTITION BY useridentity.username, DATE(eventtime)
+        ORDER BY eventtime
+    ) as daily_count
+FROM cloudtrail_logs_table
+WHERE eventname IN (
+    'GetObject',
+    'CopyObject',
+    'CreateSnapshot',
+    'CopySnapshot',
+    'CreateDBSnapshot',
+    'CopyDBSnapshot',
+    'DownloadDBLogFilePortion',
+    'GetQueryResults'
+)
+AND eventtime > date_add('day', -1, current_timestamp)
+ORDER BY eventtime DESC
+LIMIT 100;
+Red flags:
+
+Unusual volume of GetObject calls
+Off-hours downloads
+New IP addresses
+Copying snapshots to external accounts
+
+
+Lab 47.4: Persistence Mechanism Detection
+sql-- Detect attackers establishing persistence
+SELECT
+    eventtime,
+    useridentity.username,
+    eventname,
+    sourceipaddress,
+    requestparameters
+FROM cloudtrail_logs_table
+WHERE eventname IN (
+    'CreateUser',
+    'CreateAccessKey',
+    'CreateRole',
+    'CreateFunction',  -- Lambda backdoor
+    'PutBucketPolicy', -- S3 backdoor
+    'AuthorizeSecurityGroupIngress', -- Firewall backdoor
+    'CreateNetworkAclEntry'
+)
+AND eventtime > date_add('day', -7, current_timestamp)
+ORDER BY eventtime DESC;
+Red flags:
+
+Creating users with admin permissions
+Opening port 22 to 0.0.0.0/0
+Creating Lambda functions with external triggers
+
+
+Lab 47.5: Crypto-Mining Detection
+sql-- Detect crypto-mining (large/expensive instance launches)
+SELECT
+    eventtime,
+    useridentity.username,
+    eventname,
+    sourceipaddress,
+    requestparameters
+FROM cloudtrail_logs_table
+WHERE eventname = 'RunInstances'
+    AND (
+        requestparameters LIKE '%p3.%'  -- GPU instances
+        OR requestparameters LIKE '%p4.%'
+        OR requestparameters LIKE '%g4.%'
+        OR requestparameters LIKE '%c5.24xlarge%'  -- Large CPU
+    )
+AND eventtime > date_add('day', -7, current_timestamp)
+ORDER BY eventtime DESC;
+```
+
+**Red flags:**
+- GPU instances (p3, g4)
+- Very large instances
+- Unusual regions
+- New IAM users launching instances
+
+---
+
+## **COMPLETE LAB CHECKLIST:**
+```
+☐ Lab 41: Created CloudTrail trail
+☐ Lab 42: Explored CloudTrail events
+☐ Lab 43: Enabled CloudTrail Insights
+☐ Lab 44: Log file validation
+☐ Lab 45: CloudWatch integration + 8 metric filters + alarms
+☐ Lab 46: Athena setup + 10 security queries
+☐ Lab 47: Suspicious activity detection queries
+
+EXCELLENT WORK! 🎉
+You now have complete CloudTrail mastery:
+
+✅ Trails capturing all activity
+✅ Real-time CloudWatch alerts
+✅ SQL queries for investigations
+✅ Suspicious activity detection
+✅ Log validation (tamper-proof)
+
+
+WHAT'S NEXT?
+Tomorrow: Amazon GuardDuty - AI-powered threat detection that does this automatically! 🤖
