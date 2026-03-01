@@ -397,6 +397,70 @@ LOCATION 's3://cloudtrail-logs-yourname-2026/AWSLogs/ACCOUNT-ID/CloudTrail/';
 Run this query in Athena
 ✅ Table created!
 
+
+----------------------------------------------
+Teh above Query gives an issue while running. I tried debugging it with Claude and failed everytme in generating proper synatx. However, copilot gave me corrected syntax. Here's the corrected syntax - 
+
+Key Fixes
+Added < > around STRUCT definitions properly.
+Ensured commas between fields inside STRUCT.
+Corrected capitalization consistency (username vs userName).
+Closed all nested STRUCT brackets cleanly.
+Fixed resources ARRAY<STRUCT<...>> to have proper angle brackets.
+
+
+
+CREATE TABLE cloudtrail_logs_table (
+  eventversion STRING,
+  useridentity STRUCT<
+    type:STRING,
+    principalid:STRING,
+    arn:STRING,
+    accountid:STRING,
+    invokedby:STRING,
+    accesskeyid:STRING,
+    username:STRING,
+    sessioncontext:STRUCT<
+      attributes:STRUCT<
+        mfaauthenticated:STRING,
+        creationdate:STRING>,
+      sessionissuer:STRUCT<
+        type:STRING,
+        principalid:STRING,
+        arn:STRING,
+        accountid:STRING,
+        username:STRING>>>,
+  eventtime STRING,
+  eventsource STRING,
+  eventname STRING,
+  awsregion STRING,
+  sourceipaddress STRING,
+  useragent STRING,
+  errorcode STRING,
+  errormessage STRING,
+  requestparameters STRING,
+  responseelements STRING,
+  additionaleventdata STRING,
+  requestid STRING,
+  eventid STRING,
+  resources ARRAY<STRUCT<
+    arn:STRING,
+    accountid:STRING,
+    type:STRING>>,
+  eventtype STRING,
+  apiversion STRING,
+  readonly STRING,
+  recipientaccountid STRING,
+  serviceeventdetails STRING,
+  sharedeventid STRING,
+  vpcendpointid STRING
+)
+ROW FORMAT SERDE 'org.apache.hive.hcatalog.data.JsonSerDe'
+STORED AS INPUTFORMAT 'com.amazon.emr.cloudtrail.CloudTrailInputFormat'
+OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+LOCATION 's3://cloudtrail-logs-yourname-2026/AWSLogs/<Acc_number>/CloudTrail/';
+------------------------------------------------------------------------------------------------
+
 Lab 46.3: Query CloudTrail Logs
 Query 1: Recent Events
 sql-- Last 100 events

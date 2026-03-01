@@ -1,0 +1,192 @@
+Amazon GuardDuty = AI-powered threat detection
+
+What it does:
+🤖 Analyzes CloudTrail, VPC Flow Logs, DNS logs
+🤖 Uses machine learning to detect threats
+🤖 Finds: Compromised instances, reconnaissance,
+   credential theft, cryptocurrency mining, data exfiltration
+
+Findings types:
+├─ Backdoor (compromised EC2)
+├─ Behavior (unusual API calls)
+├─ CryptoCurrency (Bitcoin mining)
+├─ PenTest (Kali Linux detected)
+├─ Policy (IAM unusual behavior)
+├─ PrivilegeEscalation (attacker gaining access)
+├─ Recon (port scanning, network probing)
+├─ ResourceConsumption (unusual usage)
+├─ Stealth (hiding tracks)
+├─ Trojan (malware detected)
+└─ UnauthorizedAccess (stolen credentials)
+
+Best part: NO agents, NO infrastructure, AUTOMATIC!
+Just enable and it starts protecting! 🛡️
+
+
+WEEK 3 SUCCESS METRICS:
+By Feb 24 (end of Week 3), you will:
+
+✅ Understand all major detection services
+✅ Know when to use GuardDuty vs Macie vs Inspector
+✅ Create automated threat response workflows
+✅ Configure Security Hub as central dashboard
+✅ Complete 25+ hands-on labs
+✅ Score 80%+ on Week 3 practice exam
+✅ Be at 50% of total certification progress
+✅ Have strong foundation for Week 4
+
+AND you'll do it sustainably! (14-18 hrs, not 28 hrs)
+
+--------------------
+GuardDuty Introduction (60 min)
+Watch Stephane's Course:
+└─ Amazon GuardDuty section (~40 min at 1.5x)
+
+Read AWS GuardDuty documentation:
+└─ What is GuardDuty (10 min)
+└─ How it works (10 min)
+
+Take notes on:
+- What GuardDuty detects
+- How it uses ML/AI
+- Finding types
+- Pricing ($4/month + usage)
+
+MONDAY MARCH 3: GUARDDUTY HANDS-ON
+Time: 3 hours
+Lab 48: Enable GuardDuty
+Lab 49: Generate Sample Findings
+Lab 50: Explore Finding Types
+Lab 51: Suppress Findings
+Lab 52: EventBridge Integration
+Lab 53: Automated SNS Alerts
+
+Complete GuardDuty mastery!
+
+TUESDAY MARCH 4: MACIE
+Time: 2.5 hours
+Hour 1: Theory (Stephane's course + docs)
+Hour 2: Hands-on labs (enable, discovery jobs, findings)
+
+Complete Macie understanding!
+
+WEDNESDAY MARCH 5: AWS INSPECTOR
+Time: 2.5 hours
+Hour 1: Theory (vulnerability scanning, CVEs)
+Hour 2: Hands-on labs (enable, scan EC2, review findings)
+
+Complete Inspector understanding!
+
+THURSDAY MARCH 6: SECURITY HUB
+Time: 3 hours
+Hour 1: Theory (central dashboard, standards)
+Hour 2-3: Hands-on labs (enable, configure, integrate all services)
+
+This ties everything together!
+
+FRIDAY MARCH 7: CLOUDWATCH FOR SECURITY
+Time: 2.5 hours
+Hour 1: Theory (logs, metrics, alarms, insights)
+Hour 2: Hands-on labs (log analysis, metric filters, anomaly detection)
+
+Complete monitoring!
+
+SATURDAY MARCH 8: WEEK 3 REVIEW
+Time: 2 hours
+Hour 1: Review all Week 3 services
+Hour 2: Create comparison matrix
+Optional: Practice questions
+
+SUNDAY MARCH 9: REST DAY 🌴
+NO STUDY
+
+Week 3 complete!
+Prepare for Week 4.
+
+WEEK 3 SUMMARY (MAR 1-9):
+Study Days: 6 days (Sat, Mon-Fri, Sat)
+Rest Days: 2 days (Sun, Sun)
+Total Hours: ~17 hours
+Services: GuardDuty, Macie, Inspector, Security Hub, CloudWatch
+
+Pace: Sustainable
+Progress by end: 50% of certification
+
+COMPLETE UPDATED ROADMAP TO CERTIFICATION:
+WEEK 4 (MAR 10-16): NETWORK SECURITY
+Topics:
+- VPC Security (Security Groups, NACLs)
+- VPC Flow Logs
+- AWS Network Firewall
+- AWS WAF & Shield
+- Route 53 security
+
+Hours: 15-18
+WEEK 5 (MAR 17-23): APPLICATION SECURITY
+Topics:
+- Cognito (authentication)
+- API Gateway security
+- Lambda security
+- ECS/EKS security
+- Secrets in containers
+
+Hours: 15-18
+WEEK 6 (MAR 24-30): COMPLIANCE & GOVERNANCE
+Topics:
+- AWS Config
+- AWS Organizations
+- Control Tower
+- Service Catalog
+- Artifact
+
+Hours: 15-18
+WEEK 7 (MAR 31 - APR 6): INCIDENT RESPONSE
+Topics:
+- Incident response playbooks
+- Forensics
+- Systems Manager
+- Automated remediation
+- Real-world scenarios
+
+Hours: 15-18
+WEEK 8 (APR 7-13): PRACTICE EXAMS
+Topics:
+- Full practice exams (3-4)
+- Review weak areas
+- Flashcards
+- Last-minute topics
+
+Hours: 15-18
+WEEK 9 (APR 14-20): FINAL PREP
+Topics:
+- Final review
+- Exam readiness
+- Practice questions
+- Mental preparation
+
+Hours: 10-15
+WEEK 10 (APR 21-27): BUFFER WEEK
+Topics:
+- Extra review if needed
+- OR take exam early
+- OR rest before exam
+
+Hours: Flexible
+EXAM WEEK (APR 28 - MAY 10)
+Schedule exam
+Take exam
+PASS! 🎉
+
+ADJUSTED COMPLETION DATE:
+Original: April 7, 2026
+Updated: May 1-10, 2026
+
+Reason for change:
+✅ Sustainable pace (no burnout)
+✅ Built-in rest days (better retention)
+✅ Flexibility for life events
+✅ Higher pass probability (quality over speed)
+
+You're still finishing in 10 weeks total!
+Most people take 16-20 weeks.
+You're still FAST! 🚀
