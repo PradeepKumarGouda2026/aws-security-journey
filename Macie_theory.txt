@@ -1,4 +1,8 @@
-AMAZON MACIE - SENSITIVE DATA DISCOVERY! 🔍Welcome to one of the coolest security services - finding secrets hidden in S3!TODAY'S PLAN (2.5 HOURS):Hour 1: Macie Theory + What It Does (45 min)
+DAY 17: AMAZON MACIE - SENSITIVE DATA DISCOVERY! 🔍
+Welcome to one of the coolest security services - finding secrets hidden in S3!
+
+TODAY'S PLAN (2.5 HOURS):
+Hour 1: Macie Theory + What It Does (45 min)
 Hour 2-3: Hands-On Labs (90 min)
 
 Labs:
@@ -6,7 +10,11 @@ Labs:
 ├─ Lab 54: Create Sample Data (with secrets!)
 ├─ Lab 55: Run Discovery Job
 ├─ Lab 56: Analyze Findings
-└─ Lab 57: Custom Data Identifiers (bonus)PART 1: WHAT IS AMAZON MACIE? (15 MIN)The Problem:Your company has 1000s of S3 buckets:
+└─ Lab 57: Custom Data Identifiers (bonus)
+
+PART 1: WHAT IS AMAZON MACIE? (15 MIN)
+The Problem:
+Your company has 1000s of S3 buckets:
 ├─ Old backups from 2018
 ├─ Log files everywhere
 ├─ Uploaded customer data
@@ -20,7 +28,9 @@ Questions you can't answer:
 ❓ Which buckets contain health records?
 ❓ Which buckets are accidentally public?
 
-Manual search: IMPOSSIBLE (millions of files)The Solution: Amazon MacieAmazon Macie = AI-powered data detective 🔍
+Manual search: IMPOSSIBLE (millions of files)
+The Solution: Amazon Macie
+Amazon Macie = AI-powered data detective 🔍
 
 What it does:
 ✅ Scans ALL your S3 buckets automatically
@@ -30,7 +40,10 @@ What it does:
 ✅ Monitors continuously
 ✅ Sends alerts
 
-It's like having a security auditor working 24/7!How Macie Works:┌─────────────────────────────────────────┐
+It's like having a security auditor working 24/7!
+
+How Macie Works:
+┌─────────────────────────────────────────┐
 │         Your S3 Buckets                 │
 │  ├─ customer-uploads/                   │
 │  ├─ backup-2020/                        │
@@ -79,7 +92,10 @@ It's like having a security auditor working 24/7!How Macie Works:┌────
         ┌─────────────────────┐
         │  EventBridge        │
         │  (Alerts)           │
-        └─────────────────────┘What Macie Can Find:1. Financial Data:
+        └─────────────────────┘
+
+What Macie Can Find:
+1. Financial Data:
 Credit Card Numbers:
 ├─ Visa: 4111-1111-1111-1111
 ├─ MasterCard: 5500-0000-0000-0004
@@ -94,7 +110,9 @@ Bank Account Numbers:
 Financial Information:
 ├─ Tax IDs
 ├─ Investment accounts
-└─ Payment data2. Personal Identifiable Information (PII):
+└─ Payment data
+
+2. Personal Identifiable Information (PII):
 US-Specific:
 ├─ Social Security Numbers (SSN): 123-45-6789
 ├─ Driver's License Numbers
@@ -111,14 +129,18 @@ Contact Information:
 ├─ Email addresses
 ├─ Phone numbers
 ├─ Mailing addresses
-└─ Names with context3. Protected Health Information (PHI):
+└─ Names with context
+
+3. Protected Health Information (PHI):
 HIPAA-regulated data:
 ├─ Patient names with medical context
 ├─ Medical record numbers
 ├─ Health insurance IDs
 ├─ Prescription information
 ├─ Diagnosis codes (ICD-10)
-└─ Treatment records4. Credentials & Secrets:
+└─ Treatment records
+
+4. Credentials & Secrets:
 AWS Credentials:
 ├─ Access Keys: AKIA...
 ├─ Secret Keys
@@ -129,7 +151,9 @@ Other Credentials:
 ├─ API keys
 ├─ Passwords in files
 ├─ Database connection strings
-└─ OAuth tokens5. Technical Identifiers:
+└─ OAuth tokens
+
+5. Technical Identifiers:
 Network:
 ├─ IP addresses
 ├─ MAC addresses
@@ -138,7 +162,10 @@ Network:
 System:
 ├─ Usernames
 ├─ Session IDs
-└─ Device IDsMacie Managed Data Identifiers:Macie includes 100+ built-in identifiers:
+└─ Device IDs
+
+Macie Managed Data Identifiers:
+Macie includes 100+ built-in identifiers:
 
 Geographic Categories:
 ├─ US (SSN, Driver's License, etc.)
@@ -156,7 +183,11 @@ Generic Categories:
 ├─ Phone numbers
 ├─ IP addresses
 ├─ AWS credentials
-└─ Private keysMacie Findings:Sensitive Data Findings:Finding: Multiple credit card numbers found
+└─ Private keys
+
+Macie Findings:
+Sensitive Data Findings:
+Finding: Multiple credit card numbers found
 
 Details:
 ├─ Bucket: customer-uploads
@@ -171,7 +202,10 @@ Recommendation:
 - Encrypt the object
 - Move to restricted bucket
 - Enable access logging
-- Review who accessed itPolicy Findings:Finding: S3 bucket is publicly accessible
+- Review who accessed it
+
+Policy Findings:
+Finding: S3 bucket is publicly accessible
 
 Details:
 ├─ Bucket: backup-2020
@@ -184,7 +218,10 @@ Details:
 Recommendation:
 - Enable Block Public Access immediately
 - Review bucket policy
-- Check CloudTrail for unauthorized accessMacie Pricing:Bucket Inventory:
+- Check CloudTrail for unauthorized access
+
+Macie Pricing:
+Bucket Inventory:
 ├─ First 1,000 buckets: FREE for 30 days
 └─ After: $0.10 per bucket per month
 
@@ -206,7 +243,10 @@ Typical costs:
 ✅ First 1 GB scanning free
 ✅ All features included
 
-⚠️ Expensive for continuous use!Macie vs Other Services:┌────────────┬──────────────┬──────────────┬──────────────┐
+⚠️ Expensive for continuous use!
+
+Macie vs Other Services:
+┌────────────┬──────────────┬──────────────┬──────────────┐
 │  Service   │   Macie      │  GuardDuty   │  Inspector   │
 ├────────────┼──────────────┼──────────────┼──────────────┤
 │ Purpose    │Data discovery│Threat detect │Vulnerabilty  │
@@ -231,7 +271,10 @@ Typical costs:
 │            │data audits   │threats       │security      │
 └────────────┴──────────────┴──────────────┴──────────────┘
 
-Use together for complete security!When to Use Macie:✅ Use Macie for:
+Use together for complete security!
+
+When to Use Macie:
+✅ Use Macie for:
 - GDPR compliance (find personal data)
 - HIPAA compliance (find health data)
 - PCI-DSS compliance (find payment data)
