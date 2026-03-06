@@ -1,0 +1,294 @@
+DAY 18: AWS INSPECTOR - VULNERABILITY SCANNING! 🛡️Let's find security vulnerabilities before attackers do!TODAY'S PLAN (2.5 HOURS):Hour 1: Inspector Theory + How It Works (45 min)
+Hour 2-3: Hands-On Labs (90 min)
+
+Labs:
+├─ Lab 58: Enable Inspector
+├─ Lab 59: Launch EC2 and Scan for Vulnerabilities
+├─ Lab 60: Scan Container Images (ECR)
+├─ Lab 61: Analyze Findings & Remediation
+└─ Lab 62: Suppress Findings & Continuous MonitoringPART 1: WHAT IS AWS INSPECTOR? (15 MIN)The Problem:Your infrastructure has vulnerabilities:
+├─ EC2 instances with outdated software
+├─ Container images with known CVEs
+├─ Lambda functions with vulnerable dependencies
+├─ Network misconfigurations
+└─ Missing security patches
+
+Attackers exploit these vulnerabilities:
+├─ Remote code execution (RCE)
+├─ Privilege escalation
+├─ Data exfiltration
+├─ Denial of service
+└─ Complete system compromise
+
+Manual scanning: Time-consuming, error-prone, outdated quicklyThe Solution: AWS InspectorAWS Inspector = Automated vulnerability scanner 🔍
+
+What it does:
+✅ Continuously scans EC2, ECR, Lambda
+✅ Finds CVEs (Common Vulnerabilities and Exposures)
+✅ Finds package vulnerabilities
+✅ Finds network exposure issues
+✅ Provides severity scores (CVSS)
+✅ Gives remediation guidance
+✅ Integrates with Security Hub
+✅ Runs automatically (no agents needed!)
+
+It's like having a security researcher scanning 24/7!How Inspector Works:┌─────────────────────────────────────────┐
+│         Your Resources                  │
+│  ├─ EC2 Instances (Amazon Linux, Ubuntu)│
+│  ├─ Container Images (ECR)              │
+│  └─ Lambda Functions (Python, Node.js)  │
+└─────────────────┬───────────────────────┘
+                  ↓
+        ┌─────────────────────┐
+        │  Enable Inspector   │
+        │  (1 click)          │
+        └─────────┬───────────┘
+                  ↓
+        ┌─────────────────────┐
+        │  SSM Agent          │
+        │  (auto-installed on │
+        │  Amazon Linux 2023) │
+        └─────────┬───────────┘
+                  ↓
+        ┌─────────────────────┐
+        │  Inventory Scan     │
+        │  - List packages    │
+        │  - Check versions   │
+        │  - Network config   │
+        └─────────┬───────────┘
+                  ↓
+        ┌─────────────────────┐
+        │  CVE Database       │
+        │  (NVD + Amazon)     │
+        │  - 200,000+ CVEs    │
+        │  - Daily updates    │
+        └─────────┬───────────┘
+                  ↓
+        ┌─────────────────────┐
+        │     Findings        │
+        │  - CVE ID           │
+        │  - Severity (0-10)  │
+        │  - Affected package │
+        │  - Remediation      │
+        └─────────┬───────────┘
+                  ↓
+        ┌─────────────────────┐
+        │  Security Hub       │
+        │  EventBridge        │
+        └─────────────────────┘What Inspector Scans:1. EC2 Instances:
+Operating Systems Supported:
+├─ Amazon Linux 2
+├─ Amazon Linux 2023
+├─ Ubuntu 18.04, 20.04, 22.04
+├─ CentOS 7, 8
+├─ Red Hat Enterprise Linux 7, 8, 9
+└─ Windows Server 2016, 2019, 2022
+
+What it finds:
+├─ CVEs in OS packages
+├─ Outdated software
+├─ Missing patches
+├─ Network exposure (open ports, 0.0.0.0/0)
+└─ Common misconfigurations
+
+Requirements:
+├─ SSM Agent installed (auto on Amazon Linux 2023)
+├─ Instance has IAM role with SSM permissions
+└─ Systems Manager Session Manager recommended2. Container Images (ECR):
+Scans:
+├─ Base OS vulnerabilities
+├─ Application dependencies
+├─ Programming language packages
+│   ├─ Python (pip)
+│   ├─ Node.js (npm)
+│   ├─ Java (Maven, Gradle)
+│   ├─ Ruby (gems)
+│   └─ Go modules
+
+What it finds:
+├─ CVEs in container layers
+├─ Vulnerable dependencies
+├─ Outdated packages
+└─ Security best practice violations
+
+Automatic scanning:
+├─ On push (continuous)
+├─ On schedule (re-scan regularly)
+└─ Enhanced scanning (deep analysis)3. Lambda Functions:
+Scans:
+├─ Runtime vulnerabilities
+├─ Application dependencies
+├─ Layers
+└─ Code packages
+
+Supported runtimes:
+├─ Python 3.7, 3.8, 3.9, 3.10, 3.11
+├─ Node.js 12.x, 14.x, 16.x, 18.x, 20.x
+├─ Java 8, 11, 17, 21
+└─ Ruby 2.7, 3.2
+
+What it finds:
+├─ Vulnerable npm packages
+├─ Vulnerable pip packages
+├─ Outdated dependencies
+└─ Known CVEs in runtimeCVE Severity Scores (CVSS):CVSS = Common Vulnerability Scoring System (0.0 - 10.0)
+
+None: 0.0
+└─ No vulnerability
+
+Low: 0.1 - 3.9 🟢
+├─ Minor impact
+├─ Example: Information disclosure
+└─ Remediate: When convenient
+
+Medium: 4.0 - 6.9 🟡
+├─ Moderate impact
+├─ Example: Denial of service
+└─ Remediate: Within 30 days
+
+High: 7.0 - 8.9 🟠
+├─ Significant impact
+├─ Example: Remote code execution (with auth)
+└─ Remediate: Within 7 days
+
+Critical: 9.0 - 10.0 🔴
+├─ Severe impact
+├─ Example: Unauthenticated RCE
+└─ Remediate: IMMEDIATELY (same day)
+
+Inspector uses CVSS v3.1 scoringFinding Types:1. Package Vulnerability:
+Finding: CVE-2023-1234 in OpenSSL
+
+Details:
+├─ CVE ID: CVE-2023-1234
+├─ CVSS Score: 9.8 (Critical) 🔴
+├─ Package: openssl
+├─ Installed version: 1.1.1k
+├─ Fixed version: 1.1.1u
+├─ Affected resource: i-abc123...
+├─ First seen: 2026-03-03 10:00:00
+└─ Status: ACTIVE
+
+Description:
+"Remote attackers can execute arbitrary code via
+crafted SSL/TLS handshake"
+
+Remediation:
+1. Update OpenSSL: sudo yum update openssl
+2. Reboot instance if kernel updated
+3. Verify patch: openssl version
+4. Expected: OpenSSL 1.1.1u or later
+
+References:
+├─ https://nvd.nist.gov/vuln/detail/CVE-2023-1234
+├─ https://www.openssl.org/news/secadv/...
+└─ https://access.redhat.com/security/cve/...2. Network Reachability:
+Finding: Network path allows broad access
+
+Details:
+├─ Type: Network Reachability
+├─ Severity: Medium 🟡
+├─ Instance: i-abc123...
+├─ Port: 22 (SSH)
+├─ Protocol: TCP
+├─ Security Group: sg-xyz789
+└─ Issue: Allows 0.0.0.0/0 (entire internet)
+
+Risk:
+"SSH port exposed to the internet increases
+attack surface for brute force attempts"
+
+Remediation:
+1. Restrict security group to known IPs only
+2. Or use Systems Manager Session Manager
+3. Or use bastion host with strict access
+4. Enable MFA for SSH if keeping open
+
+Impact:
+├─ Brute force attacks
+├─ Credential stuffing
+├─ Potential unauthorized access
+└─ Compliance violations (CIS Benchmark)3. Code Vulnerability (Lambda/ECR):
+Finding: Vulnerable dependency in Lambda
+
+Details:
+├─ CVE ID: CVE-2024-5678
+├─ CVSS: 7.5 (High) 🟠
+├─ Function: DataProcessorFunction
+├─ Runtime: Python 3.9
+├─ Package: requests
+├─ Installed: 2.25.0
+├─ Fixed: 2.31.0
+└─ Vulnerability: Server-Side Request Forgery (SSRF)
+
+Description:
+"The requests library allows SSRF attacks via
+improper URL validation"
+
+Remediation:
+1. Update requirements.txt:
+   requests>=2.31.0
+2. Redeploy Lambda function
+3. Test application functionality
+4. Monitor for regressions
+
+Automated fix:
+Inspector can create Lambda layer with patched versionInspector Pricing:EC2 Scanning:
+├─ First 100 EC2 instances: $1.25 per instance per month
+├─ 101-1,000 instances: $0.85 per instance per month
+└─ Over 1,000 instances: $0.62 per instance per month
+
+ECR Image Scanning:
+├─ First scan per image: $0.09 per scan
+├─ Re-scan: FREE (monthly)
+└─ Enhanced scanning: Additional $0.01/image/day
+
+Lambda Scanning:
+├─ Per function per month: $0.30
+└─ Automatic, continuous
+
+Typical costs:
+├─ Small (10 EC2, 5 containers): ~$15/month
+├─ Medium (100 EC2, 50 containers): ~$90/month
+└─ Large (1000 EC2, 500 containers): ~$650/month
+
+15-day FREE trial!Inspector vs Other Services:┌────────────┬──────────────┬──────────────┬──────────────┐
+│  Service   │  Inspector   │  GuardDuty   │    Macie     │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Purpose    │Vulnerability │Threat detect │Data discovery│
+│            │scanning      │              │              │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Scans      │EC2, ECR,     │CloudTrail,   │S3 objects    │
+│            │Lambda        │VPC Flow, DNS │(content)     │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Finds      │CVEs, vulns,  │Compromised   │PII, PHI,     │
+│            │misconfigs    │instances     │credentials   │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Continuous │     ✅       │     ✅       │     ❌       │
+│            │              │              │(job-based)   │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Agent      │SSM Agent     │None          │None          │
+│            │(auto)        │              │              │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Cost       │$1-15/mo      │$4-10/mo      │$100+/mo      │
+│            │per resource  │              │              │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Best for   │Patch mgmt,   │Runtime       │Compliance,   │
+│            │compliance    │threats       │data audits   │
+└────────────┴──────────────┴──────────────┴──────────────┘
+
+Use together: Complete security coverage!When to Use Inspector:✅ Use Inspector for:
+- Finding software vulnerabilities (CVEs)
+- Patch management
+- Container security scanning
+- Compliance (PCI-DSS, HIPAA, SOC 2)
+- Continuous assessment
+- Pre-production scanning
+- Security posture monitoring
+
+✅ Enable Inspector when:
+- Running EC2 instances (always!)
+- Using containers (ECR)
+- Deploying Lambda functions
+- Need compliance evidence
+- Want automated scanning
