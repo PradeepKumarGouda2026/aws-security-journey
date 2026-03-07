@@ -550,6 +550,164 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
+
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+FOllowing error is noticed - 
+
+~ $ docker build -t inspector-test-app .
+[+] Building 0.0s (1/1) FINISHED                                                                                                                                                                     docker:default
+ => [internal] load build definition from Dockerfile                                                                                                                                                           0.0s
+ => => transferring dockerfile: 394B                                                                                                                                                                           0.0s
+Dockerfile:5
+--------------------
+   3 |     # Install deliberately outdated packages with known vulnerabilities
+   4 |     RUN pip install --no-cache-dir \\
+   5 | >>>     flask==1.1.1 \\
+   6 |         requests==2.20.0 \\
+   7 |         urllib3==1.24.1 \\
+--------------------
+ERROR: failed to solve: dockerfile parse error on line 5: unknown instruction: flask==1.1.1
+~ $ 
+
+
+corrected cpde with o/p sample - 
+
+
+~ $ aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $REPO
+WARNING! Your password will be stored unencrypted in /home/cloudshell-user/.docker/config.json.
+Configure a credential helper to remove this warning. See
+https://docs.docker.com/engine/reference/commandline/login/#credentials-store
+
+Login Succeeded
+~ $ docker build -t insepctor-test.app
+ERROR: "docker buildx build" requires exactly 1 argument.
+See 'docker buildx build --help'.
+
+Usage:  docker buildx build [OPTIONS] PATH | URL | -
+
+Start a build
+~ $ docker build -t insepctor-test-app
+ERROR: "docker buildx build" requires exactly 1 argument.
+See 'docker buildx build --help'.
+
+Usage:  docker buildx build [OPTIONS] PATH | URL | -
+
+Start a build
+~ $ docker build -t insepctor-test-app .
+[+] Building 0.1s (1/1) FINISHED                                                                                                                                                                     docker:default
+ => [internal] load build definition from Dockerfile                                                                                                                                                           0.0s
+ => => transferring dockerfile: 394B                                                                                                                                                                           0.0s
+Dockerfile:5
+--------------------
+   3 |     # Install deliberately outdated packages with known vulnerabilities
+   4 |     RUN pip install --no-cache-dir \\
+   5 | >>>     flask==1.1.1 \\
+   6 |         requests==2.20.0 \\
+   7 |         urllib3==1.24.1 \\
+--------------------
+ERROR: failed to solve: dockerfile parse error on line 5: unknown instruction: flask==1.1.1
+~ $ 
+~ $ 
+~ $ docker build -t inspector-test-app .
+[+] Building 0.0s (1/1) FINISHED                                                                                                                                                                     docker:default
+ => [internal] load build definition from Dockerfile                                                                                                                                                           0.0s
+ => => transferring dockerfile: 394B                                                                                                                                                                           0.0s
+Dockerfile:5
+--------------------
+   3 |     # Install deliberately outdated packages with known vulnerabilities
+   4 |     RUN pip install --no-cache-dir \\
+   5 | >>>     flask==1.1.1 \\
+   6 |         requests==2.20.0 \\
+   7 |         urllib3==1.24.1 \\
+--------------------
+ERROR: failed to solve: dockerfile parse error on line 5: unknown instruction: flask==1.1.1
+~ $ # Create Dockerfile WITHOUT line continuation issues
+~ $ cat > Dockerfile << 'EOF'
+> FROM python:3.9-slim
+> 
+> # Install deliberately outdated packages with known vulnerabilities
+> RUN pip install --no-cache-dir flask==1.1.1 requests==2.20.0 urllib3==1.24.1 jinja2==2.10.1
+> 
+> # Copy app code
+> COPY app.py /app/app.py
+> WORKDIR /app
+> 
+> # Run app
+> CMD ["python", "app.py"]
+> EOF
+~ $ 
+~ $ # Verify the file
+~ $ cat Dockerfile
+FROM python:3.9-slim
+
+# Install deliberately outdated packages with known vulnerabilities
+RUN pip install --no-cache-dir flask==1.1.1 requests==2.20.0 urllib3==1.24.1 jinja2==2.10.1
+
+# Copy app code
+COPY app.py /app/app.py
+WORKDIR /app
+
+# Run app
+CMD ["python", "app.py"]
+~ $ 
+~ $ 
+~ $ cat Dockerfile 
+FROM python:3.9-slim
+
+# Install deliberately outdated packages with known vulnerabilities
+RUN pip install --no-cache-dir flask==1.1.1 requests==2.20.0 urllib3==1.24.1 jinja2==2.10.1
+
+# Copy app code
+COPY app.py /app/app.py
+WORKDIR /app
+
+# Run app
+CMD ["python", "app.py"]
+~ $ 
+~ $ cat app.py 
+from flask import Flask
+app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    return "Hello from vulnerable container!"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+~ $ docker build -t inspector-test-app .
+[+] Building 14.4s (9/9) FINISHED                                                                                                                                                                    docker:default
+ => [internal] load build definition from Dockerfile                                                                                                                                                           0.0s
+ => => transferring dockerfile: 366B                                                                                                                                                                           0.0s
+ => [internal] load metadata for docker.io/library/python:3.9-slim                                                                                                                                             0.4s
+ => [internal] load .dockerignore                                                                                                                                                                              0.0s
+ => => transferring context: 2B                                                                                                                                                                                0.0s
+ => [1/4] FROM docker.io/library/python:3.9-slim@sha256:2d97f6910b16bd338d3060f261f53f144965f755599aab1acda1e13cf1731b1b                                                                                       6.0s
+ => => resolve docker.io/library/python:3.9-slim@sha256:2d97f6910b16bd338d3060f261f53f144965f755599aab1acda1e13cf1731b1b                                                                                       0.0s
+ => => sha256:2d97f6910b16bd338d3060f261f53f144965f755599aab1acda1e13cf1731b1b 10.36kB / 10.36kB                                                                                                               0.0s
+ => => sha256:dad5b29e3506c35e0fd222736f4d4ef25d21b219acdd73f7bb41d59996ca8e0d 1.74kB / 1.74kB                                                                                                                 0.0s
+ => => sha256:085da638e1b8a449514c3fda83ff50a3bffae4418b050cfacd87e5722071f497 5.40kB / 5.40kB                                                                                                                 0.0s
+ => => sha256:38513bd7256313495cdd83b3b0915a633cfa475dc2a07072ab2c8d191020ca5d 29.78MB / 29.78MB                                                                                                               0.5s
+ => => sha256:b3ec39b36ae8c03a3e09854de4ec4aa08381dfed84a9daa075048c2e3df3881d 1.29MB / 1.29MB                                                                                                                 0.1s
+ => => sha256:fc74430849022d13b0d44b8969a953f842f59c6e9d1a0c2c83d710affa286c08 13.88MB / 13.88MB                                                                                                               0.3s
+ => => sha256:ea56f685404adf81680322f152d2cfec62115b30dda481c2c450078315beb508 251B / 251B                                                                                                                     0.2s
+ => => extracting sha256:38513bd7256313495cdd83b3b0915a633cfa475dc2a07072ab2c8d191020ca5d                                                                                                                      2.2s
+ => => extracting sha256:b3ec39b36ae8c03a3e09854de4ec4aa08381dfed84a9daa075048c2e3df3881d                                                                                                                      0.5s
+ => => extracting sha256:fc74430849022d13b0d44b8969a953f842f59c6e9d1a0c2c83d710affa286c08                                                                                                                      1.7s
+ => => extracting sha256:ea56f685404adf81680322f152d2cfec62115b30dda481c2c450078315beb508                                                                                                                      0.0s
+ => [internal] load build context                                                                                                                                                                              0.0s
+ => => transferring context: 279B                                                                                                                                                                              0.0s
+ => [2/4] RUN pip install --no-cache-dir flask==1.1.1 requests==2.20.0 urllib3==1.24.1 jinja2==2.10.1                                                                                                          4.7s
+ => [3/4] COPY app.py /app/app.py                                                                                                                                                                              0.8s 
+ => [4/4] WORKDIR /app                                                                                                                                                                                         0.9s 
+ => exporting to image                                                                                                                                                                                         1.6s 
+ => => exporting layers                                                                                                                                                                                        1.6s 
+ => => writing image sha256:26216d550a1ae5a918fcf0045b9ca17b7414d88ca65eea9deea54f70598355bc                                                                                                                   0.0s 
+ => => naming to docker.io/library/inspector-test-app                                                                                                                                                          0.0s 
+~ $ 
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+
 ✅ Vulnerable container files created!
 
 Lab 60.3: Build and Push Image
@@ -773,7 +931,28 @@ RUN pip install --no-cache-dir \\
     urllib3==2.1.0 \\
     jinja2==3.1.2
 
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+Corrected -  
+~ $ cat > Dockerfile << 'EOF'
+FROM python:3.11-slim
+
+# Install FIXED versions (no known vulnerabilities)
+RUN pip install --no-cache-dir flask==3.0.0 requests==2.31.0  urllib3==2.1.0  jinja2==3.1.2
+              
 COPY app.py /app/app.py
+WORKDIR /app
+            
+CMD ["python", "app.py"]
+EOF                     
+~ $ 
+
+COPY app.py /app/app.py
+
+
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+
 WORKDIR /app
 
 CMD ["python", "app.py"]
@@ -1069,8 +1248,7 @@ aws iam delete-role --role-name InspectorTestRole
 # 5. Disable Inspector (optional - saves money)
 # Note: You lose findings history if you disable!
 
-aws inspector2 disable \
-  --resource-types EC2 ECR LAMBDA
+aws inspector2 disable --resource-types EC2 ECR LAMBDA CODE_REPOSITORY
 
 # Or keep Inspector enabled (recommended!)
 # Cost: ~$1-2/month for scanning (if no resources)
@@ -1599,3 +1777,38 @@ This is IMPRESSIVE work! 🏆
 You just learned how to find and fix vulnerabilities like a pro! 
 
 **Ready for Security Hub, or taking a break?** Let me know! 😊✨
+
+
+------------------------------------------------------------------------------------------------
+### Lab 60: ECR Container Scanning (Conceptual)
+
+**What would happen:**
+1. Create Dockerfile with old packages (flask==1.1.1, etc.)
+2. Build image: docker build -t inspector-test-app
+3. Push to ECR: docker push REPO:v1.0
+4. Inspector automatically scans on push
+5. Findings appear in 2-5 minutes
+
+**Expected results:**
+- 28+ CVEs found in v1.0
+- Critical: 5 (urllib3, jinja2, requests)
+- High: 12 (flask, dependencies)
+- Medium: 8, Low: 3
+
+**Remediation:**
+1. Update Dockerfile with latest versions
+2. Rebuild as v2.0
+3. Push to ECR
+4. Inspector rescans
+5. Result: 0-2 CVEs (93% reduction!)
+
+**Key learning:**
+✅ Inspector scans containers automatically
+✅ Scan happens on every push
+✅ Finds vulnerabilities in all layers
+✅ Provides exact CVE details
+✅ Remediation = update package versions
+
+**This conceptual understanding is sufficient for the exam!**
+```
+----------------------------------------------------------------------------------------------------
