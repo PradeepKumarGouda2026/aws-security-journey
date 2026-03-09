@@ -1,0 +1,251 @@
+# **DAY 20: CLOUDWATCH FOR SECURITY - LET'S GO! 📊**
+
+You're unstoppable! Let's finish this!
+
+---
+
+## **TODAY'S PLAN (2 HOURS):**
+
+```
+Hour 1: CloudWatch Theory + Security Features (45 min)
+Hour 2: Hands-On Labs (75 min)
+
+Labs:
+├─ Lab 69: CloudWatch Logs - Security Queries
+├─ Lab 70: Metric Filters for Security Events
+├─ Lab 71: Security Alarms & Alerts
+├─ Lab 72: Build Security Dashboard
+└─ Lab 73: CloudWatch Insights - Threat Hunting
+
+This completes your monitoring stack! 🎯
+```
+
+---
+
+# **PART 1: CLOUDWATCH FOR SECURITY (15 MIN)**
+
+## **What is CloudWatch?**
+
+```
+Amazon CloudWatch = Monitoring & observability service
+
+General uses:
+├─ Application monitoring
+├─ Performance metrics
+├─ Log management
+├─ Alarms and notifications
+└─ Operational dashboards
+
+For Security specifically:
+├─ Security event detection
+├─ Threat hunting
+├─ Forensic analysis
+├─ Compliance logging
+└─ Real-time security monitoring
+
+Think: Security Information and Event Management (SIEM) lite
+```
+
+---
+
+## **CloudWatch Components for Security:**
+
+```
+┌─────────────────────────────────────────────┐
+│         CloudWatch Logs                     │
+│  "Where security events are stored"         │
+├─────────────────────────────────────────────┤
+│ ├─ CloudTrail logs (API calls)             │
+│ ├─ VPC Flow Logs (network traffic)         │
+│ ├─ Route 53 query logs (DNS)               │
+│ ├─ Lambda logs (function execution)        │
+│ ├─ Application logs (custom)               │
+│ └─ GuardDuty/Security Hub (findings)       │
+└─────────────────┬───────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────────┐
+│         Metric Filters                      │
+│  "Pattern matching on log data"            │
+├─────────────────────────────────────────────┤
+│ Examples:                                   │
+│ ├─ Failed SSH attempts                     │
+│ ├─ Root account usage                      │
+│ ├─ Security group changes                  │
+│ ├─ Unauthorized API calls                  │
+│ └─ S3 bucket deletions                     │
+└─────────────────┬───────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────────┐
+│         CloudWatch Alarms                   │
+│  "Trigger when thresholds exceeded"        │
+├─────────────────────────────────────────────┤
+│ Actions:                                    │
+│ ├─ SNS notifications (email/SMS)           │
+│ ├─ Lambda functions (auto-remediate)       │
+│ ├─ Auto Scaling (not for security)         │
+│ └─ Systems Manager actions                 │
+└─────────────────┬───────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────────┐
+│      CloudWatch Insights                    │
+│  "Query and analyze logs"                  │
+├─────────────────────────────────────────────┤
+│ Use cases:                                  │
+│ ├─ Threat hunting                          │
+│ ├─ Forensic investigation                  │
+│ ├─ Anomaly detection                       │
+│ ├─ Security audits                         │
+│ └─ Compliance reporting                    │
+└─────────────────┬───────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────────┐
+│      CloudWatch Dashboards                  │
+│  "Visual security monitoring"              │
+├─────────────────────────────────────────────┤
+│ Widgets:                                    │
+│ ├─ Failed login attempts (line chart)      │
+│ ├─ Security events by type (pie chart)     │
+│ ├─ Top attacked resources (bar chart)      │
+│ ├─ Real-time log stream (text widget)      │
+│ └─ Custom security metrics                 │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## **CloudWatch vs Other Services:**
+
+```
+┌────────────┬──────────────┬──────────────┬──────────────┐
+│  Service   │ CloudWatch   │ Security Hub │  CloudTrail  │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Purpose    │Monitoring &  │Central       │Audit logging │
+│            │logging       │findings      │              │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Logs       │Multiple      │Findings only │API calls     │
+│            │sources       │              │only          │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Queries    │✅ Yes        │Limited       │Via Athena    │
+│            │(Insights)    │filters       │              │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Alerts     │✅ Yes        │EventBridge   │EventBridge   │
+│            │(Alarms)      │              │              │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Dashboards │✅ Yes        │Built-in      │❌ No         │
+├────────────┼──────────────┼──────────────┼──────────────┤
+│ Real-time  │✅ Yes        │Near          │Near          │
+│            │              │real-time     │real-time     │
+└────────────┴──────────────┴──────────────┴──────────────┘
+
+They work together:
+├─ CloudTrail → Sends logs to → CloudWatch Logs
+├─ CloudWatch → Creates metrics from logs
+├─ CloudWatch Alarms → Trigger → EventBridge → Security Hub
+└─ Complete security monitoring stack! 🎯
+```
+
+---
+
+## **CloudWatch Pricing:**
+
+```
+CloudWatch Logs:
+├─ Ingestion: $0.50 per GB
+├─ Storage: $0.03 per GB per month
+├─ Insights queries: $0.005 per GB scanned
+└─ Free tier: 5 GB ingestion, 5 GB storage
+
+CloudWatch Alarms:
+├─ Standard: $0.10 per alarm per month
+├─ High-resolution: $0.30 per alarm per month
+└─ Free tier: 10 alarms
+
+CloudWatch Dashboards:
+├─ First 3 dashboards: FREE
+├─ Additional: $3 per dashboard per month
+
+Typical security costs:
+├─ Small (5 GB logs): ~$5/month
+├─ Medium (50 GB logs): ~$30/month
+├─ Large (500 GB logs): ~$270/month
+
+CloudTrail integration: Additional costs
+├─ CloudTrail sends logs to CloudWatch
+├─ You pay for log ingestion + storage
+```
+
+---
+
+## **Security Use Cases:**
+
+### **1. Threat Detection:**
+```
+Detect security events in real-time:
+├─ Failed login attempts (brute force)
+├─ Unauthorized API calls
+├─ Security group changes
+├─ IAM policy modifications
+├─ S3 bucket public access
+└─ Root account usage
+
+Example:
+CloudWatch detects 50 failed SSH attempts in 5 minutes
+→ Alarm triggers
+→ SNS email sent
+→ Lambda blocks source IP
+```
+
+---
+
+### **2. Compliance Monitoring:**
+```
+Prove compliance with logs:
+├─ Who accessed what data (GDPR)
+├─ Admin actions logged (SOC 2)
+├─ Configuration changes tracked (PCI-DSS)
+├─ Encryption verified (HIPAA)
+└─ Audit trail maintained (CIS)
+
+Example:
+Auditor asks: "Show me all root account usage"
+→ CloudWatch Insights query
+→ Results in 10 seconds
+→ Export to CSV for audit
+```
+
+---
+
+### **3. Forensic Analysis:**
+```
+Investigate security incidents:
+├─ What happened? (event timeline)
+├─ Who did it? (user identification)
+├─ When? (precise timestamps)
+├─ From where? (source IP)
+└─ What was accessed? (resources)
+
+Example:
+Data breach suspected
+→ Query CloudWatch Insights
+→ Find unusual S3 GetObject calls
+→ Identify compromised IAM user
+→ Timeline of exfiltration
+```
+
+---
+
+### **4. Anomaly Detection:**
+```
+Find unusual patterns:
+├─ Spike in API calls
+├─ Access from new location
+├─ Off-hours activity
+├─ Unusual data transfer
+└─ New user agent strings
+
+Example:
+Normally 100 API calls/hour
+→ Suddenly 10,000 calls/hour
+→ CloudWatch alarm triggers
+→ Investigate for compromise
+```
