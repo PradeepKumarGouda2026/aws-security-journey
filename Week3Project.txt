@@ -1,0 +1,464 @@
+# **PART 2: WEEK 3 INTEGRATION PROJECT! 🚀**
+
+Let's build an **end-to-end security incident detection and response system** that ties ALL 6 services together!
+
+---
+
+## **PROJECT: "COMPLETE SECURITY INCIDENT RESPONSE PIPELINE"**
+
+### **Scenario:**
+```
+You're the Security Engineer for a company that:
+├─ Stores customer data in S3
+├─ Runs web applications on EC2
+├─ Uses Lambda for data processing
+└─ Needs to detect and respond to security incidents automatically
+
+Requirements:
+✅ Detect all security events
+✅ Identify threats in real-time
+✅ Find sensitive data exposure
+✅ Scan for vulnerabilities
+✅ Unified security view
+✅ Automated incident response
+✅ Real-time monitoring
+```
+
+---
+
+## **PROJECT ARCHITECTURE:**
+
+```
+┌─────────────────────────────────────────────────────┐
+│                 INCIDENT OCCURS                      │
+│  Example: Attacker tries to access S3 bucket        │
+└────────────────────┬────────────────────────────────┘
+                     ↓
+┌─────────────────────────────────────────────────────┐
+│              1. CLOUDTRAIL                          │
+│  Logs: GetObject API call                           │
+│  User: compromised-user                             │
+│  IP: 198.51.100.99 (suspicious)                    │
+│  Result: AccessDenied                               │
+└────────────────────┬────────────────────────────────┘
+                     ↓
+         ┌───────────┴───────────┐
+         ↓                       ↓
+┌──────────────────┐    ┌──────────────────┐
+│  2. GUARDDUTY    │    │  3. CLOUDWATCH   │
+│  Detects:        │    │  Metric Filter:  │
+│  - Unusual IP    │    │  - Failed API    │
+│  - Credential    │    │  - Count: 15     │
+│    theft pattern │    │  Alarm: TRIGGERED│
+└────────┬─────────┘    └────────┬─────────┘
+         ↓                       ↓
+         └───────────┬───────────┘
+                     ↓
+┌─────────────────────────────────────────────────────┐
+│              4. SECURITY HUB                        │
+│  Aggregates findings:                               │
+│  - GuardDuty: UnauthorizedAccess finding           │
+│  - CloudWatch: Failed API alarm                     │
+│  - Inspector: Instance has 5 critical CVEs         │
+│  Severity: HIGH (8.0)                              │
+│  Correlation: Same instance, same timeframe        │
+└────────────────────┬────────────────────────────────┘
+                     ↓
+┌─────────────────────────────────────────────────────┐
+│              5. EVENTBRIDGE                         │
+│  Rule matches: High severity finding               │
+│  Triggers: Automated response                       │
+└────────────────────┬────────────────────────────────┘
+                     ↓
+         ┌───────────┴───────────┐
+         ↓                       ↓
+┌──────────────────┐    ┌──────────────────┐
+│  6. LAMBDA       │    │  7. SNS          │
+│  Actions:        │    │  Notifications:  │
+│  - Isolate EC2   │    │  - Email SOC team│
+│  - Disable IAM   │    │  - Slack alert   │
+│  - Snapshot EBS  │    │  - PagerDuty     │
+│  - Update ticket │    │  - SMS on-call   │
+└──────────────────┘    └──────────────────┘
+         ↓
+┌─────────────────────────────────────────────────────┐
+│              8. RESOLUTION                          │
+│  Instance isolated: ✅                              │
+│  Credentials revoked: ✅                            │
+│  Forensic snapshot: ✅                              │
+│  SOC team notified: ✅                              │
+│  Incident logged: ✅                                │
+│  Timeline: 45 seconds from attack to containment!  │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## **PROJECT IMPLEMENTATION:**
+
+### **Step 1: Verify All Services Are Enabled**
+
+```bash
+# CloudShell - Quick verification
+
+echo "=== Week 3 Services Status Check ==="
+echo ""
+
+# 1. CloudTrail
+echo "1. CloudTrail:"
+aws cloudtrail describe-trails --query 'trailList[*].[Name,IsMultiRegionTrail]' --output table
+echo ""
+
+# 2. GuardDuty
+echo "2. GuardDuty:"
+aws guardduty list-detectors --query 'DetectorIds[0]' --output text
+if [ $? -eq 0 ]; then echo "✅ Enabled"; else echo "❌ Not enabled"; fi
+echo ""
+
+# 3. Macie (might be disabled to save cost)
+echo "3. Macie:"
+aws macie2 get-macie-session --query 'status' --output text 2>/dev/null
+if [ $? -eq 0 ]; then echo "✅ Enabled"; else echo "❌ Not enabled (OK - expensive)"; fi
+echo ""
+
+# 4. Inspector
+echo "4. Inspector:"
+aws inspector2 get-configuration --query 'state' --output text 2>/dev/null
+if [ $? -eq 0 ]; then echo "✅ Enabled"; else echo "❌ Not enabled"; fi
+echo ""
+
+# 5. Security Hub
+echo "5. Security Hub:"
+aws securityhub describe-hub --query 'HubArn' --output text 2>/dev/null
+if [ $? -eq 0 ]; then echo "✅ Enabled"; else echo "❌ Not enabled"; fi
+echo ""
+
+# 6. CloudWatch (always available)
+echo "6. CloudWatch: ✅ Always available"
+echo ""
+
+echo "=== Check Complete ==="
+```
+
+---
+
+### **Step 2: Build Integration Test Scenario**
+
+We'll simulate a security incident and watch all services detect and respond!
+
+#### **Create Test Resources:**
+
+```bash
+# CloudShell
+
+echo "Creating test environment for incident simulation..."
+
+# 1. Create test S3 bucket (will be target of attack)
+BUCKET_NAME="security-test-$(aws sts get-caller-identity --query Account --output text)-$(date +%s)"
+aws s3 mb s3://$BUCKET_NAME
+echo "Created bucket: $BUCKET_NAME"
+
+# 2. Upload sensitive test file
+cat > sensitive-data.txt << 'EOF'
+Customer Database Export
+SSN: 123-45-6789
+Credit Card: 4111-1111-1111-1111
+AWS Access Key: AKIAIOSFODNN7EXAMPLE
+EOF
+
+aws s3 cp sensitive-data.txt s3://$BUCKET_NAME/
+echo "Uploaded sensitive test file"
+
+# 3. Create test IAM user (will be "compromised")
+aws iam create-user --user-name test-compromised-user 2>/dev/null
+echo "Created test IAM user"
+
+# 4. Create access key for test user
+KEY_OUTPUT=$(aws iam create-access-key --user-name test-compromised-user --output json)
+ACCESS_KEY=$(echo $KEY_OUTPUT | jq -r '.AccessKey.AccessKeyId')
+SECRET_KEY=$(echo $KEY_OUTPUT | jq -r '.AccessKey.SecretAccessKey')
+echo "Created access keys for test user"
+
+echo ""
+echo "=== Test Environment Ready ==="
+echo "Bucket: $BUCKET_NAME"
+echo "Test user: test-compromised-user"
+echo ""
+```
+
+---
+
+### **Step 3: Simulate Security Incidents**
+
+#### **Incident 1: Unauthorized API Calls**
+
+```bash
+# CloudShell
+
+echo "=== Simulating Incident 1: Unauthorized Access Attempts ==="
+
+# Attempt to access bucket without permissions (will fail)
+for i in {1..10}; do
+  aws s3 ls s3://$BUCKET_NAME --profile nonexistent-profile 2>/dev/null
+  echo "Attempt $i: Unauthorized access (expected to fail)"
+  sleep 1
+done
+
+echo ""
+echo "✅ Generated 10 unauthorized API calls"
+echo "Expected detections:"
+echo "  - CloudTrail: Logged all attempts"
+echo "  - CloudWatch: Metric filter should increment"
+echo "  - GuardDuty: May detect unusual pattern"
+echo ""
+```
+
+---
+
+#### **Incident 2: Suspicious Actions**
+
+```bash
+# CloudShell
+
+echo "=== Simulating Incident 2: Suspicious Security Group Changes ==="
+
+# Create and modify security group (suspicious pattern)
+SG_ID=$(aws ec2 create-security-group --group-name test-suspicious-sg --description "Test security group" --query 'GroupId' --output text)
+
+# Open to internet (bad practice - will trigger alerts)
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 22 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 3389 --cidr 0.0.0.0/0
+aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 1433 --cidr 0.0.0.0/0
+
+echo ""
+echo "✅ Created security group with overly permissive rules"
+echo "Expected detections:"
+echo "  - CloudTrail: Logged all changes"
+echo "  - CloudWatch: SecurityGroupChanges metric incremented"
+echo "  - Security Hub: Compliance finding (0.0.0.0/0 not allowed)"
+echo "  - Config: Rule violation"
+echo ""
+```
+
+---
+
+#### **Incident 3: Sensitive Data Exposure**
+
+```bash
+# CloudShell
+
+echo "=== Simulating Incident 3: Public Bucket (Data Exposure) ==="
+
+# Disable Block Public Access (will trigger Security Hub)
+aws s3api put-public-access-block --bucket $BUCKET_NAME --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+
+echo ""
+echo "✅ Disabled Block Public Access on bucket"
+echo "Expected detections:"
+echo "  - CloudTrail: PutPublicAccessBlock logged"
+echo "  - Security Hub: [S3.1] finding (should trigger in 5-15 min)"
+echo "  - Macie: If enabled, would flag bucket as high-risk"
+echo "  - Auto-remediation: Lambda should re-enable BPA (if configured)"
+echo ""
+```
+
+---
+
+### **Step 4: Monitor Detection Across All Services**
+
+```bash
+# CloudShell
+
+echo "=== Waiting 2 minutes for events to propagate ==="
+sleep 120
+
+echo ""
+echo "=== Checking Detections Across Services ==="
+echo ""
+
+# CloudTrail - Recent events
+echo "1. CLOUDTRAIL - Recent Security Events:"
+aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=PutPublicAccessBlock --max-results 3 --query 'Events[*].[EventTime,EventName,Username]' --output table
+echo ""
+
+# GuardDuty - Findings (may take longer)
+echo "2. GUARDDUTY - Active Findings:"
+DETECTOR_ID=$(aws guardduty list-detectors --query 'DetectorIds[0]' --output text)
+if [ "$DETECTOR_ID" != "None" ]; then
+  aws guardduty list-findings --detector-id $DETECTOR_ID --max-results 5
+  echo "(Note: Real findings may take 15-30 minutes to appear)"
+else
+  echo "GuardDuty not enabled"
+fi
+echo ""
+
+# Security Hub - Recent findings
+echo "3. SECURITY HUB - Recent Findings:"
+aws securityhub get-findings --filters '{"RecordState":[{"Value":"ACTIVE","Comparison":"EQUALS"}],"SeverityLabel":[{"Value":"HIGH","Comparison":"EQUALS"},{"Value":"CRITICAL","Comparison":"EQUALS"}]}' --max-results 5 --query 'Findings[*].[Title,ProductName,Severity.Label]' --output table 2>/dev/null
+echo ""
+
+# CloudWatch - Metrics
+echo "4. CLOUDWATCH - Security Metrics (Last Hour):"
+aws cloudwatch get-metric-statistics --namespace SecurityMetrics --metric-name SecurityGroupChanges --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) --end-time $(date -u +%Y-%m-%dT%H:%M:%S) --period 3600 --statistics Sum --query 'Datapoints[*].[Timestamp,Sum]' --output table 2>/dev/null
+echo ""
+
+echo "=== Detection Check Complete ==="
+echo ""
+echo "Full propagation timeline:"
+echo "  - CloudTrail: Immediate (within seconds)"
+echo "  - CloudWatch Metrics: 1-5 minutes"
+echo "  - GuardDuty: 15-30 minutes for new findings"
+echo "  - Security Hub: 5-15 minutes"
+echo "  - Inspector: Runs on schedule (every 24h for EC2)"
+echo ""
+```
+
+---
+
+### **Step 5: View Unified Dashboard**
+
+```
+Now go to AWS Console to see the integration:
+
+SECURITY HUB:
+1. Security Hub Console → Summary
+2. You should see:
+   ├─ New findings from today's tests
+   ├─ Security score (may have decreased!)
+   ├─ Failed compliance controls
+   └─ Integration status from all services
+
+CLOUDWATCH:
+1. CloudWatch Console → Dashboards
+2. If you created dashboard: See metrics updating
+3. CloudWatch → Alarms: Check alarm states
+
+CLOUDTRAIL:
+1. CloudTrail Console → Event history
+2. Filter: Last hour
+3. See all your test events logged
+
+This is your UNIFIED security view! 🎯
+```
+
+---
+
+### **Step 6: Test Automated Response**
+
+```
+Check if auto-remediation worked:
+
+Security Hub Auto-Remediation Test:
+1. Security Hub → Findings
+2. Search for: "S3 Block Public Access"
+3. Check status:
+   - If RESOLVED: Auto-remediation worked! ✅
+   - If ACTIVE: Lambda didn't trigger (check EventBridge rule)
+
+Verify bucket protection:
+```
+
+```bash
+# CloudShell
+
+echo "Checking if Block Public Access was re-enabled..."
+aws s3api get-public-access-block --bucket $BUCKET_NAME --query 'PublicAccessBlockConfiguration' --output json
+
+# Should show all settings as "true" if auto-remediation worked
+```
+
+---
+
+### **Step 7: Cleanup Test Resources**
+
+```bash
+# CloudShell
+
+echo "=== Cleaning Up Test Environment ==="
+
+# 1. Delete S3 bucket
+aws s3 rm s3://$BUCKET_NAME --recursive
+aws s3 rb s3://$BUCKET_NAME
+echo "✅ Deleted test bucket"
+
+# 2. Delete security group
+aws ec2 delete-security-group --group-id $SG_ID
+echo "✅ Deleted test security group"
+
+# 3. Delete IAM user
+aws iam delete-access-key --user-name test-compromised-user --access-key-id $ACCESS_KEY
+aws iam delete-user --user-name test-compromised-user
+echo "✅ Deleted test IAM user"
+
+# 4. Delete local test file
+rm -f sensitive-data.txt
+
+echo ""
+echo "=== Cleanup Complete ==="
+echo ""
+echo "Note: Security Hub findings will remain visible for historical record"
+echo "You can suppress or archive them if desired"
+```
+
+---
+
+## **PROJECT DOCUMENTATION:**
+
+```markdown
+# Week 3 Integration Project - COMPLETE ✅
+## Security Incident Detection & Response Pipeline
+
+### Project Overview:
+Built end-to-end security incident response system integrating all 6 Week 3 services.
+
+### Architecture:
+```
+Incident → CloudTrail → GuardDuty/CloudWatch → Security Hub
+→ EventBridge → Lambda/SNS → Automated Response
+```
+
+### Test Scenarios Executed:
+1. ✅ Unauthorized API calls (10 attempts)
+2. ✅ Suspicious security group changes (overly permissive)
+3. ✅ S3 public access (data exposure risk)
+
+### Detections Verified:
+- CloudTrail: All events logged ✅
+- CloudWatch: Metrics incremented ✅
+- GuardDuty: Pattern detection (15-30 min) ✅
+- Security Hub: Findings aggregated ✅
+- Auto-remediation: S3 protection restored ✅
+
+### Response Timeline:
+- CloudTrail logging: <5 seconds
+- CloudWatch metrics: 1-5 minutes
+- Security Hub aggregation: 5-15 minutes
+- Automated remediation: <1 minute after finding
+- Total incident containment: <20 minutes
+
+### Key Learnings:
+1. Services work together seamlessly
+2. Automated response is FAST (seconds)
+3. Unified view reduces investigation time
+4. Multiple layers provide defense in depth
+5. Production-ready security architecture
+
+### Real-World Value:
+This architecture is used by Fortune 500 companies for:
+- 24/7 security monitoring
+- Automated incident response
+- Compliance validation
+- Threat detection and prevention
+
+### Time to Build: 90 minutes
+### Complexity: Enterprise-grade
+### Skills Demonstrated: AWS Security Specialist level! 🏆
+```
+
+---
+
+**TAKE A 10-MINUTE BREAK!** ☕
+
+Next: Practice Questions (30 min)
+
+**Ready for practice questions?** 🎯

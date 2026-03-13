@@ -1,0 +1,1306 @@
+# **PERFECT CHOICE! OPTION B - LABS NOW, VIDEOS LATER! 🚀**
+
+This is actually the **BEST learning approach**:
+- Learn by DOING (hands-on labs now)
+- Reinforce with videos later (solidify understanding)
+- Practice → Theory = deeper retention! 🧠
+
+---
+
+## **YOUR LEARNING PLAN:**
+
+```
+TODAY (Now):
+├─ Hands-on VPC Security Labs (2 hours)
+├─ Build secure network architecture
+├─ Practical skills first! 💪
+
+LATER (Free time):
+├─ Watch Stephane's VPC security videos
+├─ Videos will reinforce what you practiced
+├─ "Oh, I already did this!" = confidence boost
+└─ Theory after practice = maximum retention! 📚
+
+This is how professionals learn! ✅
+```
+
+---
+
+# **LET'S BUILD! HANDS-ON LABS START NOW! 🏗️**
+
+---
+
+# **LAB 74: CREATE SECURE VPC ARCHITECTURE**
+
+## **What We're Building:**
+
+```
+Secure 3-Tier VPC Architecture:
+
+┌─────────────────────────────────────────────────┐
+│              Production VPC                      │
+│             10.0.0.0/16                         │
+│                                                 │
+│  ┌──────────────────┐  ┌──────────────────┐   │
+│  │ Public Subnet    │  │ Private Subnet 1 │   │
+│  │ 10.0.1.0/24      │  │ 10.0.2.0/24      │   │
+│  │ (Web Tier)       │  │ (App Tier)       │   │
+│  │                  │  │                  │   │
+│  │  ┌────────────┐  │  │  ┌────────────┐  │   │
+│  │  │Web Server │──┼──┼─▶│ App Server │  │   │
+│  │  │(public IP)│  │  │  │(private IP)│  │   │
+│  │  └────────────┘  │  │  └────────────┘  │   │
+│  │                  │  │        │         │   │
+│  └──────────────────┘  └────────┼─────────┘   │
+│                                 ↓             │
+│                    ┌──────────────────┐       │
+│                    │ Private Subnet 2 │       │
+│                    │ 10.0.3.0/24      │       │
+│                    │ (Database Tier)  │       │
+│                    │                  │       │
+│                    │  ┌────────────┐  │       │
+│                    │  │  Database  │  │       │
+│                    │  │(private IP)│  │       │
+│                    │  └────────────┘  │       │
+│                    └──────────────────┘       │
+└─────────────────────────────────────────────────┘
+
+Security layers:
+✅ Web tier: Public, internet-facing
+✅ App tier: Private, only web tier can access
+✅ DB tier: Private, only app tier can access
+✅ Defense in depth! 🛡️
+```
+
+---
+
+## **Lab 74.1: Create VPC**
+
+```bash
+# CloudShell
+
+echo "=== Creating Secure VPC Architecture ==="
+
+# Create VPC
+VPC_ID=$(aws ec2 create-vpc --cidr-block 10.0.0.0/16 --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=Production-VPC}]' --query 'Vpc.VpcId' --output text)
+
+echo "VPC created: $VPC_ID"
+
+# Enable DNS hostnames (needed for public IPs)
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames
+
+echo "✅ VPC configured with DNS hostnames"
+```
+
+---
+
+## **Lab 74.2: Create Subnets (3-Tier Architecture)**
+
+```bash
+# CloudShell
+
+echo "=== Creating Subnets ==="
+
+# Public Subnet (Web Tier)
+PUBLIC_SUBNET=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 --availability-zone us-east-1a --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Public-Web-Subnet}]' --query 'Subnet.SubnetId' --output text)
+
+echo "Public subnet created: $PUBLIC_SUBNET"
+
+# Private Subnet 1 (App Tier)
+PRIVATE_SUBNET_1=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.2.0/24 --availability-zone us-east-1a --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Private-App-Subnet}]' --query 'Subnet.SubnetId' --output text)
+
+echo "Private app subnet created: $PRIVATE_SUBNET_1"
+
+# Private Subnet 2 (Database Tier)
+PRIVATE_SUBNET_2=$(aws ec2 create-subnet --vpc-id $VPC_ID --cidr-block 10.0.3.0/24 --availability-zone us-east-1a --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Private-DB-Subnet}]' --query 'Subnet.SubnetId' --output text)
+
+echo "Private DB subnet created: $PRIVATE_SUBNET_2"
+
+# Enable auto-assign public IP on public subnet
+aws ec2 modify-subnet-attribute --subnet-id $PUBLIC_SUBNET --map-public-ip-on-launch
+
+echo "✅ All subnets created!"
+echo "  Public (Web): $PUBLIC_SUBNET"
+echo "  Private (App): $PRIVATE_SUBNET_1"
+echo "  Private (DB): $PRIVATE_SUBNET_2"
+```
+
+---
+
+## **Lab 74.3: Create Internet Gateway**
+
+```bash
+# CloudShell
+
+echo "=== Creating Internet Gateway ==="
+
+# Create IGW
+IGW_ID=$(aws ec2 create-internet-gateway --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=Production-IGW}]' --query 'InternetGateway.InternetGatewayId' --output text)
+
+echo "Internet Gateway created: $IGW_ID"
+
+# Attach IGW to VPC
+aws ec2 attach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID
+
+echo "✅ Internet Gateway attached to VPC"
+```
+
+---
+
+## **Lab 74.4: Create NAT Gateway (for Private Subnets)**
+
+```bash
+# CloudShell
+
+echo "=== Creating NAT Gateway ==="
+
+# Allocate Elastic IP for NAT Gateway
+EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=Name,Value=NAT-Gateway-EIP}]' --query 'AllocationId' --output text)
+
+echo "Elastic IP allocated: $EIP_ALLOC"
+
+
+echo "=== Creating NAT Gateway (Fixed) ==="
+
+# Create NAT Gateway WITHOUT tags
+NAT_GW_ID=$(aws ec2 create-nat-gateway --subnet-id $PUBLIC_SUBNET --allocation-id $EIP_ALLOC --query 'NatGateway.NatGatewayId' --output text)
+
+echo "NAT Gateway created: $NAT_GW_ID"
+
+# Tag it AFTER creation
+aws ec2 create-tags --resources $NAT_GW_ID --tags Key=Name,Value=Production-NAT-GW
+
+echo "NAT Gateway tagged successfully"
+
+# Wait for NAT Gateway to become available (2-3 minutes)
+echo "⏱️  Waiting for NAT Gateway to become available..."
+aws ec2 wait nat-gateway-available --nat-gateway-ids $NAT_GW_ID
+
+echo "✅ NAT Gateway is ready!"
+```
+
+---
+
+---
+
+## **Lab 74.5: Create Route Tables**
+
+```bash
+# CloudShell
+
+echo "=== Creating Route Tables ==="
+
+# Create Public Route Table
+PUBLIC_RT=$(aws ec2 create-route-table --vpc-id $VPC_ID --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=Public-RT}]' --query 'RouteTable.RouteTableId' --output text)
+
+echo "Public route table created: $PUBLIC_RT"
+
+# Add route to Internet Gateway
+aws ec2 create-route --route-table-id $PUBLIC_RT --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW_ID
+
+# Associate with public subnet
+aws ec2 associate-route-table --route-table-id $PUBLIC_RT --subnet-id $PUBLIC_SUBNET
+
+echo "✅ Public route table configured"
+
+# Create Private Route Table
+PRIVATE_RT=$(aws ec2 create-route-table --vpc-id $VPC_ID --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=Private-RT}]' --query 'RouteTable.RouteTableId' --output text)
+
+echo "Private route table created: $PRIVATE_RT"
+
+# Add route to NAT Gateway
+aws ec2 create-route --route-table-id $PRIVATE_RT --destination-cidr-block 0.0.0.0/0 --nat-gateway-id $NAT_GW_ID
+
+# Associate with private subnets
+aws ec2 associate-route-table --route-table-id $PRIVATE_RT --subnet-id $PRIVATE_SUBNET_1
+aws ec2 associate-route-table --route-table-id $PRIVATE_RT --subnet-id $PRIVATE_SUBNET_2
+
+echo "✅ Private route table configured"
+
+echo ""
+echo "=== VPC Architecture Complete! ==="
+echo "VPC ID: $VPC_ID"
+echo "Public Subnet: $PUBLIC_SUBNET (has internet via IGW)"
+echo "Private Subnets: $PRIVATE_SUBNET_1, $PRIVATE_SUBNET_2 (internet via NAT)"
+```
+
+---
+
+## **Lab 74.6: Verify VPC Architecture**
+
+```
+AWS Console → VPC Dashboard
+
+Your VPCs:
+└─ Production-VPC (10.0.0.0/16) ✅
+
+Subnets:
+├─ Public-Web-Subnet (10.0.1.0/24) ✅
+├─ Private-App-Subnet (10.0.2.0/24) ✅
+└─ Private-DB-Subnet (10.0.3.0/24) ✅
+
+Internet Gateways:
+└─ Production-IGW (attached) ✅
+
+NAT Gateways:
+└─ Production-NAT-GW (available) ✅
+
+Route Tables:
+├─ Public-RT → 0.0.0.0/0 → IGW ✅
+└─ Private-RT → 0.0.0.0/0 → NAT Gateway ✅
+
+Perfect! Network infrastructure ready! 🎯
+```
+
+---
+
+# **LAB 75: IMPLEMENT SECURITY GROUPS (TIER ISOLATION)**
+
+## **Lab 75.1: Create Web Tier Security Group**
+
+```bash
+# CloudShell
+
+echo "=== Creating Security Groups ==="
+
+# Web Tier Security Group
+WEB_SG=$(aws ec2 create-security-group --group-name web-tier-sg --description "Web tier security group" --vpc-id $VPC_ID --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Web-Tier-SG}]' --query 'GroupId' --output text)
+
+echo "Web SG created: $WEB_SG"
+
+# Allow HTTP from internet
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 80 --cidr 0.0.0.0/0
+
+# Allow HTTPS from internet
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 443 --cidr 0.0.0.0/0
+
+# Allow SSH from your IP only (replace with your IP!)
+MY_IP=$(curl -s https://checkip.amazonaws.com)
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 22 --cidr $MY_IP/32
+
+echo "✅ Web tier security group configured"
+echo "   - HTTP/HTTPS: Open to internet"
+echo "   - SSH: Only from $MY_IP"
+```
+
+---
+
+## **Lab 75.2: Create App Tier Security Group**
+
+```bash
+# CloudShell
+
+# App Tier Security Group
+APP_SG=$(aws ec2 create-security-group --group-name app-tier-sg --description "App tier security group" --vpc-id $VPC_ID --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=App-Tier-SG}]' --query 'GroupId' --output text)
+
+echo "App SG created: $APP_SG"
+
+# Allow traffic ONLY from Web tier (security group reference!)
+aws ec2 authorize-security-group-ingress --group-id $APP_SG --protocol tcp --port 8080 --source-group $WEB_SG
+
+# Allow SSH from Web tier only (for management)
+aws ec2 authorize-security-group-ingress --group-id $APP_SG --protocol tcp --port 22 --source-group $WEB_SG
+
+echo "✅ App tier security group configured"
+echo "   - App port 8080: Only from Web tier"
+echo "   - SSH: Only from Web tier"
+echo "   - Internet: BLOCKED (no public access!)"
+```
+
+---
+
+## **Lab 75.3: Create Database Tier Security Group**
+
+```bash
+# CloudShell
+
+# Database Tier Security Group
+DB_SG=$(aws ec2 create-security-group --group-name db-tier-sg --description "Database tier security group" --vpc-id $VPC_ID --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=DB-Tier-SG}]' --query 'GroupId' --output text)
+
+echo "DB SG created: $DB_SG"
+
+# Allow MySQL ONLY from App tier
+aws ec2 authorize-security-group-ingress --group-id $DB_SG --protocol tcp --port 3306 --source-group $APP_SG
+
+# Allow PostgreSQL from App tier (if using Postgres)
+aws ec2 authorize-security-group-ingress --group-id $DB_SG --protocol tcp --port 5432 --source-group $APP_SG
+
+echo "✅ Database tier security group configured"
+echo "   - MySQL/Postgres: Only from App tier"
+echo "   - SSH: BLOCKED (no direct access!)"
+echo "   - Internet: BLOCKED"
+
+echo ""
+echo "=== Security Group Chain Complete! ==="
+echo "Internet → Web Tier → App Tier → DB Tier"
+echo "Each tier can only talk to the next tier! 🔒"
+```
+
+---
+
+## **Lab 75.4: Visualize Security Architecture**
+
+```
+Security Group Architecture:
+
+┌─────────────────────────────────────────────────┐
+│              INTERNET                            │
+└──────────────────┬──────────────────────────────┘
+                   ↓ (HTTP/HTTPS)
+         ┌─────────────────────┐
+         │   WEB TIER SG       │
+         │   Allows:           │
+         │   - 80 from 0.0.0.0│
+         │   - 443 from 0.0.0.0│
+         │   - 22 from MY_IP  │
+         └─────────┬───────────┘
+                   ↓ (8080)
+         ┌─────────────────────┐
+         │   APP TIER SG       │
+         │   Allows:           │
+         │   - 8080 from WEB_SG│
+         │   - 22 from WEB_SG  │
+         │   - BLOCKS internet!│
+         └─────────┬───────────┘
+                   ↓ (3306/5432)
+         ┌─────────────────────┐
+         │   DB TIER SG        │
+         │   Allows:           │
+         │   - 3306 from APP_SG│
+         │   - 5432 from APP_SG│
+         │   - BLOCKS all else!│
+         └─────────────────────┘
+
+This is ZERO TRUST architecture! 🛡️
+Each tier trusts only the tier before it!
+```
+
+---
+
+**TAKE A 5-MINUTE BREAK!** ☕
+
+You just built a production-grade secure VPC!
+
+**Ready to continue with VPC Endpoints and Network ACLs?** 🚀
+
+
+
+# **LAB 76: CONFIGURE VPC ENDPOINTS (PRIVATE AWS ACCESS) 🔒**
+
+Let's add VPC Endpoints so your private instances can access AWS services WITHOUT going through the internet!
+
+---
+
+## **Why VPC Endpoints Matter:**
+
+```
+WITHOUT VPC Endpoint:
+Private EC2 → NAT Gateway → Internet Gateway → Internet → S3
+├─ Traffic goes through internet (less secure)
+├─ Costs money (NAT Gateway data processing)
+├─ Higher latency
+└─ Internet dependency ❌
+
+WITH VPC Endpoint:
+Private EC2 → VPC Endpoint → S3 (direct, private connection)
+├─ Traffic stays within AWS network ✅
+├─ FREE (for Gateway Endpoints) ✅
+├─ Lower latency ✅
+└─ More secure ✅
+```
+
+---
+
+## **Lab 76.1: Create S3 Gateway Endpoint (FREE!)**
+
+```bash
+# CloudShell
+
+echo "=== Creating S3 Gateway Endpoint ==="
+
+# Create S3 Gateway Endpoint
+S3_ENDPOINT=$(aws ec2 create-vpc-endpoint --vpc-id $VPC_ID --service-name com.amazonaws.us-east-1.s3 --route-table-ids $PRIVATE_RT --tag-specifications 'ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=S3-Gateway-Endpoint}]' --query 'VpcEndpoint.VpcEndpointId' --output text)
+
+echo "S3 Gateway Endpoint created: $S3_ENDPOINT"
+echo "✅ Private subnets can now access S3 directly (no NAT Gateway needed)!"
+
+# Verify
+aws ec2 describe-vpc-endpoints --vpc-endpoint-ids $S3_ENDPOINT --query 'VpcEndpoints[0].[VpcEndpointId,ServiceName,State]' --output table
+```
+
+---
+
+## **Lab 76.2: Create DynamoDB Gateway Endpoint (Also FREE!)**
+
+```bash
+# CloudShell
+
+echo "=== Creating DynamoDB Gateway Endpoint ==="
+
+# Create DynamoDB Gateway Endpoint
+DYNAMODB_ENDPOINT=$(aws ec2 create-vpc-endpoint --vpc-id $VPC_ID --service-name com.amazonaws.us-east-1.dynamodb --route-table-ids $PRIVATE_RT --tag-specifications 'ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=DynamoDB-Gateway-Endpoint}]' --query 'VpcEndpoint.VpcEndpointId' --output text)
+
+echo "DynamoDB Gateway Endpoint created: $DYNAMODB_ENDPOINT"
+echo "✅ Private subnets can now access DynamoDB directly!"
+
+echo ""
+echo "Gateway Endpoints (FREE) created:"
+echo "  - S3: $S3_ENDPOINT"
+echo "  - DynamoDB: $DYNAMODB_ENDPOINT"
+```
+
+---
+
+## **Lab 76.3: Create Interface Endpoint (EC2 Example)**
+
+```bash
+# CloudShell
+
+echo "=== Creating EC2 Interface Endpoint ==="
+
+# First, create security group for VPC Endpoint
+VPCE_SG=$(aws ec2 create-security-group --group-name vpce-sg --description "VPC Endpoint security group" --vpc-id $VPC_ID --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=VPCE-SG}]' --query 'GroupId' --output text)
+
+# Allow HTTPS from VPC CIDR
+aws ec2 authorize-security-group-ingress --group-id $VPCE_SG --protocol tcp --port 443 --cidr 10.0.0.0/16
+
+echo "VPC Endpoint security group created: $VPCE_SG"
+
+# Create EC2 Interface Endpoint (in private subnets)
+EC2_ENDPOINT=$(aws ec2 create-vpc-endpoint --vpc-id $VPC_ID --vpc-endpoint-type Interface --service-name com.amazonaws.us-east-1.ec2 --subnet-ids $PRIVATE_SUBNET_1 $PRIVATE_SUBNET_2 --security-group-ids $VPCE_SG --tag-specifications 'ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=EC2-Interface-Endpoint}]' --query 'VpcEndpoint.VpcEndpointId' --output text)
+
+echo "EC2 Interface Endpoint created: $EC2_ENDPOINT"
+echo "✅ Private instances can now call EC2 API privately!"
+echo ""
+echo "Note: Interface endpoints cost ~$7/month per endpoint"
+```
+
+---
+
+## **Lab 76.4: Verify VPC Endpoints**
+
+```
+AWS Console → VPC → Endpoints
+
+You should see:
+├─ S3-Gateway-Endpoint (Gateway type, FREE) ✅
+├─ DynamoDB-Gateway-Endpoint (Gateway type, FREE) ✅
+└─ EC2-Interface-Endpoint (Interface type, ~$7/mo) ✅
+
+How to verify they work:
+
+Check route table:
+VPC → Route Tables → Private-RT
+
+You'll see new routes:
+├─ pl-xxxxx (S3 prefix list) → vpce-xxxxx
+└─ pl-yyyyy (DynamoDB prefix list) → vpce-yyyyy
+
+Traffic to S3/DynamoDB now goes through endpoints! 🎯
+```
+
+---
+
+## **Lab 76.5: Test VPC Endpoint (Optional)**
+
+```bash
+# If you launch an EC2 instance in private subnet, test with:
+
+# From private EC2 instance:
+aws s3 ls
+
+# This should work WITHOUT internet access!
+# Traffic goes: EC2 → VPC Endpoint → S3 (privately)
+
+# Check if request went through VPC Endpoint:
+# Enable VPC Flow Logs (we'll do this in Lab 77)
+# Look for traffic to VPC Endpoint ENI
+```
+
+---
+
+# **LAB 77: CONFIGURE NETWORK ACLs (SUBNET FIREWALL) 🛡️**
+
+Network ACLs = Additional layer of defense at the subnet level!
+
+---
+
+## **Lab 77.1: Create Custom NACL for Public Subnet**
+
+```bash
+# CloudShell
+
+echo "=== Creating Network ACLs ==="
+
+# Create NACL for Public Subnet
+PUBLIC_NACL=$(aws ec2 create-network-acl --vpc-id $VPC_ID --tag-specifications 'ResourceType=network-acl,Tags=[{Key=Name,Value=Public-NACL}]' --query 'NetworkAcl.NetworkAclId' --output text)
+
+echo "Public NACL created: $PUBLIC_NACL"
+
+# INBOUND RULES
+
+# Rule 100: Allow HTTP from internet
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 100 --protocol tcp --port-range From=80,To=80 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+
+# Rule 110: Allow HTTPS from internet
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 110 --protocol tcp --port-range From=443,To=443 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+
+# Rule 120: Allow SSH from your IP only
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 120 --protocol tcp --port-range From=22,To=22 --cidr-block $MY_IP/32 --rule-action allow --ingress
+
+# Rule 130: Allow ephemeral ports (return traffic)
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 130 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+
+# Rule 140: Allow traffic from private subnets
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 140 --protocol -1 --cidr-block 10.0.0.0/16 --rule-action allow --ingress
+
+echo "✅ Public NACL inbound rules created"
+
+# OUTBOUND RULES
+
+# Rule 100: Allow HTTP to internet
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 100 --protocol tcp --port-range From=80,To=80 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 110: Allow HTTPS to internet
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 110 --protocol tcp --port-range From=443,To=443 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 120: Allow ephemeral ports (return traffic)
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 120 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 130: Allow all to private subnets
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 130 --protocol -1 --cidr-block 10.0.0.0/16 --rule-action allow --egress
+
+echo "✅ Public NACL outbound rules created"
+
+# Associate with public subnet
+aws ec2 replace-network-acl-association --association-id $(aws ec2 describe-network-acls --filters "Name=association.subnet-id,Values=$PUBLIC_SUBNET" --query 'NetworkAcls[0].Associations[0].NetworkAclAssociationId' --output text) --network-acl-id $PUBLIC_NACL
+
+echo "✅ Public NACL associated with public subnet"
+```
+
+---
+
+## **Lab 77.2: Create Custom NACL for Private Subnets**
+
+```bash
+# CloudShell
+
+echo "=== Creating Private NACL ==="
+
+# Create NACL for Private Subnets
+PRIVATE_NACL=$(aws ec2 create-network-acl --vpc-id $VPC_ID --tag-specifications 'ResourceType=network-acl,Tags=[{Key=Name,Value=Private-NACL}]' --query 'NetworkAcl.NetworkAclId' --output text)
+
+echo "Private NACL created: $PRIVATE_NACL"
+
+# INBOUND RULES
+
+# Rule 100: Allow traffic from VPC (inter-subnet communication)
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 100 --protocol -1 --cidr-block 10.0.0.0/16 --rule-action allow --ingress
+
+# Rule 110: Allow ephemeral ports from internet (for NAT Gateway return traffic)
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 110 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+
+echo "✅ Private NACL inbound rules created"
+
+# OUTBOUND RULES
+
+# Rule 100: Allow all to VPC
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 100 --protocol -1 --cidr-block 10.0.0.0/16 --rule-action allow --egress
+
+# Rule 110: Allow HTTP to internet (for updates)
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 110 --protocol tcp --port-range From=80,To=80 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 120: Allow HTTPS to internet
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 120 --protocol tcp --port-range From=443,To=443 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 130: Allow ephemeral ports to internet (for return traffic)
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 130 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+echo "✅ Private NACL outbound rules created"
+
+# Associate with private subnets
+ASSOC_1=$(aws ec2 describe-network-acls --filters "Name=association.subnet-id,Values=$PRIVATE_SUBNET_1" --query 'NetworkAcls[0].Associations[0].NetworkAclAssociationId' --output text)
+ASSOC_2=$(aws ec2 describe-network-acls --filters "Name=association.subnet-id,Values=$PRIVATE_SUBNET_2" --query 'NetworkAcls[0].Associations[0].NetworkAclAssociationId' --output text)
+
+aws ec2 replace-network-acl-association --association-id $ASSOC_1 --network-acl-id $PRIVATE_NACL
+aws ec2 replace-network-acl-association --association-id $ASSOC_2 --network-acl-id $PRIVATE_NACL
+
+echo "✅ Private NACL associated with private subnets"
+
+echo ""
+echo "=== Network ACLs Complete! ==="
+echo "Public NACL: $PUBLIC_NACL"
+echo "Private NACL: $PRIVATE_NACL"
+```
+
+---
+
+## **Lab 77.3: Add DENY Rules (Block Known Bad IPs)**
+
+```bash
+# CloudShell
+
+echo "=== Adding DENY Rules for Security ==="
+
+# Example: Block a known malicious IP
+# Rule 50 (processed before allow rules because lower number)
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 50 --protocol -1 --cidr-block 198.51.100.0/24 --rule-action deny --ingress
+
+echo "✅ Blocked malicious IP range: 198.51.100.0/24"
+
+# Block another range
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 60 --protocol -1 --cidr-block 203.0.113.0/24 --rule-action deny --ingress
+
+echo "✅ Blocked another malicious range: 203.0.113.0/24"
+
+echo ""
+echo "NACL Rule Processing:"
+echo "  Rule 50: DENY 198.51.100.0/24 ❌"
+echo "  Rule 60: DENY 203.0.113.0/24 ❌"
+echo "  Rule 100: ALLOW HTTP from 0.0.0.0/0 ✅"
+echo "  Rule 110: ALLOW HTTPS from 0.0.0.0/0 ✅"
+echo ""
+echo "Rules processed in order! Lower numbers = higher priority!"
+```
+
+---
+
+## **Lab 77.4: Verify NACLs**
+
+```
+AWS Console → VPC → Network ACLs
+
+Public-NACL:
+Inbound:
+├─ 50: DENY 198.51.100.0/24 (all protocols) ❌
+├─ 60: DENY 203.0.113.0/24 (all protocols) ❌
+├─ 100: ALLOW 0.0.0.0/0 port 80 ✅
+├─ 110: ALLOW 0.0.0.0/0 port 443 ✅
+├─ 120: ALLOW your-ip port 22 ✅
+├─ 130: ALLOW 0.0.0.0/0 ports 1024-65535 ✅
+└─ *: DENY all (implicit)
+
+Outbound:
+├─ 100: ALLOW 0.0.0.0/0 port 80 ✅
+├─ 110: ALLOW 0.0.0.0/0 port 443 ✅
+├─ 120: ALLOW 0.0.0.0/0 ports 1024-65535 ✅
+└─ *: DENY all (implicit)
+
+Private-NACL:
+Inbound:
+├─ 100: ALLOW 10.0.0.0/16 all ✅
+├─ 110: ALLOW 0.0.0.0/0 ports 1024-65535 ✅
+└─ *: DENY all
+
+Outbound:
+├─ 100: ALLOW 10.0.0.0/16 all ✅
+├─ 110: ALLOW 0.0.0.0/0 port 80 ✅
+├─ 120: ALLOW 0.0.0.0/0 port 443 ✅
+└─ *: DENY all
+
+✅ Multi-layer security in place!
+```
+
+---
+
+# **COMPLETE ARCHITECTURE SUMMARY:**
+
+```
+┌─────────────────────────────────────────────────┐
+│         PRODUCTION VPC (10.0.0.0/16)           │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  Layer 1: VPC Isolation ✅                     │
+│  Layer 2: Subnet Segmentation ✅               │
+│  Layer 3: Route Tables ✅                      │
+│  Layer 4: Network ACLs ✅                      │
+│  Layer 5: Security Groups ✅                   │
+│  Layer 6: VPC Endpoints ✅                     │
+│                                                 │
+│  ┌──────────────────────────────────────────┐  │
+│  │  Public Subnet (10.0.1.0/24)            │  │
+│  │  - Internet Gateway access              │  │
+│  │  - Public NACL (restricted)             │  │
+│  │  - Web-Tier-SG (HTTP/HTTPS/SSH)        │  │
+│  │  - Auto-assign public IP               │  │
+│  └──────────────────────────────────────────┘  │
+│                      ↓                          │
+│  ┌──────────────────────────────────────────┐  │
+│  │  Private Subnet 1 (10.0.2.0/24)         │  │
+│  │  - NAT Gateway access (outbound only)   │  │
+│  │  - Private NACL                         │  │
+│  │  - App-Tier-SG (only from Web tier)    │  │
+│  │  - VPC Endpoints (S3, DynamoDB, EC2)   │  │
+│  └──────────────────────────────────────────┘  │
+│                      ↓                          │
+│  ┌──────────────────────────────────────────┐  │
+│  │  Private Subnet 2 (10.0.3.0/24)         │  │
+│  │  - NAT Gateway access (updates only)    │  │
+│  │  - Private NACL                         │  │
+│  │  - DB-Tier-SG (only from App tier)     │  │
+│  │  - No internet inbound                  │  │
+│  └──────────────────────────────────────────┘  │
+│                                                 │
+└─────────────────────────────────────────────────┘
+
+Defense in Depth = Multiple Security Layers! 🛡️
+```
+
+---
+
+## **RESOURCES CREATED:**
+
+```
+✅ VPC: Production-VPC (10.0.0.0/16)
+✅ Subnets: 3 (1 public, 2 private)
+✅ Internet Gateway: Production-IGW
+✅ NAT Gateway: Production-NAT-GW
+✅ Route Tables: 2 (public, private)
+✅ Security Groups: 4 (web, app, db, vpce)
+✅ VPC Endpoints: 3 (S3, DynamoDB, EC2)
+✅ Network ACLs: 2 (public, private)
+
+This is PRODUCTION-READY architecture! 🎯
+```
+
+---
+
+## **COST BREAKDOWN:**
+
+```
+Monthly costs for this architecture:
+
+FREE:
+├─ VPC ✅
+├─ Subnets ✅
+├─ Internet Gateway ✅
+├─ Route Tables ✅
+├─ Security Groups ✅
+├─ S3 Gateway Endpoint ✅
+└─ DynamoDB Gateway Endpoint ✅
+
+PAID:
+├─ NAT Gateway: ~$32/month + $0.045/GB
+├─ Elastic IP (for NAT): ~$0 (attached)
+├─ EC2 Interface Endpoint: ~$7/month
+└─ Data transfer: Variable
+
+Total: ~$40-50/month (without EC2 instances)
+
+Worth it for enterprise security! 💰
+```
+
+---
+
+## **SAVE YOUR WORK:**
+
+```bash
+# CloudShell - Save all IDs for cleanup later
+
+cat > vpc-resources.txt << EOF
+VPC_ID=$VPC_ID
+PUBLIC_SUBNET=$PUBLIC_SUBNET
+PRIVATE_SUBNET_1=$PRIVATE_SUBNET_1
+PRIVATE_SUBNET_2=$PRIVATE_SUBNET_2
+IGW_ID=$IGW_ID
+NAT_GW_ID=$NAT_GW_ID
+PUBLIC_RT=$PUBLIC_RT
+PRIVATE_RT=$PRIVATE_RT
+WEB_SG=$WEB_SG
+APP_SG=$APP_SG
+DB_SG=$DB_SG
+VPCE_SG=$VPCE_SG
+S3_ENDPOINT=$S3_ENDPOINT
+DYNAMODB_ENDPOINT=$DYNAMODB_ENDPOINT
+EC2_ENDPOINT=$EC2_ENDPOINT
+PUBLIC_NACL=$PUBLIC_NACL
+PRIVATE_NACL=$PRIVATE_NACL
+EOF
+
+cat vpc-resources.txt
+
+echo "✅ Resource IDs saved to vpc-resources.txt"
+```
+
+---
+
+**TAKE A 10-MINUTE BREAK!** ☕☕
+
+You just built an **enterprise-grade secure VPC** from scratch!
+
+---
+
+## **WHAT'S NEXT:**
+
+**Day 22 Labs Complete!** ✅
+
+Tomorrow (or next session):
+- **Day 23:** Security Groups & NACLs Deep Dive
+- **Day 24:** VPC Flow Logs & Network Monitoring
+- **Day 25:** AWS Network Firewall
+
+---
+
+**How are you feeling?** 🚀
+
+**A) Continue to Day 23 now** (if you have energy!)
+
+**B) Stop here, review Stephane's videos later** ⭐ (recommended)
+
+**C) Take a break, resume tomorrow**
+
+Let me know! 💪
+
+
+
+----------------------
+CLEAN UP
+----------------------
+# **VPC CLEANUP - COMPLETE TEARDOWN 🧹**
+
+Let's clean up all resources to avoid charges (especially NAT Gateway = $32/month!)
+
+---
+
+## **IMPORTANT: CLEANUP ORDER MATTERS!**
+
+```
+AWS resources have dependencies. Must delete in this order:
+
+1. VPC Endpoints (dependent on subnets)
+2. NAT Gateway (dependent on subnet/EIP)
+3. Release Elastic IP (after NAT deleted)
+4. EC2 Instances (if any were launched)
+5. Network ACL associations (revert to default)
+6. Route table associations (revert to default)
+7. Routes (delete custom routes)
+8. Internet Gateway (detach then delete)
+9. Subnets (after everything using them is gone)
+10. Security Groups (after instances deleted)
+11. Route Tables (custom ones)
+12. VPC (last - after everything else)
+
+Wrong order = errors! ❌
+```
+
+---
+
+## **AUTOMATED CLEANUP SCRIPT:**
+
+```bash
+# CloudShell
+
+echo "=== Starting VPC Cleanup ==="
+echo "This will delete ALL resources we created today"
+echo ""
+
+# Load saved resource IDs (if you saved them earlier)
+# If not, you'll need to find them manually in console
+
+# Or set them manually:
+# VPC_ID="vpc-xxxxx"
+# NAT_GW_ID="nat-xxxxx"
+# etc.
+
+# Check if variables are set
+if [ -z "$VPC_ID" ]; then
+    echo "Error: VPC_ID not set. Please set resource IDs first."
+    echo "Run: source vpc-resources.txt"
+    exit 1
+fi
+
+echo "Cleaning up VPC: $VPC_ID"
+echo ""
+
+# STEP 1: Delete VPC Endpoints
+echo "Step 1: Deleting VPC Endpoints..."
+
+if [ ! -z "$EC2_ENDPOINT" ]; then
+    aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $EC2_ENDPOINT
+    echo "  ✅ Deleted EC2 Interface Endpoint"
+fi
+
+if [ ! -z "$S3_ENDPOINT" ]; then
+    aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $S3_ENDPOINT
+    echo "  ✅ Deleted S3 Gateway Endpoint"
+fi
+
+if [ ! -z "$DYNAMODB_ENDPOINT" ]; then
+    aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $DYNAMODB_ENDPOINT
+    echo "  ✅ Deleted DynamoDB Gateway Endpoint"
+fi
+
+sleep 5
+
+# STEP 2: Delete NAT Gateway
+echo "Step 2: Deleting NAT Gateway..."
+
+if [ ! -z "$NAT_GW_ID" ]; then
+    aws ec2 delete-nat-gateway --nat-gateway-id $NAT_GW_ID
+    echo "  ✅ NAT Gateway deletion initiated: $NAT_GW_ID"
+    echo "  ⏱️  Waiting for NAT Gateway to delete (2-3 minutes)..."
+    
+    # Wait for NAT Gateway to be deleted
+    while true; do
+        STATE=$(aws ec2 describe-nat-gateways --nat-gateway-ids $NAT_GW_ID --query 'NatGateways[0].State' --output text 2>/dev/null)
+        if [ "$STATE" == "deleted" ] || [ -z "$STATE" ]; then
+            echo "  ✅ NAT Gateway deleted"
+            break
+        fi
+        echo "  ... NAT Gateway state: $STATE"
+        sleep 10
+    done
+fi
+
+# STEP 3: Release Elastic IP
+echo "Step 3: Releasing Elastic IP..."
+
+if [ ! -z "$EIP_ALLOC" ]; then
+    aws ec2 release-address --allocation-id $EIP_ALLOC
+    echo "  ✅ Elastic IP released: $EIP_ALLOC"
+fi
+
+# STEP 4: Detach and Delete Internet Gateway
+echo "Step 4: Deleting Internet Gateway..."
+
+if [ ! -z "$IGW_ID" ]; then
+    aws ec2 detach-internet-gateway --internet-gateway-id $IGW_ID --vpc-id $VPC_ID 2>/dev/null
+    echo "  ✅ Internet Gateway detached"
+    
+    aws ec2 delete-internet-gateway --internet-gateway-id $IGW_ID
+    echo "  ✅ Internet Gateway deleted: $IGW_ID"
+fi
+
+# STEP 5: Delete custom route table associations and routes
+echo "Step 5: Cleaning up Route Tables..."
+
+if [ ! -z "$PUBLIC_RT" ]; then
+    # Disassociate from subnet
+    ASSOC_ID=$(aws ec2 describe-route-tables --route-table-ids $PUBLIC_RT --query 'RouteTables[0].Associations[?SubnetId!=`null`].RouteTableAssociationId' --output text)
+    if [ ! -z "$ASSOC_ID" ]; then
+        aws ec2 disassociate-route-table --association-id $ASSOC_ID 2>/dev/null
+        echo "  ✅ Public route table disassociated"
+    fi
+    
+    # Delete route table
+    aws ec2 delete-route-table --route-table-id $PUBLIC_RT
+    echo "  ✅ Public route table deleted: $PUBLIC_RT"
+fi
+
+if [ ! -z "$PRIVATE_RT" ]; then
+    # Disassociate from subnets
+    ASSOC_IDS=$(aws ec2 describe-route-tables --route-table-ids $PRIVATE_RT --query 'RouteTables[0].Associations[?SubnetId!=`null`].RouteTableAssociationId' --output text)
+    for ASSOC_ID in $ASSOC_IDS; do
+        aws ec2 disassociate-route-table --association-id $ASSOC_ID 2>/dev/null
+    done
+    echo "  ✅ Private route table disassociated"
+    
+    # Delete route table
+    aws ec2 delete-route-table --route-table-id $PRIVATE_RT
+    echo "  ✅ Private route table deleted: $PRIVATE_RT"
+fi
+
+# STEP 6: Delete custom Network ACL associations
+echo "Step 6: Cleaning up Network ACLs..."
+
+if [ ! -z "$PUBLIC_NACL" ]; then
+    aws ec2 delete-network-acl --network-acl-id $PUBLIC_NACL 2>/dev/null
+    echo "  ✅ Public NACL deleted: $PUBLIC_NACL"
+fi
+
+if [ ! -z "$PRIVATE_NACL" ]; then
+    aws ec2 delete-network-acl --network-acl-id $PRIVATE_NACL 2>/dev/null
+    echo "  ✅ Private NACL deleted: $PRIVATE_NACL"
+fi
+
+# STEP 7: Delete Subnets
+echo "Step 7: Deleting Subnets..."
+
+if [ ! -z "$PUBLIC_SUBNET" ]; then
+    aws ec2 delete-subnet --subnet-id $PUBLIC_SUBNET
+    echo "  ✅ Public subnet deleted: $PUBLIC_SUBNET"
+fi
+
+if [ ! -z "$PRIVATE_SUBNET_1" ]; then
+    aws ec2 delete-subnet --subnet-id $PRIVATE_SUBNET_1
+    echo "  ✅ Private subnet 1 deleted: $PRIVATE_SUBNET_1"
+fi
+
+if [ ! -z "$PRIVATE_SUBNET_2" ]; then
+    aws ec2 delete-subnet --subnet-id $PRIVATE_SUBNET_2
+    echo "  ✅ Private subnet 2 deleted: $PRIVATE_SUBNET_2"
+fi
+
+# STEP 8: Delete Security Groups
+echo "Step 8: Deleting Security Groups..."
+
+# Delete in reverse dependency order
+if [ ! -z "$DB_SG" ]; then
+    aws ec2 delete-security-group --group-id $DB_SG 2>/dev/null
+    echo "  ✅ DB security group deleted: $DB_SG"
+fi
+
+if [ ! -z "$APP_SG" ]; then
+    aws ec2 delete-security-group --group-id $APP_SG 2>/dev/null
+    echo "  ✅ App security group deleted: $APP_SG"
+fi
+
+if [ ! -z "$WEB_SG" ]; then
+    aws ec2 delete-security-group --group-id $WEB_SG 2>/dev/null
+    echo "  ✅ Web security group deleted: $WEB_SG"
+fi
+
+if [ ! -z "$VPCE_SG" ]; then
+    aws ec2 delete-security-group --group-id $VPCE_SG 2>/dev/null
+    echo "  ✅ VPC Endpoint security group deleted: $VPCE_SG"
+fi
+
+# STEP 9: Delete VPC
+echo "Step 9: Deleting VPC..."
+
+if [ ! -z "$VPC_ID" ]; then
+    aws ec2 delete-vpc --vpc-id $VPC_ID
+    echo "  ✅ VPC deleted: $VPC_ID"
+fi
+
+# STEP 10: Clean up local files
+echo "Step 10: Cleaning up local files..."
+
+rm -f vpc-resources.txt
+echo "  ✅ Local resource file deleted"
+
+echo ""
+echo "=== CLEANUP COMPLETE! ==="
+echo ""
+echo "All resources deleted successfully! ✅"
+echo ""
+echo "Verify in AWS Console:"
+echo "  - VPC Console → VPCs (should be empty or only default)"
+echo "  - VPC Console → NAT Gateways (should be deleted)"
+echo "  - VPC Console → Elastic IPs (should be released)"
+echo ""
+echo "Monthly cost savings: ~$40-50 💰"
+```
+
+---
+
+## **MANUAL CLEANUP (If Script Fails):**
+
+### **Via AWS Console:**
+
+```
+Step 1: VPC Dashboard → Endpoints
+└─ Select all endpoints → Actions → Delete ✅
+
+Step 2: VPC Dashboard → NAT Gateways
+└─ Select NAT Gateway → Actions → Delete NAT Gateway ✅
+└─ Wait 2-3 minutes for deletion
+
+Step 3: VPC Dashboard → Elastic IPs
+└─ Select EIP → Actions → Release Elastic IP address ✅
+
+Step 4: VPC Dashboard → Internet Gateways
+└─ Select IGW → Actions → Detach from VPC ✅
+└─ Then: Actions → Delete Internet Gateway ✅
+
+Step 5: VPC Dashboard → Route Tables
+└─ Select custom route tables → Actions → Delete ✅
+└─ (Cannot delete main route table)
+
+Step 6: VPC Dashboard → Network ACLs
+└─ Select custom NACLs → Actions → Delete ✅
+└─ (Cannot delete default NACL)
+
+Step 7: VPC Dashboard → Subnets
+└─ Select all subnets → Actions → Delete subnet ✅
+
+Step 8: EC2 Dashboard → Security Groups
+└─ Select custom security groups → Actions → Delete ✅
+└─ (Cannot delete default SG)
+└─ Delete in order: DB-SG, App-SG, Web-SG, VPCE-SG
+
+Step 9: VPC Dashboard → Your VPCs
+└─ Select Production-VPC → Actions → Delete VPC ✅
+
+✅ All cleaned up!
+```
+
+---
+
+## **VERIFY CLEANUP:**
+
+```bash
+# CloudShell - Verify everything is deleted
+
+echo "=== Verifying Cleanup ==="
+
+# Check VPCs (should only see default VPC)
+echo "VPCs remaining:"
+aws ec2 describe-vpcs --query 'Vpcs[*].[VpcId,Tags[?Key==`Name`].Value|[0],CidrBlock]' --output table
+
+# Check NAT Gateways (should be empty or deleted)
+echo "NAT Gateways:"
+aws ec2 describe-nat-gateways --filter "Name=state,Values=available,pending,deleting" --query 'NatGateways[*].[NatGatewayId,State]' --output table
+
+# Check Elastic IPs (should not have NAT Gateway EIP)
+echo "Elastic IPs:"
+aws ec2 describe-addresses --query 'Addresses[*].[PublicIp,AllocationId,InstanceId]' --output table
+
+echo ""
+echo "If tables are empty (except default VPC), cleanup successful! ✅"
+```
+
+---
+
+## **COST SAVINGS:**
+
+```
+Resources deleted:
+
+Monthly costs eliminated:
+├─ NAT Gateway: $32/month ✅ SAVED
+├─ NAT Gateway data: $0.045/GB ✅ SAVED
+├─ Elastic IP (if unattached): $3.60/month ✅ SAVED
+├─ EC2 Interface Endpoint: $7/month ✅ SAVED
+└─ Total: ~$40-50/month SAVED! 💰
+
+Resources kept (FREE):
+├─ Default VPC ✅
+├─ Knowledge gained ✅
+└─ Skills learned ✅
+
+Best investment: Your learning! 📚
+```
+
+---
+
+## **WHAT YOU LEARNED TODAY:**
+
+```markdown
+# Day 22: VPC Security Fundamentals - COMPLETE ✅
+## Date: March 9, 2026
+
+### Labs Completed:
+✅ Lab 74: Created secure 3-tier VPC architecture
+✅ Lab 75: Implemented Security Groups (tier isolation)
+✅ Lab 76: Configured VPC Endpoints (private AWS access)
+✅ Lab 77: Set up Network ACLs (subnet firewalls)
+✅ Cleanup: All resources deleted
+
+### Architecture Built:
+- Production VPC (10.0.0.0/16)
+- 3 subnets (1 public, 2 private)
+- Internet Gateway (public internet access)
+- NAT Gateway (private outbound access)
+- 2 route tables (public/private routing)
+- 4 security groups (web/app/db/vpce)
+- 3 VPC endpoints (S3/DynamoDB/EC2)
+- 2 Network ACLs (public/private)
+
+### Defense in Depth Layers:
+1. VPC isolation
+2. Subnet segmentation
+3. Route table control
+4. Network ACLs (subnet-level)
+5. Security Groups (instance-level)
+6. VPC Endpoints (private access)
+
+### Key Learnings:
+
+**VPC Security Principles:**
+- Network segmentation (public/private)
+- Least privilege network access
+- Defense in depth (multiple layers)
+- Private by default
+- Stateful vs Stateless firewalls
+
+**Security Groups:**
+- Stateful (return traffic automatic)
+- Instance-level (attached to ENI)
+- Only ALLOW rules
+- Can reference other security groups
+- Default: Deny inbound, Allow outbound
+
+**Network ACLs:**
+- Stateless (must allow return traffic)
+- Subnet-level (applies to all instances)
+- ALLOW and DENY rules
+- Rules numbered (processed in order)
+- Default: Allow all
+
+**VPC Endpoints:**
+- Gateway Endpoints: S3, DynamoDB (FREE!)
+- Interface Endpoints: Most services (~$7/month)
+- Benefits: Security, cost savings, lower latency
+
+### Real-World Application:
+- 3-tier web application architecture
+- Zero-trust networking
+- Compliance requirements (PCI-DSS, HIPAA)
+- Production-grade security
+
+### Time Spent: 3 hours
+### Confidence: 9/10 ✅
+### Cost: ~$0 (all resources deleted)
+
+### Next: Day 23 - Security Groups & NACLs Deep Dive
+```
+
+---
+
+## **SAVE DOCUMENTATION:**
+
+```bash
+cd aws-security-journey
+
+cat > labs/day22-vpc-security.md << 'EOF'
+[Paste documentation above]
+EOF
+
+git add .
+git commit -m "Day 22: VPC Security complete - built and cleaned up secure 3-tier architecture"
+git push
+
+✅ Progress saved!
+```
+
+---
+
+## **WEEK 4 PROGRESS:**
+
+```
+Week 4: Network Security
+
+✅ Day 22 (Mar 9): VPC Security Fundamentals - COMPLETE!
+
+Remaining:
+→ Day 23: Security Groups & NACLs Deep Dive
+→ Day 24: VPC Flow Logs & Network Monitoring
+→ Day 25: AWS Network Firewall
+→ Day 26: AWS WAF & Shield
+→ Day 27: Route 53 Security & VPC Endpoints
+→ Day 28: Week 4 Review
+
+Progress: 1/7 days (14% of Week 4)
+Overall: 53% of certification! 🎯
+```
+
+---
+
+## **EXCELLENT WORK TODAY!** 🎉
+
+You built a **production-grade secure VPC** from scratch and learned enterprise networking!
+
+---
+
+## **WHAT'S NEXT?**
+
+**A) Continue to Day 23 now** (Security Groups & NACLs deep dive)
+
+**B) Stop here, watch Stephane's VPC videos** ⭐ (recommended)
+
+**C) Rest, resume tomorrow**
+
+**Let me know!** 🚀
+
+**You're now 53% through the AWS Security Specialist certification!** 💪✨

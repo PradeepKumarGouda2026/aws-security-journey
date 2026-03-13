@@ -1,0 +1,471 @@
+WEEK 3 REVIEW + PROJECT ⭐ (Recommended)
+Why: Solidify Week 3 before moving forward
+
+Time: 2-3 hours
+
+Activities:
+├─ Quick recap of all 6 services (30 min)
+├─ Build final integration project (90 min)
+├─ Practice questions (30 min)
+└─ Document learnings
+
+Benefits:
+✅ Reinforces Week 3 knowledge
+✅ Identifies any gaps
+✅ Builds confidence
+✅ Creates portfolio project
+✅ Smooth transition to Week 4
+
+This is what professionals do! 📚
+
+
+
+
+# **PERFECT PLAN! LET'S DO BOTH! 📚**
+
+You'll get:
+- **Option A NOW:** Week 3 Review + Project (interactive, 2-3 hours)
+- **Option C LATER:** Full Weeks 1-3 Review Document (for your free time)
+
+Let's start!
+
+---
+
+# **OPTION A: WEEK 3 REVIEW + PROJECT**
+
+---
+
+# **PART 1: WEEK 3 QUICK RECAP (30 MIN)**
+
+## **Service 1: CloudTrail - "What Happened?"**
+
+### **Core Concept:**
+```
+CloudTrail = Complete audit trail of every API call
+
+What it logs:
+├─ Who: UserIdentity (IAM user, role, root)
+├─ What: EventName (CreateBucket, PutObject, etc.)
+├─ When: EventTime (precise timestamp)
+├─ Where: SourceIPAddress + Region
+├─ Result: Success or error
+└─ Details: Full request/response parameters
+
+Use cases:
+✅ Security investigation (who deleted my bucket?)
+✅ Compliance audit trail (prove what happened)
+✅ Troubleshooting (why did API call fail?)
+✅ Anomaly detection (unusual activity patterns)
+```
+
+### **Key Features You Built:**
+```
+✅ Trail: security-audit-trail
+✅ S3 bucket: cloudtrail-logs-pradeep-2026
+✅ CloudWatch integration (8 metric filters)
+✅ Athena queries for analysis
+✅ SNS alerts: SecurityAlerts topic
+✅ Log file validation (tamper-proof)
+
+Metric filters created:
+1. Root account usage
+2. Failed console logins
+3. Unauthorized API calls
+4. S3 bucket changes
+5. IAM policy changes
+6. Security group changes
+7. Network ACL changes
+8. KMS key changes
+```
+
+### **Exam Tips:**
+```
+Q: How to track ALL API calls in AWS account?
+A: Enable CloudTrail
+
+Q: How to prevent CloudTrail log tampering?
+A: Enable log file validation
+
+Q: How to search CloudTrail logs efficiently?
+A: Use Amazon Athena (SQL queries)
+
+Q: How to get real-time alerts from CloudTrail?
+A: CloudTrail → CloudWatch Logs → Metric Filters → Alarms
+
+Q: Does CloudTrail log data events by default?
+A: NO - only management events. Must enable data events separately.
+```
+
+---
+
+## **Service 2: GuardDuty - "Is It Malicious?"**
+
+### **Core Concept:**
+```
+GuardDuty = AI-powered threat detection
+
+Data sources (automatic):
+├─ CloudTrail event logs
+├─ VPC Flow Logs
+├─ DNS logs
+├─ EKS audit logs (optional)
+├─ RDS login activity (optional)
+└─ Lambda network activity (optional)
+
+Machine Learning analyzes for:
+├─ Compromised instances (crypto mining, backdoors)
+├─ Stolen credentials (Tor usage, unusual locations)
+├─ Reconnaissance (port scanning, enumeration)
+├─ Data exfiltration (unusual data transfer)
+└─ 100+ threat types
+
+Key: NO agents, NO configuration needed!
+```
+
+### **Threat Categories You Learned:**
+```
+1. Backdoor - C&C communication
+2. Behavior - Unusual API calls
+3. CryptoCurrency - Mining detected (HIGH $$$ impact!)
+4. PenTest - Kali Linux, scanning tools
+5. Policy - Security controls disabled
+6. PrivilegeEscalation - Attacker gaining access
+7. Recon - Port scanning, enumeration
+8. ResourceConsumption - Launching expensive instances
+9. Stealth - Covering tracks, deleting logs
+10. Trojan - Malware detected
+11. UnauthorizedAccess - Stolen credentials, Tor
+12. Impact - Data exfiltration
+
+Severity: 0.1 (Low) to 8.9+ (Critical)
+```
+
+### **What You Built:**
+```
+✅ Enabled GuardDuty (1-click!)
+✅ Generated 50+ sample findings
+✅ Created SNS email alerts
+✅ Built Lambda auto-isolation function
+✅ EventBridge rule for automated response
+
+Auto-response workflow:
+GuardDuty finding (severity ≥7.0)
+→ EventBridge
+→ Lambda (IsolateCompromisedInstance)
+→ Changes security group to isolation-sg
+→ SNS notification
+→ Instance quarantined in seconds! 🔒
+```
+
+### **Exam Tips:**
+```
+Q: Real-time threat detection in AWS?
+A: Amazon GuardDuty
+
+Q: Does GuardDuty require agents on EC2?
+A: NO - completely agentless
+
+Q: How to automate response to GuardDuty findings?
+A: EventBridge + Lambda
+
+Q: GuardDuty vs Inspector - what's the difference?
+A: GuardDuty = Runtime threats (active attacks)
+   Inspector = Vulnerabilities (CVEs, misconfigurations)
+
+Q: Cost of GuardDuty?
+A: ~$4-10/month per account + usage
+```
+
+---
+
+## **Service 3: Macie - "Where's Sensitive Data?"**
+
+### **Core Concept:**
+```
+Macie = AI-powered sensitive data discovery in S3
+
+What it finds:
+├─ PII: SSN, driver's license, passport, names
+├─ PHI: Medical records, insurance IDs
+├─ Financial: Credit cards, bank accounts
+├─ Credentials: AWS keys, API keys, passwords
+├─ 100+ managed data identifiers
+└─ Custom identifiers (your regex patterns)
+
+How it works:
+1. Scans S3 bucket contents (not just metadata!)
+2. Uses ML to identify sensitive data
+3. Creates findings with exact locations
+4. Maps to compliance standards
+5. Alerts via EventBridge
+```
+
+### **What You Found:**
+```
+Test data scanned:
+├─ 5 credit card numbers (customers.csv)
+├─ 3 Social Security Numbers (employees.txt)
+├─ 2 AWS access keys (config-backup.txt)
+├─ 2 medical record numbers (patients.json)
+└─ Custom patterns: Employee IDs, Customer IDs
+
+Custom data identifiers created:
+1. EMP-[0-9]{5} - Employee IDs
+2. CUST-[0-9]{4}-[0-9]{5} - Customer IDs
+3. ACC-(US|EU|AP)-[0-9]{6} - Account numbers
+4. PROJ-(ALPHA|BETA|GAMMA)-[0-9]{3} - Project codes
+
+Total findings: 31 sensitive data discoveries! 🔍
+```
+
+### **Exam Tips:**
+```
+Q: Find all S3 buckets containing credit card numbers?
+A: Amazon Macie
+
+Q: Macie vs GuardDuty - difference?
+A: Macie = Data discovery (PII/PHI in S3)
+   GuardDuty = Threat detection (active attacks)
+
+Q: Does Macie run continuously?
+A: NO - job-based (schedule or one-time)
+
+Q: How to find company-specific sensitive data?
+A: Macie custom data identifiers (regex patterns)
+
+Q: Cost of Macie?
+A: EXPENSIVE - $1/GB scanned + $0.10/bucket/month
+   Use for audits, then disable!
+```
+
+---
+
+## **Service 4: Inspector - "What's Vulnerable?"**
+
+### **Core Concept:**
+```
+Inspector = Automated vulnerability scanner
+
+What it scans:
+├─ EC2 instances (OS packages, network)
+├─ ECR container images (all layers)
+├─ Lambda functions (runtime, dependencies)
+
+What it finds:
+├─ CVEs (Common Vulnerabilities and Exposures)
+├─ Package vulnerabilities
+├─ Network misconfigurations (0.0.0.0/0)
+├─ Software outdated versions
+└─ Missing security patches
+
+CVSS Scoring:
+├─ Critical: 9.0-10.0 (patch immediately!)
+├─ High: 7.0-8.9 (patch within 7 days)
+├─ Medium: 4.0-6.9 (patch within 30 days)
+└─ Low: 0.1-3.9 (patch when convenient)
+```
+
+### **What You Discovered:**
+```
+EC2 vulnerabilities:
+├─ Found: 15-20 CVEs
+├─ Critical: 2 (OpenSSL RCE, kernel exploit)
+├─ High: 8
+├─ Remediation: sudo yum update -y
+└─ Result: All critical/high CLOSED ✅
+
+Container vulnerabilities:
+├─ v1.0 (vulnerable): 28 CVEs
+│   ├─ flask==1.1.1
+│   ├─ requests==2.20.0
+│   └─ urllib3==1.24.1
+├─ v2.0 (fixed): 2 CVEs (93% reduction!)
+│   ├─ flask==3.0.0
+│   └─ requests==2.31.0
+└─ Production-ready container security! 🎉
+
+Network findings:
+├─ SSH (22) open to 0.0.0.0/0
+├─ HTTP (80) open to 0.0.0.0/0
+└─ Created suppression rules for accepted risks
+```
+
+### **Exam Tips:**
+```
+Q: Continuous vulnerability scanning for EC2?
+A: AWS Inspector
+
+Q: Does Inspector require agents?
+A: YES - SSM Agent (auto-installed on Amazon Linux 2023)
+
+Q: Scan container images for CVEs?
+A: Inspector ECR scanning (automatic on push)
+
+Q: Cost of Inspector?
+A: $1.25/EC2/month, $0.09/container scan, $0.30/Lambda/month
+
+Q: Inspector vs GuardDuty?
+A: Inspector = Vulnerabilities (CVEs, static analysis)
+   GuardDuty = Threats (runtime, active attacks)
+```
+
+---
+
+## **Service 5: Security Hub - "Show Me Everything"**
+
+### **Core Concept:**
+```
+Security Hub = Central security command center
+
+Aggregates findings from:
+├─ GuardDuty (threats)
+├─ Inspector (vulnerabilities)
+├─ Macie (sensitive data)
+├─ IAM Access Analyzer (permissions)
+├─ AWS Config (compliance)
+├─ Firewall Manager
+├─ Systems Manager
+└─ 50+ third-party tools
+
+Provides:
+├─ Unified dashboard (single pane of glass)
+├─ Security score (0-100)
+├─ Compliance dashboards (CIS, PCI-DSS, AWS)
+├─ Automated insights
+├─ Cross-account/region aggregation
+└─ ASFF (AWS Security Finding Format)
+```
+
+### **Security Standards You Enabled:**
+```
+1. CIS AWS Foundations Benchmark v1.2
+   ├─ 43 controls
+   ├─ Your score: ~87%
+   └─ Top issue: Root MFA not enabled
+
+2. PCI-DSS v3.2.1
+   ├─ 38 controls
+   ├─ Your score: ~92%
+   └─ Top issue: Some S3 buckets unencrypted
+
+3. AWS Foundational Security Best Practices
+   ├─ 100+ controls
+   ├─ Your score: ~95%
+   └─ Top issue: EBS volumes unencrypted
+
+Total findings unified: 100-150 across all services!
+```
+
+### **What You Built:**
+```
+✅ Enabled Security Hub with 3 standards
+✅ Custom insights:
+   ├─ Production critical findings
+   ├─ Unencrypted data at rest
+   ├─ Network exposure risks
+   └─ Critical findings last 7 days
+
+✅ Automated alerts:
+   EventBridge → SNS (critical findings)
+
+✅ Auto-remediation:
+   EventBridge → Lambda → S3 Block Public Access
+   Finding status updated to RESOLVED
+
+✅ Multi-account aggregation (conceptual)
+```
+
+### **Exam Tips:**
+```
+Q: Central dashboard for all security findings?
+A: AWS Security Hub
+
+Q: Compliance dashboards (CIS, PCI-DSS)?
+A: Security Hub security standards
+
+Q: Security Hub generates findings?
+A: NO - aggregates from other services
+
+Q: Automate remediation of Security Hub findings?
+A: EventBridge + Lambda
+
+Q: Security score for management?
+A: Security Hub security score (0-100)
+
+Q: Multi-account security visibility?
+A: Security Hub with AWS Organizations integration
+```
+
+---
+
+## **Service 6: CloudWatch - "Real-Time Visibility"**
+
+### **Core Concept:**
+```
+CloudWatch = Monitoring, logging, and observability
+
+For security:
+├─ CloudWatch Logs (centralized logging)
+├─ Metric Filters (pattern → metric)
+├─ Alarms (threshold → action)
+├─ Insights (SQL-like queries)
+└─ Dashboards (visual monitoring)
+
+Integration:
+CloudTrail → CloudWatch Logs → Metric Filters → Alarms → SNS
+```
+
+### **What You Created:**
+```
+Metric Filters (6 total):
+1. FailedConsoleLogins
+2. RootAccountUsage
+3. UnauthorizedAPICalls
+4. SecurityGroupChanges
+5. S3BucketDeletions
+6. IAMPolicyChanges
+
+CloudWatch Alarms (4 total):
+1. FailedConsoleLogins-HighRate (>5 in 5 min)
+2. RootAccountUsage-Alert (any usage)
+3. UnauthorizedAPI-HighRate (>10 in 5 min)
+4. SecurityGroupChanges-Unusual (>3 in 5 min)
+
+All → SNS → Email notifications ✅
+
+CloudWatch Insights Queries:
+├─ Failed API calls
+├─ Root account activity
+├─ Security group changes
+├─ S3 access patterns
+├─ IP-based investigation
+├─ Failed logins by user
+└─ Geographic anomaly detection
+```
+
+### **Exam Tips:**
+```
+Q: Real-time alerts from CloudTrail events?
+A: CloudTrail → CloudWatch Logs → Metric Filters → Alarms
+
+Q: Query logs for security investigation?
+A: CloudWatch Logs Insights
+
+Q: Detect unusual API patterns?
+A: CloudWatch metric filters + anomaly detection alarms
+
+Q: Dashboard for security metrics?
+A: CloudWatch Dashboards
+
+Q: Cost of CloudWatch?
+A: $0.50/GB ingestion, $0.03/GB storage, $0.10/alarm/month
+```
+
+---
+
+**TAKE A 5-MINUTE BREAK!** ☕
+
+Next: Integration Project (the fun part!)
+
+**Ready to continue?** 🚀
+
