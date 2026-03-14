@@ -1,0 +1,382 @@
+# **HANDS-ON LABS: SECURITY GROUPS & NACLs MASTERY! 🔥**
+
+Let's build real-world scenarios and test them!
+
+---
+
+# **LAB 78: SECURITY GROUP ADVANCED PATTERNS**
+
+## **Lab 78.1: Create Test VPC (Simple Architecture)**
+
+```bash
+# CloudShell
+
+echo "=== Creating Test VPC for SG/NACL Labs ==="
+
+# Create VPC
+TEST_VPC=$(aws ec2 create-vpc --cidr-block 10.1.0.0/16 --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=Test-VPC}]' --query 'Vpc.VpcId' --output text)
+
+aws ec2 modify-vpc-attribute --vpc-id $TEST_VPC --enable-dns-hostnames
+
+echo "Test VPC created: $TEST_VPC"
+
+# Create 2 subnets
+TEST_PUBLIC=$(aws ec2 create-subnet --vpc-id $TEST_VPC --cidr-block 10.1.1.0/24 --availability-zone us-east-1a --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Test-Public}]' --query 'Subnet.SubnetId' --output text)
+
+TEST_PRIVATE=$(aws ec2 create-subnet --vpc-id $TEST_VPC --cidr-block 10.1.2.0/24 --availability-zone us-east-1a --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Test-Private}]' --query 'Subnet.SubnetId' --output text)
+
+aws ec2 modify-subnet-attribute --subnet-id $TEST_PUBLIC --map-public-ip-on-launch
+
+echo "Subnets created:"
+echo "  Public: $TEST_PUBLIC"
+echo "  Private: $TEST_PRIVATE"
+
+# Create and attach IGW
+TEST_IGW=$(aws ec2 create-internet-gateway --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=Test-IGW}]' --query 'InternetGateway.InternetGatewayId' --output text)
+
+aws ec2 attach-internet-gateway --internet-gateway-id $TEST_IGW --vpc-id $TEST_VPC
+
+echo "Internet Gateway attached: $TEST_IGW"
+
+# Create route table for public subnet
+TEST_RT=$(aws ec2 create-route-table --vpc-id $TEST_VPC --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=Test-Public-RT}]' --query 'RouteTable.RouteTableId' --output text)
+
+aws ec2 create-route --route-table-id $TEST_RT --destination-cidr-block 0.0.0.0/0 --gateway-id $TEST_IGW
+
+aws ec2 associate-route-table --route-table-id $TEST_RT --subnet-id $TEST_PUBLIC
+
+echo "Route table configured: $TEST_RT"
+echo "✅ Test VPC ready for experiments!"
+```
+
+---
+
+## **Lab 78.2: Pattern - Security Group Chaining**
+
+```bash
+# CloudShell
+
+echo "=== Creating Security Group Chain ==="
+
+# Web Tier Security Group
+WEB_SG=$(aws ec2 create-security-group --group-name web-tier --description "Web tier security group" --vpc-id $TEST_VPC --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Web-Tier-SG}]' --query 'GroupId' --output text)
+
+echo "Web SG created: $WEB_SG"
+
+# Allow HTTP from internet
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 80 --cidr 0.0.0.0/0
+
+# Allow HTTPS from internet
+aws ec2 authorize-security-group-ingress --group-id $WEB_SG --protocol tcp --port 443 --cidr 0.0.0.0/0
+
+echo "✅ Web tier: Allows HTTP/HTTPS from internet"
+
+# App Tier Security Group
+APP_SG=$(aws ec2 create-security-group --group-name app-tier --description "App tier security group" --vpc-id $TEST_VPC --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=App-Tier-SG}]' --query 'GroupId' --output text)
+
+echo "App SG created: $APP_SG"
+
+# Allow port 8080 ONLY from Web tier (security group reference!)
+aws ec2 authorize-security-group-ingress --group-id $APP_SG --protocol tcp --port 8080 --source-group $WEB_SG
+
+echo "✅ App tier: Allows 8080 ONLY from Web tier"
+
+# Database Tier Security Group
+DB_SG=$(aws ec2 create-security-group --group-name db-tier --description "Database tier security group" --vpc-id $TEST_VPC --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=DB-Tier-SG}]' --query 'GroupId' --output text)
+
+echo "DB SG created: $DB_SG"
+
+# Allow MySQL ONLY from App tier
+aws ec2 authorize-security-group-ingress --group-id $DB_SG --protocol tcp --port 3306 --source-group $APP_SG
+
+# Allow PostgreSQL ONLY from App tier
+aws ec2 authorize-security-group-ingress --group-id $DB_SG --protocol tcp --port 5432 --source-group $APP_SG
+
+echo "✅ DB tier: Allows 3306/5432 ONLY from App tier"
+
+echo ""
+echo "=== Security Group Chain Complete! ==="
+echo "Internet → Web (80/443) → App (8080) → DB (3306/5432)"
+echo ""
+echo "Security Group IDs:"
+echo "  Web: $WEB_SG"
+echo "  App: $APP_SG"
+echo "  DB: $DB_SG"
+```
+
+---
+
+## **Lab 78.3: Pattern - Self-Referencing Security Group (Cluster Communication)**
+
+```bash
+# CloudShell
+
+echo "=== Creating Self-Referencing Security Group ==="
+
+# Create cluster security group
+CLUSTER_SG=$(aws ec2 create-security-group --group-name cluster-sg --description "Cluster nodes can talk to each other" --vpc-id $TEST_VPC --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Cluster-SG}]' --query 'GroupId' --output text)
+
+echo "Cluster SG created: $CLUSTER_SG"
+
+# Allow all traffic from members of the SAME security group
+aws ec2 authorize-security-group-ingress --group-id $CLUSTER_SG --protocol -1 --source-group $CLUSTER_SG
+
+echo "✅ Cluster SG: Members can communicate with each other"
+echo ""
+echo "Use case: Database cluster, Elasticsearch cluster, etc."
+echo "Any instance with this SG can talk to any other instance with same SG!"
+```
+
+---
+
+## **Lab 78.4: Pattern - Bastion Host Security**
+
+```bash
+# CloudShell
+
+echo "=== Creating Bastion Host Security Pattern ==="
+
+# Get your current IP
+MY_IP=$(curl -s https://checkip.amazonaws.com)
+echo "Your IP: $MY_IP"
+
+# Bastion Security Group (in public subnet)
+BASTION_SG=$(aws ec2 create-security-group --group-name bastion-sg --description "Bastion host security group" --vpc-id $TEST_VPC --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Bastion-SG}]' --query 'GroupId' --output text)
+
+# Allow SSH ONLY from your IP
+aws ec2 authorize-security-group-ingress --group-id $BASTION_SG --protocol tcp --port 22 --cidr $MY_IP/32
+
+echo "✅ Bastion SG: SSH allowed ONLY from $MY_IP"
+
+# Private Instances Security Group
+PRIVATE_SG=$(aws ec2 create-security-group --group-name private-sg --description "Private instances security group" --vpc-id $TEST_VPC --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Private-SG}]' --query 'GroupId' --output text)
+
+# Allow SSH ONLY from Bastion
+aws ec2 authorize-security-group-ingress --group-id $PRIVATE_SG --protocol tcp --port 22 --source-group $BASTION_SG
+
+# Allow application traffic from web tier
+aws ec2 authorize-security-group-ingress --group-id $PRIVATE_SG --protocol tcp --port 8080 --source-group $WEB_SG
+
+echo "✅ Private SG: SSH from Bastion only, App traffic from Web tier"
+echo ""
+echo "Access path: Your laptop → Bastion → Private instances"
+echo "Direct access to private instances: BLOCKED! 🔒"
+```
+
+---
+
+## **Lab 78.5: View Security Group Rules**
+
+```bash
+# CloudShell
+
+echo "=== Viewing Security Group Configurations ==="
+
+# Function to describe SG nicely
+describe_sg() {
+    SG_ID=$1
+    SG_NAME=$2
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Security Group: $SG_NAME ($SG_ID)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    echo "INBOUND RULES:"
+    aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions[*].[IpProtocol,FromPort,ToPort,IpRanges[0].CidrIp,UserIdGroupPairs[0].GroupId]' --output table
+    
+    echo ""
+    echo "OUTBOUND RULES:"
+    aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissionsEgress[*].[IpProtocol,FromPort,ToPort,IpRanges[0].CidrIp,UserIdGroupPairs[0].GroupId]' --output table
+}
+
+# Show all security groups
+describe_sg $WEB_SG "Web-Tier"
+describe_sg $APP_SG "App-Tier"
+describe_sg $DB_SG "Database-Tier"
+describe_sg $CLUSTER_SG "Cluster"
+describe_sg $BASTION_SG "Bastion"
+describe_sg $PRIVATE_SG "Private"
+
+echo ""
+echo "✅ All security groups configured!"
+```
+
+---
+
+# **LAB 79: NETWORK ACL ADVANCED PATTERNS**
+
+## **Lab 79.1: Create Restrictive Public Subnet NACL**
+
+```bash
+# CloudShell
+
+echo "=== Creating Custom NACLs ==="
+
+# Create NACL for public subnet
+PUBLIC_NACL=$(aws ec2 create-network-acl --vpc-id $TEST_VPC --tag-specifications 'ResourceType=network-acl,Tags=[{Key=Name,Value=Public-NACL}]' --query 'NetworkAcl.NetworkAclId' --output text)
+
+echo "Public NACL created: $PUBLIC_NACL"
+
+# ===== INBOUND RULES =====
+
+# Rule 10: DENY known malicious IP
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 10 --protocol -1 --cidr-block 198.51.100.0/24 --rule-action deny --ingress
+
+echo "  Rule 10: DENY 198.51.100.0/24 (malicious IP range)"
+
+# Rule 20: DENY another bad range
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 20 --protocol -1 --cidr-block 203.0.113.0/24 --rule-action deny --ingress
+
+echo "  Rule 20: DENY 203.0.113.0/24 (another bad range)"
+
+# Rule 100: Allow HTTP
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 100 --protocol tcp --port-range From=80,To=80 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+
+echo "  Rule 100: ALLOW HTTP (80)"
+
+# Rule 110: Allow HTTPS
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 110 --protocol tcp --port-range From=443,To=443 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+
+echo "  Rule 110: ALLOW HTTPS (443)"
+
+# Rule 120: Allow SSH from office IP only
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 120 --protocol tcp --port-range From=22,To=22 --cidr-block $MY_IP/32 --rule-action allow --ingress
+
+echo "  Rule 120: ALLOW SSH from $MY_IP"
+
+# Rule 130: Allow ephemeral ports (return traffic)
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 130 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+
+echo "  Rule 130: ALLOW ephemeral ports (return traffic)"
+
+# Rule 140: Allow from private subnet
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 140 --protocol -1 --cidr-block 10.1.0.0/16 --rule-action allow --ingress
+
+echo "  Rule 140: ALLOW from VPC"
+
+# ===== OUTBOUND RULES =====
+
+# Rule 100: Allow HTTP
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 100 --protocol tcp --port-range From=80,To=80 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 110: Allow HTTPS
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 110 --protocol tcp --port-range From=443,To=443 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 120: Allow ephemeral ports (return traffic)
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 120 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 130: Allow to VPC
+aws ec2 create-network-acl-entry --network-acl-id $PUBLIC_NACL --rule-number 130 --protocol -1 --cidr-block 10.1.0.0/16 --rule-action allow --egress
+
+echo "  Outbound rules configured"
+
+# Associate with public subnet
+PUBLIC_ASSOC=$(aws ec2 describe-network-acls --filters "Name=association.subnet-id,Values=$TEST_PUBLIC" --query 'NetworkAcls[0].Associations[0].NetworkAclAssociationId' --output text)
+
+aws ec2 replace-network-acl-association --association-id $PUBLIC_ASSOC --network-acl-id $PUBLIC_NACL
+
+echo "✅ Public NACL associated with public subnet"
+```
+
+---
+
+## **Lab 79.2: Create Isolated Private Subnet NACL**
+
+```bash
+# CloudShell
+
+echo "=== Creating Private Subnet NACL ==="
+
+# Create NACL for private subnet
+PRIVATE_NACL=$(aws ec2 create-network-acl --vpc-id $TEST_VPC --tag-specifications 'ResourceType=network-acl,Tags=[{Key=Name,Value=Private-NACL}]' --query 'NetworkAcl.NetworkAclId' --output text)
+
+echo "Private NACL created: $PRIVATE_NACL"
+
+# ===== INBOUND RULES =====
+
+# Rule 100: Allow from VPC only
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 100 --protocol -1 --cidr-block 10.1.0.0/16 --rule-action allow --ingress
+
+echo "  Rule 100: ALLOW from VPC (10.1.0.0/16)"
+
+# Rule 110: Allow ephemeral ports from internet (for outbound-initiated connections)
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 110 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --ingress
+
+echo "  Rule 110: ALLOW ephemeral ports (return traffic)"
+
+# Rule 200: DENY all inbound from internet (explicit)
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 200 --protocol -1 --cidr-block 0.0.0.0/0 --rule-action deny --ingress
+
+echo "  Rule 200: DENY all from internet (explicit)"
+
+# ===== OUTBOUND RULES =====
+
+# Rule 100: Allow to VPC
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 100 --protocol -1 --cidr-block 10.1.0.0/16 --rule-action allow --egress
+
+# Rule 110: Allow HTTP for updates
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 110 --protocol tcp --port-range From=80,To=80 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 120: Allow HTTPS for updates
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 120 --protocol tcp --port-range From=443,To=443 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+# Rule 130: Allow ephemeral ports
+aws ec2 create-network-acl-entry --network-acl-id $PRIVATE_NACL --rule-number 130 --protocol tcp --port-range From=1024,To=65535 --cidr-block 0.0.0.0/0 --rule-action allow --egress
+
+echo "  Outbound rules configured"
+
+# Associate with private subnet
+PRIVATE_ASSOC=$(aws ec2 describe-network-acls --filters "Name=association.subnet-id,Values=$TEST_PRIVATE" --query 'NetworkAcls[0].Associations[0].NetworkAclAssociationId' --output text)
+
+aws ec2 replace-network-acl-association --association-id $PRIVATE_ASSOC --network-acl-id $PRIVATE_NACL
+
+echo "✅ Private NACL associated with private subnet"
+echo ""
+echo "Private subnet can:"
+echo "  ✅ Communicate within VPC"
+echo "  ✅ Initiate connections to internet (for updates)"
+echo "  ❌ Receive connections from internet"
+```
+
+---
+
+## **Lab 79.3: View NACL Rules**
+
+```bash
+# CloudShell
+
+echo "=== Viewing NACL Configurations ==="
+
+# Function to describe NACL
+describe_nacl() {
+    NACL_ID=$1
+    NACL_NAME=$2
+    
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Network ACL: $NACL_NAME ($NACL_ID)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    echo "INBOUND RULES (processed in order):"
+    aws ec2 describe-network-acls --network-acl-ids $NACL_ID --query 'NetworkAcls[0].Entries[?Egress==`false`].[RuleNumber,Protocol,RuleAction,CidrBlock,PortRange.From,PortRange.To]' --output table
+    
+    echo ""
+    echo "OUTBOUND RULES (processed in order):"
+    aws ec2 describe-network-acls --network-acl-ids $NACL_ID --query 'NetworkAcls[0].Entries[?Egress==`true`].[RuleNumber,Protocol,RuleAction,CidrBlock,PortRange.From,PortRange.To]' --output table
+}
+
+describe_nacl $PUBLIC_NACL "Public-NACL"
+describe_nacl $PRIVATE_NACL "Private-NACL"
+
+echo ""
+echo "✅ NACL configurations complete!"
+```
+
+---
+
+**TAKE A 5-MINUTE BREAK!** ☕
+
+Next: Testing and troubleshooting!
+
+**Ready to test everything?** 🧪
