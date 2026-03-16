@@ -385,13 +385,13 @@ Even if SG misconfigured, NACL blocks! 🛡️
 ┌─────────────────────────────────────────────┐
 │  Web Tier (Public Subnet)                   │
 │  Security Group: web-sg                     │
-│  ├─ Allow 80/443 from 0.0.0.0/0            │
-│  └─ Allow 8080 from app-sg                 │
+│  ├─ Allow 80/443 from 0.0.0.0/0          	  │
+│  └─ Allow 8080 from app-sg                  │
 │                                             │
 │  NACL: Public-NACL                          │
-│  ├─ Inbound: Allow 80/443, SSH from office│
-│  ├─ Inbound: DENY known bad IPs (rule 50) │
-│  └─ Outbound: Allow all (rule 100)        │
+│  ├─ Inbound: Allow 80/443, SSH from office  │
+│  ├─ Inbound: DENY known bad IPs (rule 50)   │
+│  └─ Outbound: Allow all (rule 100)          │
 └─────────────────┬───────────────────────────┘
                   ↓
 ┌─────────────────────────────────────────────┐

@@ -1,0 +1,293 @@
+---
+
+# **DAY 24: VPC FLOW LOGS & NETWORK MONITORING 📊**
+
+Welcome to Day 24! Today we master **network traffic visibility and monitoring**!
+
+---
+
+## **TODAY'S PLAN (2-3 HOURS):**
+
+```
+Hour 1: VPC Flow Logs Deep Dive (60 min)
+├─ What are Flow Logs?
+├─ Flow Log fields and format
+├─ Use cases and analysis
+└─ CloudWatch vs S3 destinations
+
+Hour 2-3: Hands-On Labs (90 min)
+├─ Lab 83: Enable VPC Flow Logs
+├─ Lab 84: Analyze Traffic Patterns
+├─ Lab 85: Detect Security Issues
+├─ Lab 86: Create Monitoring Dashboard
+└─ Lab 87: Automated Alerting
+
+Total: 2.5-3 hours of monitoring mastery! 🎯
+```
+
+---
+
+# **PART 1: VPC FLOW LOGS FUNDAMENTALS (60 MIN)**
+
+## **What Are VPC Flow Logs?**
+
+```
+VPC Flow Logs = Network traffic capture for your VPC
+
+Captures information about IP traffic going to/from:
+├─ VPC (all ENIs in VPC)
+├─ Subnet (all ENIs in subnet)
+└─ Elastic Network Interface (single ENI)
+
+What it logs:
+├─ Source IP
+├─ Destination IP
+├─ Source port
+├─ Destination port
+├─ Protocol
+├─ Number of packets
+├─ Number of bytes
+├─ Action (ACCEPT or REJECT)
+└─ Reason (why accepted/rejected)
+
+What it DOESN'T log:
+❌ Packet contents (not packet capture)
+❌ DNS query details (use Route 53 Resolver logs)
+❌ Application-level data
+❌ DHCP traffic
+❌ AWS metadata service (169.254.169.254)
+❌ Amazon DNS server traffic
+```
+
+---
+
+## **Flow Log Record Format:**
+
+```
+Default format (version 2):
+
+account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status
+
+Example log entry:
+123456789012 eni-abc123 10.0.1.5 203.0.113.10 443 54321 6 20 4000 1620000000 1620000060 ACCEPT OK
+
+Breaking it down:
+├─ Account ID: 123456789012
+├─ ENI: eni-abc123
+├─ Source IP: 10.0.1.5 (your EC2)
+├─ Dest IP: 203.0.113.10 (internet)
+├─ Source Port: 443 (HTTPS)
+├─ Dest Port: 54321 (ephemeral)
+├─ Protocol: 6 (TCP)
+├─ Packets: 20
+├─ Bytes: 4000
+├─ Start: Unix timestamp
+├─ End: Unix timestamp
+├─ Action: ACCEPT (traffic allowed)
+└─ Log Status: OK (logged successfully)
+
+Protocol numbers:
+├─ 1 = ICMP (ping)
+├─ 6 = TCP
+├─ 17 = UDP
+└─ -1 = All protocols
+```
+
+---
+
+## **Custom Flow Log Format (Version 5+):**
+
+```
+You can customize which fields to capture!
+
+Available fields (version 5):
+├─ vpc-id (which VPC)
+├─ subnet-id (which subnet)
+├─ instance-id (which EC2)
+├─ tcp-flags (SYN, ACK, FIN, etc.)
+├─ type (IPv4 or IPv6)
+├─ pkt-srcaddr (original source before NAT)
+├─ pkt-dstaddr (original dest before NAT)
+├─ region (AWS region)
+├─ az-id (Availability Zone)
+├─ sublocation-type (wavelength, outpost, local zone)
+├─ sublocation-id
+├─ pkt-src-aws-service (AWS service source)
+├─ pkt-dst-aws-service (AWS service destination)
+└─ flow-direction (ingress or egress)
+
+Example custom format:
+${srcaddr} ${dstaddr} ${srcport} ${dstport} ${protocol} ${action} ${vpc-id} ${subnet-id}
+
+Benefit: Get exactly the data you need, reduce costs!
+```
+
+---
+
+## **Flow Log Destinations:**
+
+```
+┌─────────────────────────────────────────────────┐
+│         CLOUDWATCH LOGS                          │
+├─────────────────────────────────────────────────┤
+│  Pros:                                          │
+│  ✅ Real-time monitoring                        │
+│  ✅ CloudWatch Insights queries                 │
+│  ✅ Alarms and dashboards                       │
+│  ✅ Easy to get started                         │
+│                                                 │
+│  Cons:                                          │
+│  ❌ More expensive for high volume              │
+│  ❌ Retention costs add up                      │
+│                                                 │
+│  Best for:                                      │
+│  - Real-time security monitoring                │
+│  - Creating alarms                              │
+│  - Interactive analysis                         │
+│                                                 │
+│  Cost: ~$0.50/GB ingestion + $0.03/GB storage   │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│         AMAZON S3                               │
+├─────────────────────────────────────────────────┤
+│  Pros:                                          │
+│  ✅ Much cheaper for storage                    │
+│  ✅ Long-term retention                         │
+│  ✅ Athena queries                              │
+│  ✅ Integration with analytics tools            │
+│                                                 │
+│  Cons:                                          │
+│  ❌ Not real-time (5-15 min delay)              │
+│  ❌ Requires Athena for queries                 │
+│                                                 │
+│  Best for:                                      │
+│  - Long-term storage/compliance                 │
+│  - Big data analysis                            │
+│  - Cost optimization                            │
+│                                                 │
+│  Cost: ~$0.023/GB storage (S3 Standard)         │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│         KINESIS DATA FIREHOSE                   │
+├─────────────────────────────────────────────────┤
+│  Pros:                                          │
+│  ✅ Stream to multiple destinations             │
+│  ✅ Transform data in transit                   │
+│  ✅ Integration with Elasticsearch, Splunk      │
+│                                                 │
+│  Best for:                                      │
+│  - SIEM integration                             │
+│  - Real-time analytics pipelines                │
+│  - Complex processing workflows                 │
+│                                                 │
+│  Cost: ~$0.029/GB + destination costs           │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## **What Can You Learn from Flow Logs?**
+
+```
+Security Use Cases:
+
+1. Detect Port Scanning
+   Pattern: Many REJECT logs from same source IP
+   Query: Count REJECTs per source IP
+   Action: Block IP in NACL or WAF
+
+2. Identify Compromised Instances
+   Pattern: Unusual outbound connections
+   Example: Database connecting to unknown IPs
+   Action: Investigate and isolate
+
+3. Find Overly Permissive Security Groups
+   Pattern: ACCEPT on unexpected ports
+   Example: Port 22 from 0.0.0.0/0
+   Action: Tighten security group rules
+
+4. Detect Data Exfiltration
+   Pattern: Large data transfers to internet
+   Query: High bytes count to external IPs
+   Action: Investigate and block
+
+5. Track Failed Connection Attempts
+   Pattern: Repeated REJECTs
+   Could indicate: Attack attempt or misconfiguration
+   Action: Investigate and remediate
+
+6. Identify Top Talkers
+   Pattern: IPs with most traffic
+   Use: Capacity planning, cost optimization
+   Action: Optimize or scale
+
+7. Validate Network ACL Rules
+   Pattern: Traffic being REJECTed
+   Use: Verify NACL rules working correctly
+   Action: Confirm security posture
+```
+
+---
+
+## **Flow Logs Traffic Analysis:**
+
+```
+ACCEPT vs REJECT Analysis:
+
+┌──────────────────────────────────────────────┐
+│  ACCEPT = Traffic allowed                    │
+├──────────────────────────────────────────────┤
+│  Allowed by:                                 │
+│  ✅ Security Group                           │
+│  ✅ Network ACL                              │
+│                                              │
+│  Normal ACCEPT examples:                     │
+│  - Web server receiving HTTP (port 80)      │
+│  - SSH from bastion to private instance     │
+│  - Database queries from app tier           │
+│                                              │
+│  Suspicious ACCEPT examples:                 │
+│  - SSH from unknown IP                      │
+│  - Database port from internet              │
+│  - Unusual protocols                        │
+└──────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────┐
+│  REJECT = Traffic blocked                    │
+├──────────────────────────────────────────────┤
+│  Blocked by:                                 │
+│  ❌ Security Group (implicit deny)           │
+│  ❌ Network ACL (explicit deny)              │
+│                                              │
+│  Normal REJECT examples:                     │
+│  - Port scan attempts blocked               │
+│  - Known bad IPs blocked by NACL            │
+│  - Unused ports denied by SG                │
+│                                              │
+│  Concerning REJECT examples:                 │
+│  - High volume from single source           │
+│  - Application not working (misconfigured)  │
+│  - Legitimate traffic blocked by mistake    │
+└──────────────────────────────────────────────┘
+
+How to determine what blocked traffic:
+
+If REJECT in flow log:
+├─ Check Security Group rules first
+│   └─ No matching ALLOW rule = SG blocked it
+├─ Check NACL rules
+│   └─ Explicit DENY rule = NACL blocked it
+└─ Common: Both could block (defense in depth!)
+
+Tip: Enable flow logs at VPC level to see ALL traffic!
+```
+
+---
+
+**TAKE A 5-MINUTE BREAK!** ☕
+
+Next: Hands-on labs - enabling and analyzing Flow Logs!
+
+**Ready to see your network traffic?** 🔍

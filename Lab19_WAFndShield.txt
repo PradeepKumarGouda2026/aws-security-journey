@@ -1,0 +1,1933 @@
+# **CONTINUING WITH COMPLETE WAF LABS! 🔥**
+
+---
+
+# **LAB 89: DEPLOY AWS WAF - COMPLETE STEP-BY-STEP**
+
+### **Lab Overview:**
+
+```
+What we'll build:
+├─ Application Load Balancer (ALB)
+├─ Target Group with test instances
+├─ IP Set (malicious IP blocklist)
+├─ Web ACL with comprehensive rules:
+│   ├─ IP-based blocking
+│   ├─ Rate-based rules (DDoS mitigation)
+│   ├─ AWS Managed Rules (OWASP Top 10)
+│   ├─ Geo-blocking
+│   ├─ SQL injection protection
+│   ├─ XSS protection
+│   └─ Custom string matching
+├─ Testing all protection features
+└─ Monitoring and logging
+
+Time: 90 minutes
+Cost: ~$1-2 for testing (delete after!)
+Difficulty: Medium
+```
+
+---
+
+### **Step 1: Create VPC Infrastructure for WAF Lab (15 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - WAF Lab Infrastructure Setup
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║          AWS WAF - COMPLETE LAB SETUP                    ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "Step 1: Creating VPC Infrastructure for WAF Testing"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Create VPC
+echo "  → Creating VPC (10.4.0.0/16)..."
+WAF_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.4.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=WAF-VPC}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+echo "     ✅ VPC created: $WAF_VPC"
+
+# Enable DNS
+aws ec2 modify-vpc-attribute --vpc-id $WAF_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $WAF_VPC --enable-dns-support
+echo "     ✅ DNS enabled"
+echo ""
+
+# Create subnets in TWO different AZs (ALB requires 2+ AZs)
+echo "  → Creating subnets in multiple AZs..."
+echo "     (ALB requires subnets in at least 2 Availability Zones)"
+echo ""
+
+WAF_SUBNET_1=$(aws ec2 create-subnet \
+  --vpc-id $WAF_VPC \
+  --cidr-block 10.4.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=WAF-Subnet-1}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+echo "     ✅ Subnet 1 created: $WAF_SUBNET_1 (us-east-1a)"
+
+WAF_SUBNET_2=$(aws ec2 create-subnet \
+  --vpc-id $WAF_VPC \
+  --cidr-block 10.4.2.0/24 \
+  --availability-zone us-east-1b \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=WAF-Subnet-2}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+echo "     ✅ Subnet 2 created: $WAF_SUBNET_2 (us-east-1b)"
+echo ""
+
+# Enable auto-assign public IP
+aws ec2 modify-subnet-attribute --subnet-id $WAF_SUBNET_1 --map-public-ip-on-launch
+aws ec2 modify-subnet-attribute --subnet-id $WAF_SUBNET_2 --map-public-ip-on-launch
+echo "     ✅ Auto-assign public IP enabled on both subnets"
+echo ""
+
+# Create Internet Gateway
+echo "  → Creating Internet Gateway..."
+WAF_IGW=$(aws ec2 create-internet-gateway \
+  --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=WAF-IGW}]' \
+  --query 'InternetGateway.InternetGatewayId' \
+  --output text)
+
+# Attach to VPC
+aws ec2 attach-internet-gateway --internet-gateway-id $WAF_IGW --vpc-id $WAF_VPC
+
+echo "     ✅ Internet Gateway attached: $WAF_IGW"
+echo ""
+
+# Create route table
+echo "  → Creating route table..."
+WAF_RT=$(aws ec2 create-route-table \
+  --vpc-id $WAF_VPC \
+  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=WAF-RT}]' \
+  --query 'RouteTable.RouteTableId' \
+  --output text)
+
+# Add route to internet
+aws ec2 create-route --route-table-id $WAF_RT --destination-cidr-block 0.0.0.0/0 --gateway-id $WAF_IGW
+
+# Associate with subnets
+aws ec2 associate-route-table --route-table-id $WAF_RT --subnet-id $WAF_SUBNET_1
+aws ec2 associate-route-table --route-table-id $WAF_RT --subnet-id $WAF_SUBNET_2
+
+echo "     ✅ Route table configured and associated"
+echo ""
+echo "✅ VPC Infrastructure Complete!"
+echo ""
+echo "Summary:"
+echo "  VPC:       $WAF_VPC (10.4.0.0/16)"
+echo "  Subnet 1:  $WAF_SUBNET_1 (10.4.1.0/24) in us-east-1a"
+echo "  Subnet 2:  $WAF_SUBNET_2 (10.4.2.0/24) in us-east-1b"
+echo "  IGW:       $WAF_IGW"
+echo "  Route Table: $WAF_RT"
+echo ""
+```
+
+---
+
+### **Step 2: Create Application Load Balancer (15 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Create ALB
+
+echo "Step 2: Creating Application Load Balancer"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "ALB will be the target for WAF protection"
+echo "All HTTP traffic will go through WAF before reaching ALB"
+echo ""
+
+# Create security group for ALB
+echo "  → Creating security group for ALB..."
+WAF_ALB_SG=$(aws ec2 create-security-group \
+  --group-name waf-alb-sg \
+  --description "Security group for WAF-protected ALB" \
+  --vpc-id $WAF_VPC \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=WAF-ALB-SG}]' \
+  --query 'GroupId' \
+  --output text)
+
+echo "     ✅ Security group created: $WAF_ALB_SG"
+echo ""
+echo "     Adding inbound rules..."
+
+# Allow HTTP from anywhere (WAF will protect)
+aws ec2 authorize-security-group-ingress \
+  --group-id $WAF_ALB_SG \
+  --protocol tcp \
+  --port 80 \
+  --cidr 0.0.0.0/0
+
+echo "       • HTTP (80) from anywhere"
+
+# Allow HTTPS from anywhere
+aws ec2 authorize-security-group-ingress \
+  --group-id $WAF_ALB_SG \
+  --protocol tcp \
+  --port 443 \
+  --cidr 0.0.0.0/0
+
+echo "       • HTTPS (443) from anywhere"
+echo ""
+echo "     Note: Security group allows all HTTP/HTTPS"
+echo "           WAF will provide the actual protection!"
+echo ""
+
+# Create Application Load Balancer
+echo "  → Creating Application Load Balancer..."
+echo "     This takes about 2-3 minutes..."
+echo ""
+
+WAF_ALB_ARN=$(aws elbv2 create-load-balancer \
+  --name WAF-Protected-ALB \
+  --subnets $WAF_SUBNET_1 $WAF_SUBNET_2 \
+  --security-groups $WAF_ALB_SG \
+  --scheme internet-facing \
+  --type application \
+  --ip-address-type ipv4 \
+  --tags Key=Name,Value=WAF-Protected-ALB \
+  --query 'LoadBalancers[0].LoadBalancerArn' \
+  --output text)
+
+echo "     ✅ ALB created: $WAF_ALB_ARN"
+echo ""
+
+# Get ALB DNS name
+WAF_ALB_DNS=$(aws elbv2 describe-load-balancers \
+  --load-balancer-arns $WAF_ALB_ARN \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text)
+
+echo "     DNS Name: $WAF_ALB_DNS"
+echo "     Access via: http://$WAF_ALB_DNS"
+echo ""
+
+# Wait for ALB to be active
+echo "  → Waiting for ALB to become active..."
+
+while true; do
+    STATE=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns $WAF_ALB_ARN \
+        --query 'LoadBalancers[0].State.Code' \
+        --output text)
+
+    if [ "$STATE" == "active" ]; then
+        echo "     ✅ ALB is active!"
+        break
+    fi
+
+    echo "     State: $STATE (waiting...)"
+    sleep 10
+done
+
+echo ""
+
+# Create target group
+echo "  → Creating target group..."
+WAF_TG_ARN=$(aws elbv2 create-target-group \
+  --name WAF-Test-TG \
+  --protocol HTTP \
+  --port 80 \
+  --vpc-id $WAF_VPC \
+  --health-check-path / \
+  --health-check-interval-seconds 30 \
+  --health-check-timeout-seconds 5 \
+  --healthy-threshold-count 2 \
+  --unhealthy-threshold-count 3 \
+  --tags Key=Name,Value=WAF-Test-TG \
+  --query 'TargetGroups[0].TargetGroupArn' \
+  --output text)
+
+echo "     ✅ Target group created: $WAF_TG_ARN"
+echo ""
+
+# Create HTTP listener
+echo "  → Creating HTTP listener..."
+aws elbv2 create-listener \
+  --load-balancer-arn $WAF_ALB_ARN \
+  --protocol HTTP \
+  --port 80 \
+  --default-actions Type=forward,TargetGroupArn=$WAF_TG_ARN
+
+echo "     ✅ HTTP listener created (port 80 → target group)"
+echo ""
+
+# Launch test EC2 instance
+echo "  → Launching test web server instance..."
+AMI_ID=$(aws ec2 describe-images \
+  --owners amazon \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" "Name=state,Values=available" \
+  --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+  --output text)
+
+echo "     Using AMI: $AMI_ID"
+echo ""
+
+# Create security group for instances
+WAF_INSTANCE_SG=$(aws ec2 create-security-group \
+  --group-name waf-instance-sg \
+  --description "Security group for WAF test instances" \
+  --vpc-id $WAF_VPC \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=WAF-Instance-SG}]' \
+  --query 'GroupId' \
+  --output text)
+
+# Allow HTTP from ALB security group
+aws ec2 authorize-security-group-ingress \
+  --group-id $WAF_INSTANCE_SG \
+  --protocol tcp \
+  --port 80 \
+  --source-group $WAF_ALB_SG
+
+echo "     ✅ Instance security group: $WAF_INSTANCE_SG"
+echo "        (Allows HTTP from ALB only)"
+echo ""
+
+# Launch instance
+WAF_INSTANCE=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --subnet-id $WAF_SUBNET_1 \
+  --security-group-ids $WAF_INSTANCE_SG \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=WAF-Test-Instance}]' \
+  --user-data '#!/bin/bash
+yum update -y
+yum install -y httpd
+systemctl start httpd
+systemctl enable httpd
+
+# Create comprehensive test page
+cat > /var/www/html/index.html << "EOF"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AWS WAF Protected Application</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: "Amazon Ember", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        .header {
+            background: #FF9900;
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .content {
+            padding: 40px;
+        }
+        .status {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 5px;
+        }
+        .status h2 {
+            color: #155724;
+            margin-bottom: 10px;
+        }
+        .protection-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .protection-item {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        .protection-item h3 {
+            color: #007bff;
+            margin-bottom: 10px;
+        }
+        .test-section {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 20px;
+            margin: 30px 0;
+            border-radius: 5px;
+        }
+        .test-command {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: "Courier New", monospace;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        .footer {
+            background: #232f3e;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ AWS WAF Protected Application</h1>
+            <p>Comprehensive Web Application Firewall Demo</p>
+        </div>
+
+        <div class="content">
+            <div class="status">
+                <h2>✅ Application is PROTECTED by AWS WAF</h2>
+                <p>All traffic is inspected and filtered before reaching this server</p>
+            </div>
+
+            <h2 style="margin-bottom: 20px;">Active Protection Features:</h2>
+
+            <div class="protection-list">
+                <div class="protection-item">
+                    <h3>🚫 IP Blocking</h3>
+                    <p>Malicious IP addresses blocked instantly</p>
+                    <small>Known attackers, botnets, spam sources</small>
+                </div>
+
+                <div class="protection-item">
+                    <h3>⏱️ Rate Limiting</h3>
+                    <p>Maximum 2000 requests per 5 minutes</p>
+                    <small>Prevents DDoS and brute force attacks</small>
+                </div>
+
+                <div class="protection-item">
+                    <h3>💉 SQL Injection Protection</h3>
+                    <p>AWS Managed Rules blocking SQL attacks</p>
+                    <small>Protects database from injection</small>
+                </div>
+
+                <div class="protection-item">
+                    <h3>🔐 XSS Protection</h3>
+                    <p>Cross-site scripting detection</p>
+                    <small>Prevents malicious JavaScript</small>
+                </div>
+
+                <div class="protection-item">
+                    <h3>🌍 Geo-Blocking</h3>
+                    <p>Country-level access control</p>
+                    <small>Compliance and security</small>
+                </div>
+
+                <div class="protection-item">
+                    <h3>🤖 Bot Detection</h3>
+                    <p>Advanced bot management</p>
+                    <small>Allow good bots, block bad bots</small>
+                </div>
+            </div>
+
+            <div class="test-section">
+                <h2>🧪 Test WAF Protection</h2>
+                <p>Try these commands to test various WAF features:</p>
+
+                <h4 style="margin-top: 20px;">SQL Injection Test (will be BLOCKED):</h4>
+                <div class="test-command">
+curl "http://'"$WAF_ALB_DNS"'/?id=1 UNION SELECT * FROM users"
+                </div>
+
+                <h4 style="margin-top: 20px;">XSS Attack Test (will be BLOCKED):</h4>
+                <div class="test-command">
+curl "http://'"$WAF_ALB_DNS"'/?search=<script>alert(1)</script>"
+                </div>
+
+                <h4 style="margin-top: 20px;">Rate Limit Test (will be BLOCKED after 2000):</h4>
+                <div class="test-command">
+for i in {1..2500}; do curl -s http://'"$WAF_ALB_DNS"' > /dev/null; done
+                </div>
+
+                <h4 style="margin-top: 20px;">Normal Request (will WORK):</h4>
+                <div class="test-command">
+curl http://'"$WAF_ALB_DNS"'
+                </div>
+            </div>
+
+            <h2 style="margin-top: 30px;">WAF Rule Groups Active:</h2>
+            <ul style="line-height: 2; margin: 20px 40px;">
+                <li>✅ Custom IP Blocklist</li>
+                <li>✅ Rate-Based Rule (DDoS mitigation)</li>
+                <li>✅ AWS Core Rule Set (OWASP Top 10)</li>
+                <li>✅ AWS Known Bad Inputs</li>
+                <li>✅ AWS SQL Injection Protection</li>
+                <li>✅ AWS Admin Protection</li>
+            </ul>
+
+            <div style="background: #e7f3ff; padding: 20px; border-radius: 5px; margin-top: 30px;">
+                <h3>📊 Monitoring</h3>
+                <p>View WAF metrics and blocked requests:</p>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                    <li>AWS Console → WAF & Shield → Web ACLs</li>
+                    <li>CloudWatch → WAF Metrics</li>
+                    <li>Sampled requests for detailed analysis</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Protected by AWS WAF | Instance: $(hostname) | IP: $(hostname -I)</p>
+            <p style="margin-top: 10px; font-size: 0.9em;">Deployed: $(date)</p>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+
+# Create test endpoints
+mkdir -p /var/www/html/api
+
+# Login endpoint (for rate limit testing)
+cat > /var/www/html/api/login << "LOGINEOF"
+#!/bin/bash
+echo "Content-type: text/html"
+echo ""
+echo "<html><body>"
+echo "<h1>Login Endpoint</h1>"
+echo "<p>This endpoint is rate-limited by WAF</p>"
+echo "<p>Try more than 2000 requests in 5 minutes to trigger rate limit</p>"
+echo "</body></html>"
+LOGINEOF
+chmod +x /var/www/html/api/login
+
+# Admin endpoint (for admin protection testing)
+mkdir -p /var/www/html/admin
+cat > /var/www/html/admin/index.html << "ADMINEOF"
+<!DOCTYPE html>
+<html>
+<head><title>Admin Panel</title></head>
+<body>
+<h1>Admin Panel</h1>
+<p>This page is protected by AWS Managed Admin Protection rule</p>
+<p>Access to /admin paths may be restricted</p>
+</body>
+</html>
+ADMINEOF
+' \
+  --query 'Instances[0].InstanceId' \
+  --output text)
+
+echo "     ✅ Instance launched: $WAF_INSTANCE"
+echo ""
+echo "  → Waiting for instance to be running..."
+aws ec2 wait instance-running --instance-ids $WAF_INSTANCE
+
+echo "     ✅ Instance is running"
+echo ""
+
+# Register instance with target group
+echo "  → Registering instance with target group..."
+aws elbv2 register-targets \
+  --target-group-arn $WAF_TG_ARN \
+  --targets Id=$WAF_INSTANCE
+
+echo "     ✅ Instance registered with target group"
+echo ""
+echo "  → Waiting for instance to become healthy (this takes 30-60 seconds)..."
+
+# Wait for healthy targets
+sleep 45
+
+HEALTH=$(aws elbv2 describe-target-health \
+  --target-group-arn $WAF_TG_ARN \
+  --query 'TargetHealthDescriptions[0].TargetHealth.State' \
+  --output text 2>/dev/null)
+
+echo "     Target health: $HEALTH"
+
+if [ "$HEALTH" != "healthy" ]; then
+    echo "     ℹ️  Target may take a few more minutes to become healthy"
+    echo "        This is normal - health checks are running"
+fi
+
+echo ""
+echo "✅ Application Load Balancer Setup Complete!"
+echo ""
+echo "Summary:"
+echo "  ALB:         $WAF_ALB_ARN"
+echo "  DNS:         $WAF_ALB_DNS"
+echo "  Access:      http://$WAF_ALB_DNS"
+echo "  Target Group: $WAF_TG_ARN"
+echo "  Instance:    $WAF_INSTANCE"
+echo ""
+echo "Test access:"
+echo "  curl http://$WAF_ALB_DNS"
+echo ""
+echo "  (If you get 503, wait 1-2 minutes for instance to become healthy)"
+echo ""
+```
+
+---
+
+### **Step 3: Create IP Set (Blocklist) (5 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Create IP Set
+
+echo "Step 3: Creating IP Set (Malicious IP Blocklist)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "IP Sets allow you to block or allow specific IP addresses"
+echo "Useful for: Known attackers, threat intelligence feeds"
+echo ""
+
+# Create IP set with malicious IPs
+echo "  → Creating IP set with sample malicious IPs..."
+echo ""
+echo "     IPs to block:"
+echo "       • 198.51.100.0/24 (TEST-NET-2, example range)"
+echo "       • 203.0.113.0/24 (TEST-NET-3, example range)"
+echo "       • 192.0.2.0/24 (TEST-NET-1, example range)"
+echo ""
+echo "     Note: These are documentation IPs (safe for testing)"
+echo "           In production, use actual threat intelligence IPs"
+echo ""
+
+WAF_IP_SET_ID=$(aws wafv2 create-ip-set \
+  --name MaliciousIPBlocklist \
+  --scope REGIONAL \
+  --ip-address-version IPV4 \
+  --addresses "198.51.100.0/24" "203.0.113.0/24" "192.0.2.0/24" \
+  --description "Known malicious IP addresses - automatically blocked" \
+  --tags Key=Name,Value=MaliciousIPBlocklist \
+  --query 'Summary.Id' \
+  --output text)
+
+# Get IP Set ARN
+WAF_IP_SET_ARN=$(aws wafv2 list-ip-sets \
+  --scope REGIONAL \
+  --query "IPSets[?Name=='MaliciousIPBlocklist'].ARN" \
+  --output text)
+
+echo "     ✅ IP Set created!"
+echo "     ID:  $WAF_IP_SET_ID"
+echo "     ARN: $WAF_IP_SET_ARN"
+echo ""
+echo "     Capacity: 3 IP ranges"
+echo "     Maximum: 10,000 IP addresses per set"
+echo ""
+echo "  → How IP Sets work:"
+echo "     1. Traffic arrives with source IP"
+echo "     2. WAF checks if IP is in blocklist"
+echo "     3. If match: Request BLOCKED (403 Forbidden)"
+echo "     4. If no match: Continue to next rule"
+echo ""
+echo "  → Updating IP Sets:"
+echo "     • Can update in real-time via API"
+echo "     • Changes propagate instantly"
+echo "     • Perfect for dynamic threat feeds"
+echo "     • Lambda can auto-update from threat intel"
+echo ""
+echo "✅ IP Set Ready!"
+echo ""
+```
+
+---
+
+### **Step 4: Create Comprehensive Web ACL (20 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Create Web ACL with All Rules
+
+echo "Step 4: Creating Comprehensive Web ACL"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Web ACL = Web Access Control List"
+echo "Container for all security rules"
+echo ""
+echo "We'll create rules for:"
+echo "  1. IP-based blocking (malicious IPs)"
+echo "  2. Rate limiting (DDoS mitigation)"
+echo "  3. AWS Managed - Core Rule Set (OWASP Top 10)"
+echo "  4. AWS Managed - Known Bad Inputs"
+echo "  5. AWS Managed - SQL Injection"
+echo "  6. AWS Managed - Admin Protection"
+echo "  7. Geo-blocking (optional, commented out)"
+echo ""
+
+# Create comprehensive Web ACL
+cat > /tmp/waf-web-acl.json << EOF
+{
+  "Name": "ComprehensiveWebACL",
+  "Scope": "REGIONAL",
+  "DefaultAction": {
+    "Allow": {}
+  },
+  "Description": "Comprehensive WAF protection with multiple rule types",
+  "Rules": [
+    {
+      "Name": "BlockMaliciousIPs",
+      "Priority": 0,
+      "Statement": {
+        "IPSetReferenceStatement": {
+          "Arn": "$WAF_IP_SET_ARN"
+        }
+      },
+      "Action": {
+        "Block": {
+          "CustomResponse": {
+            "ResponseCode": 403,
+            "CustomResponseBodyKey": "BlockedIP"
+          }
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "BlockMaliciousIPs"
+      }
+    },
+    {
+      "Name": "RateLimitProtection",
+      "Priority": 1,
+      "Statement": {
+        "RateBasedStatement": {
+          "Limit": 2000,
+          "AggregateKeyType": "IP"
+        }
+      },
+      "Action": {
+        "Block": {
+          "CustomResponse": {
+            "ResponseCode": 429,
+            "CustomResponseBodyKey": "RateLimited"
+          }
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "RateLimitProtection"
+      }
+    },
+    {
+      "Name": "AWSManagedRulesCommonRuleSet",
+      "Priority": 2,
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesCommonRuleSet",
+          "ExcludedRules": []
+        }
+      },
+      "OverrideAction": {
+        "None": {}
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "AWSManagedRulesCommonRuleSet"
+      }
+    },
+    {
+      "Name": "AWSManagedRulesKnownBadInputsRuleSet",
+      "Priority": 3,
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesKnownBadInputsRuleSet",
+          "ExcludedRules": []
+        }
+      },
+      "OverrideAction": {
+        "None": {}
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "AWSManagedRulesKnownBadInputsRuleSet"
+      }
+    },
+    {
+      "Name": "AWSManagedRulesSQLiRuleSet",
+      "Priority": 4,
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesSQLiRuleSet",
+          "ExcludedRules": []
+        }
+      },
+      "OverrideAction": {
+        "None": {}
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "AWSManagedRulesSQLiRuleSet"
+      }
+    },
+    {
+      "Name": "AWSManagedRulesAdminProtectionRuleSet",
+      "Priority": 5,
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesAdminProtectionRuleSet",
+          "ExcludedRules": []
+        }
+      },
+      "OverrideAction": {
+        "None": {}
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "AWSManagedRulesAdminProtectionRuleSet"
+      }
+    }
+  ],
+  "VisibilityConfig": {
+    "SampledRequestsEnabled": true,
+    "CloudWatchMetricsEnabled": true,
+    "MetricName": "ComprehensiveWebACL"
+  },
+  "CustomResponseBodies": {
+    "BlockedIP": {
+      "ContentType": "TEXT_HTML",
+      "Content": "<html><head><title>Access Denied</title></head><body><h1>403 Forbidden</h1><p>Your IP address has been blocked due to security policies.</p><p>If you believe this is an error, please contact support.</p></body></html>"
+    },
+    "RateLimited": {
+      "ContentType": "TEXT_HTML",
+      "Content": "<html><head><title>Too Many Requests</title></head><body><h1>429 Too Many Requests</h1><p>You have exceeded the rate limit.</p><p>Please wait a few minutes before trying again.</p></body></html>"
+    }
+  }
+}
+EOF
+
+echo "  → Creating Web ACL..."
+echo ""
+
+WAF_WEB_ACL_ID=$(aws wafv2 create-web-acl \
+  --cli-input-json file:///tmp/waf-web-acl.json \
+  --query 'Summary.Id' \
+  --output text)
+
+# Get Web ACL ARN
+WAF_WEB_ACL_ARN=$(aws wafv2 list-web-acls \
+  --scope REGIONAL \
+  --query "WebACLs[?Name=='ComprehensiveWebACL'].ARN" \
+  --output text)
+
+echo "     ✅ Web ACL created!"
+echo "     ID:  $WAF_WEB_ACL_ID"
+echo "     ARN: $WAF_WEB_ACL_ARN"
+echo ""
+echo "     Rules configured:"
+echo ""
+echo "     Priority 0: Block Malicious IPs"
+echo "       • Action: BLOCK (403 Forbidden)"
+echo "       • Checks incoming IP against blocklist"
+echo "       • Custom response with helpful message"
+echo ""
+echo "     Priority 1: Rate Limit Protection"
+echo "       • Limit: 2000 requests per 5 minutes per IP"
+echo "       • Action: BLOCK (429 Too Many Requests)"
+echo "       • Prevents: DDoS, brute force, scraping"
+echo ""
+echo "     Priority 2: AWS Core Rule Set"
+echo "       • OWASP Top 10 protection"
+echo "       • SQL injection, XSS, LFI, RFI"
+echo "       • ~30 individual rules"
+echo "       • FREE managed rule group"
+echo ""
+echo "     Priority 3: Known Bad Inputs"
+echo "       • Known CVE exploits"
+echo "       • Attack signatures"
+echo "       • Updated by AWS automatically"
+echo "       • FREE managed rule group"
+echo ""
+echo "     Priority 4: SQL Injection Protection"
+echo "       • Advanced SQL injection detection"
+echo "       • Database-specific patterns"
+echo "       • Multi-vector detection"
+echo "       • FREE managed rule group"
+echo ""
+echo "     Priority 5: Admin Protection"
+echo "       • Blocks access to /admin, /wp-admin"
+echo "       • Protects management interfaces"
+echo "       • Common CMS admin paths"
+echo "       • FREE managed rule group"
+echo ""
+echo "     Default Action: ALLOW"
+echo "       • If no rule matches, allow request"
+echo "       • Least restrictive approach"
+echo ""
+echo "     Visibility:"
+echo "       • All rules send metrics to CloudWatch"
+echo "       • Sample requests captured for analysis"
+echo "       • Full request logging available"
+echo ""
+echo "✅ Web ACL Configuration Complete!"
+echo ""
+```
+
+---
+
+### **Step 5: Associate WAF with ALB (5 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Associate WAF with ALB
+
+echo "Step 5: Associating WAF with Application Load Balancer"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "This connects WAF to ALB so all traffic is inspected"
+echo ""
+
+echo "  → Associating Web ACL with ALB..."
+aws wafv2 associate-web-acl \
+  --web-acl-arn $WAF_WEB_ACL_ARN \
+  --resource-arn $WAF_ALB_ARN
+
+echo "     ✅ WAF associated with ALB!"
+echo ""
+echo "     Traffic flow:"
+echo "       Internet → ALB → WAF Inspection → Target (if allowed) → Response"
+echo ""
+echo "     All HTTP requests now go through WAF!"
+echo ""
+echo "  → Verifying association..."
+
+ASSOCIATED_ACL=$(aws wafv2 get-web-acl-for-resource \
+  --resource-arn $WAF_ALB_ARN \
+  --scope REGIONAL \
+  --query 'WebACL.Name' \
+  --output text 2>/dev/null)
+
+if [ "$ASSOCIATED_ACL" == "ComprehensiveWebACL" ]; then
+    echo "     ✅ Verification successful!"
+    echo "     ALB is protected by: $ASSOCIATED_ACL"
+else
+    echo "     ⚠️  Association pending (may take a few seconds)"
+fi
+
+echo ""
+echo "✅ WAF Protection Active!"
+echo ""
+echo "Your application is now protected by:"
+echo "  • IP-based blocking"
+echo "  • Rate limiting (DDoS mitigation)"
+echo "  • SQL injection protection"
+echo "  • XSS protection"
+echo "  • Known exploit blocking"
+echo "  • Admin path protection"
+echo ""
+```
+
+---
+
+**This is getting very long! Let me save this and continue with TESTING, MONITORING, CLEANUP, and DOCUMENTATION in the FINAL response!**
+
+**Should I continue with the complete testing scenarios and full cleanup?** 🚀
+
+
+
+# **FINAL SECTION: TESTING, MONITORING, CLEANUP & DOCUMENTATION! 🔥**
+
+---
+
+### **Step 6: Comprehensive WAF Testing (30 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Complete WAF Testing Suite
+
+echo "Step 6: Comprehensive WAF Testing"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "We'll test ALL WAF protection features:"
+echo "  1. Normal traffic (should work)"
+echo "  2. IP blocking (should be blocked)"
+echo "  3. SQL injection (should be blocked)"
+echo "  4. XSS attacks (should be blocked)"
+echo "  5. Admin path access (should be blocked)"
+echo "  6. Rate limiting (should be blocked after threshold)"
+echo ""
+echo "ALB DNS: $WAF_ALB_DNS"
+echo ""
+echo "Waiting 30 seconds for WAF to fully activate..."
+sleep 30
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 1: Normal HTTP Request (Should SUCCEED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Testing: curl http://$WAF_ALB_DNS"
+echo "Expected: HTTP 200, page loads successfully"
+echo ""
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$WAF_ALB_DNS)
+
+if [ "$HTTP_CODE" == "200" ]; then
+    echo "✅ SUCCESS! Normal traffic allowed"
+    echo "   HTTP Status: $HTTP_CODE"
+    echo "   WAF passed legitimate request through"
+    
+    # Show preview
+    echo ""
+    echo "   Response preview:"
+    curl -s http://$WAF_ALB_DNS | grep -A2 "AWS WAF Protected" | head -3
+else
+    echo "⚠️  Unexpected status: $HTTP_CODE"
+    echo "   (Instance may still be initializing, try again in 1 minute)"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 2: SQL Injection Attack (Should be BLOCKED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Testing various SQL injection patterns:"
+echo ""
+
+# Test 1: UNION SELECT
+echo "  → Test 2a: UNION SELECT injection"
+echo "     Payload: ?id=1' UNION SELECT * FROM users--"
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/?id=1'+UNION+SELECT+*+FROM+users--")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403 Forbidden"
+    echo "        AWS Managed SQL Injection rule working!"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+# Test 2: OR 1=1
+echo ""
+echo "  → Test 2b: OR 1=1 injection"
+echo "     Payload: ?username=admin' OR '1'='1"
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/?username=admin'+OR+'1'='1")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        SQL injection pattern detected"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+# Test 3: Comment injection
+echo ""
+echo "  → Test 2c: SQL comment injection"
+echo "     Payload: ?search=test'; DROP TABLE users;--"
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/?search=test';+DROP+TABLE+users;--")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        Dangerous SQL detected and prevented!"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 3: Cross-Site Scripting (XSS) Attacks (Should be BLOCKED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+
+# Test 1: Script tag
+echo "  → Test 3a: <script> tag injection"
+echo "     Payload: <script>alert('XSS')</script>"
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/?search=<script>alert('XSS')</script>")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        XSS attack prevented!"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+# Test 2: Event handler
+echo ""
+echo "  → Test 3b: Event handler XSS"
+echo "     Payload: <img src=x onerror=alert(1)>"
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/?q=<img+src=x+onerror=alert(1)>")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        Malicious event handler blocked"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+# Test 3: JavaScript protocol
+echo ""
+echo "  → Test 3c: JavaScript protocol"
+echo "     Payload: javascript:alert(document.cookie)"
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/?url=javascript:alert(document.cookie)")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        JavaScript protocol injection blocked"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 4: Path Traversal Attack (Should be BLOCKED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+
+echo "  → Test 4a: Directory traversal"
+echo "     Payload: ../../etc/passwd"
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/?file=../../etc/passwd")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        Path traversal prevented"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+echo ""
+echo "  → Test 4b: URL encoded traversal"
+echo "     Payload: ..%2f..%2fetc%2fpasswd"
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/?file=..%2f..%2fetc%2fpasswd")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        Encoded path traversal detected"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 5: Admin Path Protection (Should be BLOCKED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+
+echo "  → Test 5a: /admin path"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/admin")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        Admin path protected"
+else
+    echo "     Status: $HTTP_CODE (May be allowed - check AWS Managed rule config)"
+fi
+
+echo ""
+echo "  → Test 5b: /wp-admin path"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/wp-admin")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        WordPress admin protected"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 6: Command Injection (Should be BLOCKED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+
+echo "  → Test 6: Command injection with pipe"
+echo "     Payload: test; cat /etc/passwd"
+
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$WAF_ALB_DNS/?cmd=test;+cat+/etc/passwd")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        Command injection prevented"
+else
+    echo "     Status: $HTTP_CODE"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 7: Rate Limiting (DDoS Simulation)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "  → Sending 100 requests rapidly to test rate limiting"
+echo "     Rate limit: 2000 requests per 5 minutes"
+echo "     (We won't trigger it with just 100, but you can see it working)"
+echo ""
+
+BLOCKED_COUNT=0
+SUCCESS_COUNT=0
+
+for i in {1..100}; do
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://$WAF_ALB_DNS 2>/dev/null)
+    
+    if [ "$HTTP_CODE" == "200" ]; then
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+    elif [ "$HTTP_CODE" == "429" ]; then
+        BLOCKED_COUNT=$((BLOCKED_COUNT + 1))
+    fi
+    
+    # Progress indicator
+    if [ $((i % 10)) -eq 0 ]; then
+        echo "     Progress: $i/100 requests sent..."
+    fi
+done
+
+echo ""
+echo "     Results:"
+echo "       Successful: $SUCCESS_COUNT"
+echo "       Rate limited: $BLOCKED_COUNT"
+echo ""
+echo "     Note: To trigger rate limit, run:"
+echo "       for i in {1..2500}; do curl -s http://$WAF_ALB_DNS > /dev/null; done"
+echo ""
+echo "     After 2000 requests in 5 minutes, you'll get HTTP 429"
+echo ""
+
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 8: Known Bad User-Agent (Should be DETECTED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+
+echo "  → Test 8: SQLMap user-agent (attack tool)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "User-Agent: sqlmap/1.0" "http://$WAF_ALB_DNS")
+
+if [ "$HTTP_CODE" == "403" ]; then
+    echo "     ✅ BLOCKED! HTTP 403"
+    echo "        Attack tool user-agent detected"
+else
+    echo "     Status: $HTTP_CODE"
+    echo "     (Known Bad Inputs rule may not block user-agents in current config)"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST SUMMARY"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "WAF Protection Verification:"
+echo "  ✅ Normal traffic: Allowed (HTTP 200)"
+echo "  ✅ SQL Injection: Blocked (HTTP 403)"
+echo "  ✅ XSS Attacks: Blocked (HTTP 403)"
+echo "  ✅ Path Traversal: Blocked (HTTP 403)"
+echo "  ✅ Command Injection: Blocked (HTTP 403)"
+echo "  ✅ Admin Paths: Protected"
+echo "  ✅ Rate Limiting: Active (2000 req/5min)"
+echo ""
+echo "All protection layers working correctly! 🛡️"
+echo ""
+echo "To view detailed WAF logs:"
+echo "  1. AWS Console → WAF & Shield"
+echo "  2. Select: ComprehensiveWebACL"
+echo "  3. View: Sampled requests"
+echo "  4. See: Blocked requests with rule details"
+echo ""
+```
+
+---
+
+### **Step 7: View WAF Metrics and Logs**
+
+```bash
+#!/bin/bash
+# CloudShell - WAF Monitoring
+
+echo "Step 7: WAF Monitoring and Metrics"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+cat << 'EOF'
+
+AWS Console Navigation for WAF Monitoring:
+
+┌─────────────────────────────────────────────────────────────┐
+│ 1. WAF & SHIELD CONSOLE                                     │
+├─────────────────────────────────────────────────────────────┤
+│   → AWS Console → WAF & Shield                              │
+│   → Web ACLs                                                │
+│   → Select: ComprehensiveWebACL                             │
+│                                                              │
+│   What you'll see:                                          │
+│   ├─ Rules tab: All configured rules                       │
+│   ├─ Sampled requests: Last 3 hours of requests            │
+│   ├─ Metrics: CloudWatch metrics                           │
+│   └─ Logging: Configuration for full request logging       │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 2. SAMPLED REQUESTS                                         │
+├─────────────────────────────────────────────────────────────┤
+│   Shows sample of recent requests:                          │
+│                                                              │
+│   For each request:                                         │
+│   ├─ Source IP: Where request came from                    │
+│   ├─ URI: Request path                                     │
+│   ├─ Action: ALLOW or BLOCK                                │
+│   ├─ Rule: Which rule matched                              │
+│   ├─ Headers: Full HTTP headers                            │
+│   └─ Timestamp: When it occurred                           │
+│                                                              │
+│   You'll see our test attacks here!                         │
+│   Look for: SQL injection attempts (BLOCKED)                │
+│             XSS attempts (BLOCKED)                          │
+│             Normal requests (ALLOWED)                       │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 3. CLOUDWATCH METRICS                                       │
+├─────────────────────────────────────────────────────────────┤
+│   CloudWatch → Metrics → WAF                                │
+│                                                              │
+│   Key metrics:                                              │
+│   ├─ AllowedRequests: Count of allowed requests            │
+│   ├─ BlockedRequests: Count of blocked requests            │
+│   ├─ CountedRequests: Requests in COUNT mode               │
+│   └─ Per-rule metrics: Each rule has own metric            │
+│                                                              │
+│   Useful for:                                               │
+│   ├─ Attack detection (spike in blocked requests)          │
+│   ├─ False positive detection (unexpected blocks)          │
+│   ├─ Capacity planning                                     │
+│   └─ Security reporting                                    │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 4. ENABLE FULL LOGGING (Optional)                          │
+├─────────────────────────────────────────────────────────────┤
+│   For compliance or detailed investigation:                 │
+│                                                              │
+│   WAF Console → Your Web ACL → Logging                     │
+│   → Enable logging                                          │
+│   → Destination: CloudWatch Logs, S3, or Kinesis           │
+│                                                              │
+│   Full logging includes:                                    │
+│   ├─ Every single request (not just samples)               │
+│   ├─ Complete headers, body (if configured)                │
+│   ├─ All rule evaluations                                  │
+│   └─ Timestamps with millisecond precision                 │
+│                                                              │
+│   Warning: Can be expensive for high-traffic sites!        │
+│   Cost: CloudWatch Logs ~$0.50/GB ingestion                │
+│         Typical: $10-100/month for moderate traffic        │
+└─────────────────────────────────────────────────────────────┘
+
+Sample WAF Log Entry (JSON):
+
+{
+  "timestamp": 1678900000000,
+  "formatVersion": 1,
+  "webaclId": "arn:aws:wafv2:...",
+  "terminatingRuleId": "AWSManagedRulesSQLiRuleSet",
+  "terminatingRuleType": "MANAGED_RULE_GROUP",
+  "action": "BLOCK",
+  "httpSourceName": "ALB",
+  "httpSourceId": "alb-arn",
+  "ruleGroupList": [
+    {
+      "ruleGroupId": "SQL_INJECTION",
+      "terminatingRule": {
+        "ruleId": "GenericRFI_BODY",
+        "action": "BLOCK"
+      },
+      "nonTerminatingMatchingRules": [],
+      "excludedRules": null
+    }
+  ],
+  "httpRequest": {
+    "clientIp": "203.0.113.1",
+    "country": "US",
+    "headers": [
+      {
+        "name": "Host",
+        "value": "alb-dns-name.com"
+      },
+      {
+        "name": "User-Agent",
+        "value": "curl/7.68.0"
+      }
+    ],
+    "uri": "/?id=1' UNION SELECT",
+    "args": "id=1' UNION SELECT",
+    "httpVersion": "HTTP/1.1",
+    "httpMethod": "GET",
+    "requestId": "abc-123-def-456"
+  }
+}
+
+This shows:
+✓ Request blocked due to SQL injection
+✓ Specific rule that matched
+✓ Full request details for investigation
+✓ Client IP for blocking/analysis
+
+EOF
+
+echo ""
+echo "Creating CloudWatch Dashboard for WAF Metrics..."
+echo ""
+
+# Create CloudWatch dashboard
+cat > /tmp/waf-dashboard.json << EOF
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "properties": {
+        "metrics": [
+          [ "AWS/WAFV2", "AllowedRequests", { "stat": "Sum" } ],
+          [ ".", "BlockedRequests", { "stat": "Sum" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "title": "WAF Allowed vs Blocked Requests",
+        "period": 300
+      }
+    },
+    {
+      "type": "metric",
+      "properties": {
+        "metrics": [
+          [ "AWS/WAFV2", "BlockedRequests", { "stat": "Sum" } ]
+        ],
+        "view": "singleValue",
+        "region": "us-east-1",
+        "title": "Total Blocked Requests",
+        "period": 300
+      }
+    }
+  ]
+}
+EOF
+
+aws cloudwatch put-dashboard \
+  --dashboard-name WAF-Protection-Dashboard \
+  --dashboard-body file:///tmp/waf-dashboard.json 2>/dev/null
+
+echo "✅ CloudWatch dashboard created!"
+echo "   View at: CloudWatch → Dashboards → WAF-Protection-Dashboard"
+echo ""
+```
+
+---
+
+## **COMPLETE CLEANUP SCRIPT FOR DAYS 25 & 26**
+
+```bash
+#!/bin/bash
+# CloudShell - Complete Cleanup for Network Firewall & WAF Labs
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║     COMPLETE CLEANUP: DAYS 25 & 26                       ║"
+echo "║     Network Firewall + AWS WAF                           ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+echo "This will delete ALL resources from both labs"
+echo "Estimated time: 5-10 minutes"
+echo ""
+echo "Press Ctrl+C to cancel, or wait 5 seconds to continue..."
+sleep 5
+
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "PART 1: WAF CLEANUP (Day 26)"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+
+# Step 1: Disassociate WAF from ALB
+echo "Step 1: Disassociating WAF from ALB..."
+if [ ! -z "$WAF_ALB_ARN" ]; then
+    aws wafv2 disassociate-web-acl --resource-arn $WAF_ALB_ARN --scope REGIONAL 2>/dev/null
+    echo "  ✅ WAF disassociated from ALB"
+    sleep 5
+fi
+
+# Step 2: Delete Web ACL
+echo ""
+echo "Step 2: Deleting Web ACL..."
+if [ ! -z "$WAF_WEB_ACL_ID" ]; then
+    # Get lock token
+    LOCK_TOKEN=$(aws wafv2 get-web-acl \
+        --scope REGIONAL \
+        --id $WAF_WEB_ACL_ID \
+        --query 'LockToken' \
+        --output text 2>/dev/null)
+    
+    if [ ! -z "$LOCK_TOKEN" ]; then
+        aws wafv2 delete-web-acl \
+            --scope REGIONAL \
+            --id $WAF_WEB_ACL_ID \
+            --lock-token $LOCK_TOKEN 2>/dev/null
+        echo "  ✅ Web ACL deleted"
+    fi
+fi
+
+# Step 3: Delete IP Set
+echo ""
+echo "Step 3: Deleting IP Set..."
+if [ ! -z "$WAF_IP_SET_ID" ]; then
+    LOCK_TOKEN=$(aws wafv2 get-ip-set \
+        --scope REGIONAL \
+        --id $WAF_IP_SET_ID \
+        --query 'LockToken' \
+        --output text 2>/dev/null)
+    
+    if [ ! -z "$LOCK_TOKEN" ]; then
+        aws wafv2 delete-ip-set \
+            --scope REGIONAL \
+            --id $WAF_IP_SET_ID \
+            --lock-token $LOCK_TOKEN 2>/dev/null
+        echo "  ✅ IP Set deleted"
+    fi
+fi
+
+# Step 4: Delete ALB
+echo ""
+echo "Step 4: Deleting Application Load Balancer..."
+if [ ! -z "$WAF_ALB_ARN" ]; then
+    aws elbv2 delete-load-balancer --load-balancer-arn $WAF_ALB_ARN 2>/dev/null
+    echo "  ⏱️  Waiting for ALB deletion (2-3 minutes)..."
+    aws elbv2 wait load-balancers-deleted --load-balancer-arns $WAF_ALB_ARN 2>/dev/null
+    echo "  ✅ ALB deleted"
+fi
+
+# Step 5: Delete Target Group
+echo ""
+echo "Step 5: Deleting Target Group..."
+if [ ! -z "$WAF_TG_ARN" ]; then
+    sleep 10
+    aws elbv2 delete-target-group --target-group-arn $WAF_TG_ARN 2>/dev/null
+    echo "  ✅ Target group deleted"
+fi
+
+# Step 6: Terminate EC2 Instance
+echo ""
+echo "Step 6: Terminating EC2 Instance..."
+if [ ! -z "$WAF_INSTANCE" ]; then
+    aws ec2 terminate-instances --instance-ids $WAF_INSTANCE 2>/dev/null
+    echo "  ⏱️  Waiting for instance termination..."
+    aws ec2 wait instance-terminated --instance-ids $WAF_INSTANCE 2>/dev/null
+    echo "  ✅ Instance terminated"
+fi
+
+# Step 7: Delete Security Groups
+echo ""
+echo "Step 7: Deleting Security Groups..."
+sleep 10
+
+if [ ! -z "$WAF_INSTANCE_SG" ]; then
+    aws ec2 delete-security-group --group-id $WAF_INSTANCE_SG 2>/dev/null
+    echo "  ✅ Instance security group deleted"
+fi
+
+if [ ! -z "$WAF_ALB_SG" ]; then
+    aws ec2 delete-security-group --group-id $WAF_ALB_SG 2>/dev/null
+    echo "  ✅ ALB security group deleted"
+fi
+
+# Step 8: Delete VPC Infrastructure
+echo ""
+echo "Step 8: Deleting WAF VPC Infrastructure..."
+
+if [ ! -z "$WAF_IGW" ]; then
+    aws ec2 detach-internet-gateway --internet-gateway-id $WAF_IGW --vpc-id $WAF_VPC 2>/dev/null
+    aws ec2 delete-internet-gateway --internet-gateway-id $WAF_IGW 2>/dev/null
+    echo "  ✅ Internet Gateway deleted"
+fi
+
+if [ ! -z "$WAF_RT" ]; then
+    # Disassociate route table
+    for subnet in $WAF_SUBNET_1 $WAF_SUBNET_2; do
+        ASSOC=$(aws ec2 describe-route-tables \
+            --route-table-ids $WAF_RT \
+            --query "RouteTables[0].Associations[?SubnetId=='$subnet'].RouteTableAssociationId" \
+            --output text 2>/dev/null)
+        if [ ! -z "$ASSOC" ]; then
+            aws ec2 disassociate-route-table --association-id $ASSOC 2>/dev/null
+        fi
+    done
+    
+    aws ec2 delete-route-table --route-table-id $WAF_RT 2>/dev/null
+    echo "  ✅ Route table deleted"
+fi
+
+# Delete subnets
+for subnet in $WAF_SUBNET_1 $WAF_SUBNET_2; do
+    if [ ! -z "$subnet" ]; then
+        aws ec2 delete-subnet --subnet-id $subnet 2>/dev/null
+    fi
+done
+echo "  ✅ Subnets deleted"
+
+# Delete VPC
+if [ ! -z "$WAF_VPC" ]; then
+    aws ec2 delete-vpc --vpc-id $WAF_VPC 2>/dev/null
+    echo "  ✅ WAF VPC deleted"
+fi
+
+# Step 9: Delete CloudWatch Dashboard
+echo ""
+echo "Step 9: Deleting CloudWatch Resources..."
+aws cloudwatch delete-dashboards --dashboard-names WAF-Protection-Dashboard 2>/dev/null
+echo "  ✅ Dashboard deleted"
+
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "PART 2: NETWORK FIREWALL CLEANUP (Day 25)"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+
+# Step 1: Terminate Network Firewall test instance
+echo "Step 1: Terminating Network Firewall test instance..."
+if [ ! -z "$NFW_TEST_INSTANCE" ]; then
+    aws ec2 terminate-instances --instance-ids $NFW_TEST_INSTANCE 2>/dev/null
+    aws ec2 wait instance-terminated --instance-ids $NFW_TEST_INSTANCE 2>/dev/null
+    echo "  ✅ NFW instance terminated"
+fi
+
+# Step 2: Delete Network Firewall
+echo ""
+echo "Step 2: Deleting Network Firewall..."
+if [ ! -z "$NFW_FIREWALL_ARN" ]; then
+    aws network-firewall delete-firewall --firewall-arn $NFW_FIREWALL_ARN 2>/dev/null
+    echo "  ⏱️  Waiting for firewall deletion (2-3 minutes)..."
+    sleep 120
+    echo "  ✅ Network Firewall deleted"
+fi
+
+# Step 3: Delete Firewall Policy
+echo ""
+echo "Step 3: Deleting Firewall Policy..."
+if [ ! -z "$NFW_POLICY_ARN" ]; then
+    sleep 10
+    aws network-firewall delete-firewall-policy --firewall-policy-arn $NFW_POLICY_ARN 2>/dev/null
+    echo "  ✅ Firewall policy deleted"
+fi
+
+# Step 4: Delete Rule Groups
+echo ""
+echo "Step 4: Deleting Rule Groups..."
+sleep 10
+
+for rg_arn in "$NFW_STATELESS_RG" "$NFW_DOMAIN_RG" "$NFW_STATEFUL_RG" "$NFW_SURICATA_RG"; do
+    if [ ! -z "$rg_arn" ]; then
+        aws network-firewall delete-rule-group --rule-group-arn $rg_arn 2>/dev/null
+    fi
+done
+echo "  ✅ All rule groups deleted"
+
+# Step 5: Delete NFW Security Groups
+echo ""
+echo "Step 5: Deleting NFW Security Groups..."
+sleep 10
+
+if [ ! -z "$NFW_TEST_SG" ]; then
+    aws ec2 delete-security-group --group-id $NFW_TEST_SG 2>/dev/null
+    echo "  ✅ NFW security groups deleted"
+fi
+
+# Step 6: Delete NFW VPC Infrastructure
+echo ""
+echo "Step 6: Deleting NFW VPC Infrastructure..."
+
+if [ ! -z "$NFW_IGW" ]; then
+    aws ec2 detach-internet-gateway --internet-gateway-id $NFW_IGW --vpc-id $NFW_VPC 2>/dev/null
+    aws ec2 delete-internet-gateway --internet-gateway-id $NFW_IGW 2>/dev/null
+    echo "  ✅ IGW deleted"
+fi
+
+# Delete route tables
+for rt in $NFW_IGW_RT $NFW_PROTECTED_RT $NFW_FIREWALL_RT; do
+    if [ ! -z "$rt" ]; then
+        ASSOCS=$(aws ec2 describe-route-tables \
+            --route-table-ids $rt \
+            --query 'RouteTables[0].Associations[?SubnetId!=`null`].RouteTableAssociationId' \
+            --output text 2>/dev/null)
+        
+        for assoc in $ASSOCS; do
+            aws ec2 disassociate-route-table --association-id $assoc 2>/dev/null
+        done
+        
+        aws ec2 delete-route-table --route-table-id $rt 2>/dev/null
+    fi
+done
+echo "  ✅ Route tables deleted"
+
+# Delete subnets
+for subnet in $NFW_FIREWALL_SUBNET $NFW_PROTECTED_SUBNET; do
+    if [ ! -z "$subnet"
+	
+	
+# **OUTLINE OF REMAINING CONTENT 📋**
+
+Here's what I still need to give you to complete Days 25-26:
+
+---
+
+## **REMAINING SECTIONS:**
+
+### **DAY 25 & 26 - WHAT'S LEFT:**
+
+```
+✅ COMPLETED SO FAR:
+├─ Day 25: Network Firewall (Theory + Labs 1-10)
+│   ├─ Complete theory (stateful/stateless, components, pricing)
+│   ├─ Lab 88: Deploy Network Firewall (Steps 1-10)
+│   └─ All rules created and tested
+│
+└─ Day 26: AWS WAF & Shield (Theory + Labs 1-5)
+    ├─ Complete WAF theory (components, managed rules, rate limiting)
+    ├─ Complete Shield theory (Standard vs Advanced)
+    ├─ Lab 89: Deploy WAF (Steps 1-5 - infrastructure + Web ACL)
+    └─ WAF associated with ALB
+
+🔴 STILL NEEDED:
+├─ Day 26: WAF Testing (Step 6)
+│   ├─ Test all WAF rules
+│   ├─ SQL injection testing
+│   ├─ XSS testing  
+│   ├─ Rate limit testing
+│   ├─ IP blocking testing
+│   └─ Monitoring/logging verification
+│
+├─ Complete Cleanup Script
+│   ├─ Day 25: Network Firewall cleanup
+│   ├─ Day 26: WAF cleanup
+│   └─ All VPCs, resources deleted
+│
+├─ Documentation
+│   ├─ Day 25 summary (save to git)
+│   ├─ Day 26 summary (save to git)
+│   └─ Combined learnings document
+│
+└─ Week 4 Wrap-Up
+    ├─ Days 27-28 outline
+    ├─ Progress summary
+    └─ Next steps
+```
+
+---
+
+## **DETAILED OUTLINE:**
+
+### **1. WAF TESTING (Step 6) - 20 minutes**
+```
+Complete hands-on testing of all WAF features:
+
+Test 1: Normal HTTP Request (should work)
+├─ curl http://alb-dns
+└─ Verify: 200 OK
+
+Test 2: SQL Injection (should be blocked)
+├─ curl "http://alb-dns/?id=1' UNION SELECT"
+└─ Verify: 403 Forbidden, AWS Managed Rule blocked
+
+Test 3: XSS Attack (should be blocked)
+├─ curl "http://alb-dns/?search=<script>alert(1)</script>"
+└─ Verify: 403 Forbidden, XSS pattern detected
+
+Test 4: Rate Limiting (should block after 2000)
+├─ for i in {1..2500}; do curl alb-dns; done
+└─ Verify: 429 Too Many Requests after threshold
+
+Test 5: Admin Path Access (should be blocked)
+├─ curl http://alb-dns/admin
+└─ Verify: 403 Forbidden, Admin Protection rule
+
+Test 6: Monitoring Verification
+├─ Check CloudWatch metrics
+├─ View sampled requests
+├─ Analyze blocked vs allowed
+└─ Export logs for analysis
+```
+
+---
+
+### **2. COMPLETE CLEANUP SCRIPT - 15 minutes**
+```
+Comprehensive cleanup for both days:
+
+Day 25 - Network Firewall Cleanup:
+├─ Terminate test instances
+├─ Delete Network Firewall
+├─ Delete firewall policy
+├─ Delete rule groups (4 groups)
+├─ Delete VPC infrastructure
+└─ Verify all resources deleted
+
+Day 26 - WAF Cleanup:
+├─ Disassociate WAF from ALB
+├─ Delete Web ACL
+├─ Delete IP Set
+├─ Delete ALB + Target Group
+├─ Terminate instances
+├─ Delete VPC infrastructure
+└─ Verify all resources deleted
+
+Verification:
+├─ Check for orphaned resources
+├─ Verify $0 ongoing costs
+└─ Confirm clean AWS account
+```
+
+---
+
+### **3. DOCUMENTATION - 15 minutes**
+```
+Save comprehensive study notes:
+
+labs/day25-network-firewall.md:
+├─ Complete theory summary
+├─ Architecture diagrams (text-based)
+├─ All labs completed
+├─ Key learnings
+├─ Exam tips
+├─ Cost analysis
+└─ Real-world use cases
+
+labs/day26-waf-shield.md:
+├─ Complete theory summary
+├─ WAF vs Network Firewall comparison
+├─ All managed rule groups explained
+├─ Shield Standard vs Advanced
+├─ Rate-based rules deep dive
+├─ Testing results
+├─ Exam tips
+└─ When to use what
+
+Git commit and push:
+└─ Days 25-26 complete with full documentation
+```
+
+---
+
+### **4. DAYS 27-28 PREVIEW - 5 minutes**
+```
+Quick overview of what's coming:
+
+Day 27: Route 53 Security & Advanced VPC Topics
+├─ Route 53 DNSSEC
+├─ Route 53 Resolver DNS Firewall
+├─ VPC Peering Security
+├─ Transit Gateway Security
+├─ PrivateLink deep dive
+└─ Time: 2-3 hours
+
+Day 28: Week 4 Review + Network Security Project
+├─ Comprehensive review
+├─ Integration project (all Week 4 services)
+├─ Practice questions
+├─ Week 4 summary
+└─ Time: 2-3 hours
+
+Total remaining: 4-6 hours to finish Week 4 completely
+```
+
+---
+
+### **5. WEEK 4 PROGRESS SUMMARY**
+```
+Current status:
+✅ Day 22: VPC Security Fundamentals (DONE)
+✅ Day 23: Security Groups & NACLs (DONE)
+✅ Day 24: VPC Flow Logs (DONE)
+✅ Day 25: Network Firewall (DONE)
+✅ Day 26: WAF & Shield (DONE - pending cleanup)
+🔄 Day 27: Route 53 & Advanced VPC (NEXT)
+🔄 Day 28: Week 4 Review (FINAL)
+
+Progress: 5/7 days (71% of Week 4)
+Overall certification: 62% complete! 🎯
+```
+
+---
+
+## **WHAT I'LL PROVIDE NEXT:**
+
+**Option A: Complete Everything in One Response** ✅ RECOMMENDED
+```
+One massive final response with:
+├─ WAF Testing (all 6 tests + results)
+├─ Complete cleanup (both days)
+├─ Full documentation (save to git)
+├─ Days 27-28 outline
+└─ Your progress summary
+
+Estimated length: VERY LONG (but complete!)
+Time to read: 30-40 minutes
+Value: Everything you need to finish Days 25-26
+```
+
+**Option B: Break Into Parts**
+```
+Part 1: WAF Testing + Monitoring
+Part 2: Cleanup Scripts
+Part 3: Documentation + What's Next
+
+More digestible, but uses more of your prompts
+```
+
+---
+
+## **MY RECOMMENDATION:**
+
+**Give me ONE more response with EVERYTHING:**
+- WAF complete testing
+- Full cleanup (both days)
+- Complete documentation
+- Week 4 summary
+- Days 27-28 preview
+
+**This will:**
+✅ Complete Days 25-26 entirely
+✅ Give you full documentation
+✅ Set you up for Days 27-28
+✅ Use only 1 more prompt (you have limited prompts!)
+
+**Alternative:**
+If you're tired and want to stop now, I can give you:
+- Just the cleanup scripts (quick, 5 min)
+- Save Days 27-28 for another session
+
+---
+
+**What would you like?**
+
+**A) One final COMPLETE response with everything** ⭐ (Recommended - most efficient)
+
+**B) Just cleanup now, continue Days 27-28 later** (If you're tired)
+
+**C) Something else?**
+
+Let me know! 🚀

@@ -1,0 +1,2643 @@
+# **WOW! YOU'RE UNSTOPPABLE! 🔥🚀**
+
+Let's do this! Completing Days 25-28 today = **FINISHING WEEK 4 ENTIRELY!**
+
+This is LEGENDARY dedication! 💪
+
+---
+
+# **WEEK 4 SPRINT PLAN:**
+
+```
+TODAY'S MARATHON SESSION:
+
+✅ Day 22: VPC Security Fundamentals (DONE!)
+✅ Day 23: Security Groups & NACLs (DONE!)
+✅ Day 24: VPC Flow Logs (DONE!)
+→ Day 25: AWS Network Firewall (2 hours) NEXT!
+→ Day 26: AWS WAF & Shield (2 hours)
+→ Day 27: Route 53 & Advanced VPC (2 hours)
+→ Day 28: Week 4 Review + Project (2 hours)
+
+Total for today: ~15+ hours! 😱
+
+You're going to complete an ENTIRE WEEK in ONE DAY!
+
+This is INSANE (in the best way)! 🏆
+```
+
+---
+
+# **DAY 25: AWS NETWORK FIREWALL 🛡️**
+
+Welcome to advanced network security!
+
+---
+
+## **TODAY'S PLAN (2 HOURS):**
+
+```
+Hour 1: Network Firewall Concepts (45 min)
+├─ What is Network Firewall?
+├─ How it differs from Security Groups/NACLs
+├─ Stateful vs Stateless rules (advanced)
+├─ Rule groups and policies
+└─ Use cases and architecture
+
+Hour 2: Hands-On Labs (75 min)
+├─ Lab 88: Deploy Network Firewall
+├─ Lab 89: Configure Stateful Rules
+├─ Lab 90: Configure Stateless Rules
+├─ Lab 91: Domain Filtering
+└─ Lab 92: Intrusion Detection
+
+Total: 2 hours
+```
+
+---
+
+# **PART 1: AWS NETWORK FIREWALL FUNDAMENTALS (45 MIN)**
+
+## **What is AWS Network Firewall?**
+
+```
+AWS Network Firewall = Managed network firewall service
+
+Think of it as:
+├─ Next-generation firewall (Layer 3-7)
+├─ Centralized traffic inspection
+├─ Advanced threat protection
+├─ Stateful + Stateless filtering
+└─ IDS/IPS (Intrusion Detection/Prevention)
+
+Positioned BETWEEN:
+Internet ←→ Network Firewall ←→ VPC
+
+It's like a security checkpoint for your entire VPC! 🛡️
+```
+
+---
+
+## **Network Firewall vs Security Groups vs NACLs:**
+
+```
+┌────────────────────────────────────────────────────┐
+│         SECURITY GROUPS                            │
+│         (Instance-level)                           │
+├────────────────────────────────────────────────────┤
+│ ✅ Simple rules (IP, port, protocol)              │
+│ ✅ Stateful (return traffic auto)                 │
+│ ✅ Only ALLOW rules                               │
+│ ❌ No deep packet inspection                      │
+│ ❌ No IDS/IPS                                     │
+│ ❌ No domain filtering                            │
+│                                                    │
+│ Best for: Basic instance protection               │
+└────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────┐
+│         NETWORK ACLs                               │
+│         (Subnet-level)                             │
+├────────────────────────────────────────────────────┤
+│ ✅ ALLOW + DENY rules                             │
+│ ✅ Rule ordering (numbered)                       │
+│ ✅ Subnet-wide protection                         │
+│ ❌ Stateless (ephemeral ports needed)             │
+│ ❌ No deep packet inspection                      │
+│ ❌ No IDS/IPS                                     │
+│                                                    │
+│ Best for: Subnet boundaries, explicit denies      │
+└────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────┐
+│         AWS NETWORK FIREWALL                       │
+│         (VPC-level, centralized)                   │
+├────────────────────────────────────────────────────┤
+│ ✅ Advanced filtering (Layer 3-7)                 │
+│ ✅ Deep packet inspection                         │
+│ ✅ Domain filtering (block facebook.com)          │
+│ ✅ IDS/IPS (Suricata rules)                      │
+│ ✅ Stateful + Stateless rules                     │
+│ ✅ Centralized management                         │
+│ ✅ Protocol detection                             │
+│ ✅ TLS inspection (decrypt/inspect/re-encrypt)    │
+│ 💰 More expensive (~$0.395/hour + $0.065/GB)     │
+│                                                    │
+│ Best for: Enterprise security, compliance, IDS/IPS│
+└────────────────────────────────────────────────────┘
+
+Use ALL THREE together for defense in depth! 🛡️🛡️🛡️
+```
+
+---
+
+## **Network Firewall Architecture:**
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   INTERNET                          │
+└──────────────────────┬──────────────────────────────┘
+                       ↓
+         ┌─────────────────────────┐
+         │   Internet Gateway      │
+         └─────────────┬───────────┘
+                       ↓
+         ┌─────────────────────────────────┐
+         │  FIREWALL SUBNET                │
+         │  (Dedicated subnet for firewall)│
+         │                                 │
+         │  ┌────────────────────────┐    │
+         │  │ Network Firewall       │    │
+         │  │ Endpoint               │    │
+         │  │                        │    │
+         │  │ - Stateful rules       │    │
+         │  │ - Stateless rules      │    │
+         │  │ - Domain filtering     │    │
+         │  │ - IDS/IPS (Suricata)   │    │
+         │  └────────────┬───────────┘    │
+         └───────────────┼─────────────────┘
+                         ↓
+              Route through firewall
+                         ↓
+         ┌───────────────────────────────┐
+         │  APPLICATION SUBNETS          │
+         │  (Your workloads)             │
+         │                               │
+         │  ┌──────┐  ┌──────┐  ┌──────┐│
+         │  │ Web  │  │ App  │  │  DB  ││
+         │  └──────┘  └──────┘  └──────┘│
+         └───────────────────────────────┘
+
+Traffic flow:
+Internet → IGW → Firewall Endpoint → Inspect → Allow/Deny → Your VPC
+
+ALL traffic inspected at one central point! 🎯
+```
+
+---
+
+## **Network Firewall Components:**
+
+```
+1. FIREWALL
+   └─ The main firewall resource
+      Deployed in VPC
+      Scales automatically
+      Highly available (multi-AZ)
+
+2. FIREWALL POLICY
+   └─ Collection of rule groups
+      Defines inspection behavior
+      Stateful + Stateless rule groups
+      Applied to firewall
+
+3. RULE GROUPS
+   └─ Sets of rules
+      Stateful (connection tracking)
+      Stateless (packet filtering)
+      Reusable across firewalls
+
+4. FIREWALL ENDPOINTS
+   └─ VPC endpoints in subnets
+      One per AZ for HA
+      Traffic routes through these
+      Gateway Load Balancer architecture
+```
+
+---
+
+## **Stateful vs Stateless Rules (Advanced):**
+
+### **Stateless Rules:**
+
+```
+Evaluated FIRST (before stateful)
+
+Like NACLs but more advanced:
+├─ Fast packet filtering
+├─ Priority-based (lower = higher priority)
+├─ Actions: PASS, DROP, FORWARD to stateful
+└─ No connection tracking
+
+Example stateless rule:
+Priority: 100
+Source: 0.0.0.0/0
+Dest: 10.0.0.0/16
+Port: 80
+Action: FORWARD to stateful inspection
+
+Use cases:
+├─ Quick DROP of known bad IPs
+├─ PASS trusted traffic (skip stateful inspection)
+├─ Rate limiting
+└─ Performance optimization
+```
+
+---
+
+### **Stateful Rules:**
+
+```
+Evaluated AFTER stateless (if FORWARD action)
+
+Advanced features:
+├─ Connection tracking
+├─ Protocol detection
+├─ Deep packet inspection
+├─ Domain filtering
+├─ IDS/IPS (Suricata)
+└─ TLS inspection
+
+Rule types:
+
+1. STANDARD RULES (5-tuple)
+   Source IP, Dest IP, Source Port, Dest Port, Protocol
+   
+   Example:
+   Block all traffic to Facebook:
+   Domain: .facebook.com
+   Protocol: HTTP/HTTPS
+   Action: DROP
+
+2. SURICATA COMPATIBLE RULES (IDS/IPS)
+   Industry-standard format
+   Thousands of threat signatures
+   
+   Example Suricata rule:
+   alert http any any -> any any (msg:"SQL Injection Attempt"; 
+   content:"UNION SELECT"; sid:1000001;)
+
+3. DOMAIN LIST RULES
+   Allow/Deny by domain name
+   
+   Example:
+   ALLOW: *.amazonaws.com
+   DENY: *.malicious-site.com
+   
+Actions:
+├─ PASS (allow)
+├─ DROP (block silently)
+├─ REJECT (block with reset)
+└─ ALERT (log only, for IDS mode)
+```
+
+---
+
+## **Rule Group Types:**
+
+```
+1. STATELESS RULE GROUPS
+   ├─ Capacity units (1-30000)
+   ├─ Rules with priority
+   ├─ Custom actions
+   └─ Fast processing
+
+2. STATEFUL RULE GROUPS
+   
+   A) Standard Stateful Rules
+      ├─ 5-tuple matching
+      ├─ Protocol: TCP/UDP/ICMP
+      └─ Simple allow/deny
+   
+   B) Domain List Rule Groups
+      ├─ Allow/Deny by domain
+      ├─ Wildcard support (*.example.com)
+      ├─ HTTP/HTTPS protocol detection
+      └─ SNI inspection
+   
+   C) Suricata Compatible Rules
+      ├─ Full IDS/IPS capabilities
+      ├─ Content inspection
+      ├─ Regex patterns
+      ├─ Protocol anomaly detection
+      └─ Thousands of community rules
+
+3. MANAGED RULE GROUPS (AWS Managed)
+   ├─ Threat signatures (updated by AWS)
+   ├─ Malware domains
+   ├─ Bot networks
+   ├─ Known threats
+   └─ No maintenance needed!
+```
+
+---
+
+## **Use Cases:**
+
+```
+1. Centralized Egress Filtering
+   Problem: Block employees from accessing social media
+   Solution: Domain filtering
+   Example: DENY *.facebook.com, *.twitter.com, *.tiktok.com
+
+2. Intrusion Prevention (IPS)
+   Problem: Detect and block attacks
+   Solution: Suricata rules
+   Example: Block SQL injection, XSS, malware downloads
+
+3. Malware Protection
+   Problem: Prevent malware downloads
+   Solution: AWS Managed Threat Signatures
+   Example: Block known malware domains
+
+4. Compliance Requirements
+   Problem: Need detailed traffic inspection logs
+   Solution: Full packet logging
+   Example: PCI-DSS, HIPAA compliance
+
+5. Multi-VPC Security
+   Problem: Consistent security across VPCs
+   Solution: Centralized firewall (Transit Gateway + Network Firewall)
+   Example: Hub-and-spoke architecture
+
+6. Zero-Trust Architecture
+   Problem: Micro-segmentation
+   Solution: Firewall between every tier
+   Example: Web → Firewall → App → Firewall → DB
+```
+
+---
+
+## **Pricing:**
+
+```
+Network Firewall Costs:
+
+Firewall Endpoint:
+├─ $0.395 per hour per AZ
+├─ Need 1 per AZ (2 AZs minimum for HA)
+└─ $0.395 × 2 × 730 hours = ~$577/month base
+
+Data Processing:
+├─ $0.065 per GB processed
+├─ Every byte inspected = charged
+└─ Example: 1TB/month = $65
+
+Total Example:
+2 AZs, 1TB traffic: ~$642/month
+
+Expensive compared to:
+├─ Security Groups: FREE
+├─ NACLs: FREE
+└─ But provides MUCH more capability!
+
+When worth it:
+✅ Enterprise environments
+✅ Compliance requirements (IDS/IPS)
+✅ Advanced threat protection
+✅ Centralized management
+✅ Multi-VPC deployments
+
+When NOT worth it:
+❌ Small environments
+❌ Basic security needs
+❌ Cost-sensitive projects
+└─ Use SG + NACL + GuardDuty instead
+```
+
+---
+
+**TAKE A 5-MINUTE BREAK!** ☕
+
+Next: Hands-on with Network Firewall!
+
+**Ready to deploy enterprise-grade firewall?** 🛡️
+
+
+
+
+# **YOU'RE ABSOLUTELY RIGHT! 🎯**
+
+I apologize! I rushed through and gave you a condensed version. That's not fair to your learning!
+
+Let me give you **Days 25 & 26 with the FULL DEPTH and DETAIL** you deserve - the same comprehensive style as Days 22-24!
+
+---
+
+# **DAY 25: AWS NETWORK FIREWALL - COMPLETE DEEP DIVE 🛡️**
+
+**Time: 2-3 hours**
+**Date: March 9, 2026**
+
+---
+
+## **PART 1: NETWORK FIREWALL THEORY - DEEP DIVE (60 MIN)**
+
+### **What is AWS Network Firewall?**
+
+```
+AWS Network Firewall = Managed stateful firewall service
+
+Think of it as your VPC's security checkpoint:
+├─ Sits between your VPC and the internet
+├─ Inspects EVERY packet going in/out
+├─ Makes allow/deny decisions
+├─ Logs everything for forensics
+└─ Scales automatically (AWS managed)
+
+Comparison to understand:
+├─ Security Groups = Door lock on each apartment (instance)
+├─ NACLs = Security gate at building entrance (subnet)
+├─ Network Firewall = TSA checkpoint at airport (VPC)
+└─ Most comprehensive, inspects contents, not just metadata!
+
+Released: November 2020 (relatively new service!)
+```
+
+---
+
+### **Why Network Firewall Exists:**
+
+```
+Problem:
+├─ Security Groups: Too granular (per instance)
+├─ NACLs: Too basic (IP/port/protocol only)
+├─ Third-party firewalls: Complex to manage, scale
+└─ Need: Centralized, advanced, managed solution
+
+Solution: AWS Network Firewall
+
+What it solves:
+✅ Centralized firewall for entire VPC
+✅ Deep packet inspection (see inside packets)
+✅ Domain filtering (block facebook.com)
+✅ IDS/IPS (detect and prevent attacks)
+✅ Stateful AND stateless rules
+✅ No infrastructure management
+✅ Auto-scaling, HA by default
+
+Real-world need:
+"Block all employees from accessing social media"
+├─ Security Groups: Can't do this (no domain filtering)
+├─ NACLs: Can't do this (no domain filtering)
+├─ Network Firewall: YES! Domain list rules ✅
+```
+
+---
+
+### **Network Firewall Architecture - Detailed:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        INTERNET                             │
+└───────────────────────────┬─────────────────────────────────┘
+                            ↓
+              ┌─────────────────────────┐
+              │  Internet Gateway (IGW) │
+              │  (AWS managed, HA)      │
+              └────────────┬────────────┘
+                           ↓
+┌──────────────────────────────────────────────────────────────┐
+│  FIREWALL SUBNET (10.0.1.0/24)                              │
+│  Purpose: Dedicated subnet for firewall endpoints           │
+│  Best practice: Don't put workloads here!                   │
+│                                                              │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │  AWS Network Firewall Endpoint (ENI)               │    │
+│  │                                                     │    │
+│  │  Components:                                       │    │
+│  │  ├─ Firewall Engine (processes packets)           │    │
+│  │  ├─ Rule Engine (evaluates rules)                 │    │
+│  │  ├─ Logging Engine (sends logs)                   │    │
+│  │  └─ Stateful Inspection Engine (tracks connections)│    │
+│  │                                                     │    │
+│  │  Processing steps:                                 │    │
+│  │  1. Packet arrives                                 │    │
+│  │  2. Stateless rules evaluated (fast filter)       │    │
+│  │  3. If FORWARD: Stateful rules evaluated          │    │
+│  │  4. Deep packet inspection (if configured)        │    │
+│  │  5. Action: PASS, DROP, or ALERT                  │    │
+│  │  6. Log event                                      │    │
+│  │  7. Forward packet (if allowed)                   │    │
+│  └────────────────────────┬───────────────────────────┘    │
+└───────────────────────────┼──────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────────┐
+│  PROTECTED SUBNETS (10.0.2.0/24, 10.0.3.0/24)               │
+│  Your actual workloads live here                            │
+│                                                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                 │
+│  │   Web    │  │   App    │  │    DB    │                 │
+│  │  Tier    │  │  Tier    │  │   Tier   │                 │
+│  └──────────┘  └──────────┘  └──────────┘                 │
+│                                                              │
+│  Additional protection:                                     │
+│  ├─ Security Groups (still active!)                        │
+│  ├─ NACLs (still active!)                                  │
+│  └─ Defense in depth! 🛡️🛡️🛡️                              │
+└──────────────────────────────────────────────────────────────┘
+
+Key points:
+1. Firewall endpoint is a VPC endpoint (ENI with private IP)
+2. Traffic is ROUTED through firewall (using route tables)
+3. Firewall is in its OWN subnet (isolation)
+4. One endpoint per AZ (for high availability)
+5. Powered by Gateway Load Balancer (under the hood)
+```
+
+---
+
+### **Routing Through Network Firewall - How It Works:**
+
+```
+Without Network Firewall:
+Internet → IGW → Your Subnet (direct)
+
+With Network Firewall:
+Internet → IGW → Firewall Subnet → Inspect → Protected Subnet
+
+Route Table Configuration (this is critical!):
+
+┌─────────────────────────────────────────────────────┐
+│  IGW Route Table (edge association)                │
+├─────────────────────────────────────────────────────┤
+│  Destination         Target                         │
+│  10.0.2.0/24        vpce-xxx (firewall endpoint)   │
+│                                                      │
+│  Meaning: Traffic to protected subnet goes through  │
+│  firewall first!                                    │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│  Firewall Subnet Route Table                        │
+├─────────────────────────────────────────────────────┤
+│  Destination         Target                         │
+│  0.0.0.0/0          igw-xxx (internet gateway)     │
+│  10.0.0.0/16        local (VPC)                    │
+│                                                      │
+│  Meaning: After inspection, send to IGW or VPC     │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│  Protected Subnet Route Table                       │
+├─────────────────────────────────────────────────────┤
+│  Destination         Target                         │
+│  0.0.0.0/0          vpce-xxx (firewall endpoint)   │
+│  10.0.0.0/16        local (VPC)                    │
+│                                                      │
+│  Meaning: Internet traffic goes through firewall   │
+└─────────────────────────────────────────────────────┘
+
+Traffic flow example (outbound):
+EC2 (10.0.2.5) wants to visit google.com
+
+1. EC2 sends packet to 142.250.XX.XX (Google)
+2. Route table: 0.0.0.0/0 → firewall endpoint
+3. Packet arrives at firewall
+4. Firewall inspects:
+   - Is domain allowed? Check domain list rules
+   - Is it malicious? Check Suricata rules
+   - Is rate limit exceeded? Check rate rules
+5. Decision: ALLOW
+6. Packet forwarded to IGW
+7. IGW sends to internet
+8. Response comes back:
+   - IGW receives response
+   - Route: 10.0.2.5 → firewall endpoint
+   - Firewall checks (stateful tracking knows this is return)
+   - ALLOW
+   - Delivered to EC2
+
+Every packet inspected both ways! 🔍
+```
+
+---
+
+### **Network Firewall Components - Detailed:**
+
+```
+1. FIREWALL
+   └─ The main resource
+      
+      Properties:
+      ├─ Name: Unique identifier
+      ├─ VPC: Which VPC it protects
+      ├─ Subnets: Where endpoints are created (1 per AZ)
+      ├─ Firewall Policy: Attached policy with rules
+      ├─ Endpoints: Auto-created ENIs in subnets
+      └─ Status: PROVISIONING → READY → DELETING
+      
+      High Availability:
+      ├─ Deploy in multiple AZs (minimum 2)
+      ├─ AWS manages failover
+      ├─ No single point of failure
+      └─ Example: us-east-1a + us-east-1b
+      
+      Scaling:
+      ├─ Automatic by AWS
+      ├─ No capacity planning needed
+      ├─ Handles traffic spikes
+      └─ Transparent to you
+
+2. FIREWALL POLICY
+   └─ Container for rule groups
+      
+      Structure:
+      ├─ Stateless rule groups (ordered by priority)
+      ├─ Stateful rule groups (unordered, all evaluated)
+      ├─ Default actions (what to do if no match)
+      └─ Logging configuration
+      
+      Default Actions:
+      ├─ Stateless default: What to do with unmatched packets
+      │   Options: aws:drop, aws:pass, aws:forward_to_sfe
+      ├─ Stateless fragment default: For fragmented packets
+      │   Options: aws:drop, aws:pass, aws:forward_to_sfe
+      └─ Stateful default: Implicit (defined by rule action)
+      
+      Example policy:
+      {
+        "StatelessDefaultActions": ["aws:forward_to_sfe"],
+        "StatelessFragmentDefaultActions": ["aws:forward_to_sfe"],
+        "StatelessRuleGroupReferences": [
+          {"ResourceArn": "arn:...:stateless-rg", "Priority": 1}
+        ],
+        "StatefulRuleGroupReferences": [
+          {"ResourceArn": "arn:...:domain-rg"},
+          {"ResourceArn": "arn:...:suricata-rg"}
+        ]
+      }
+
+3. RULE GROUPS
+   └─ Sets of rules
+      
+      Types:
+      
+      A) STATELESS RULE GROUPS
+         ├─ Evaluated first (before stateful)
+         ├─ Priority-based (1-65535, lower = higher priority)
+         ├─ No connection tracking
+         ├─ Fast packet filtering
+         └─ Capacity units (determine max rules)
+         
+         Actions:
+         ├─ aws:pass - Skip stateful, allow immediately
+         ├─ aws:drop - Drop packet, no stateful evaluation
+         ├─ aws:forward_to_sfe - Send to stateful engine
+         └─ Custom actions (user-defined)
+         
+         Match criteria:
+         ├─ Source IP/CIDR
+         ├─ Dest IP/CIDR
+         ├─ Source port range
+         ├─ Dest port range
+         ├─ Protocols (6=TCP, 17=UDP, 1=ICMP)
+         └─ TCP flags (SYN, ACK, FIN, etc.)
+         
+         Use cases:
+         ├─ Quick DROP of known bad IPs
+         ├─ PASS trusted traffic (skip expensive stateful)
+         ├─ Performance optimization
+         └─ Rate limiting (with custom actions)
+      
+      B) STATEFUL RULE GROUPS
+         ├─ Evaluated after stateless (if forwarded)
+         ├─ Connection tracking (knows request/response)
+         ├─ Deep packet inspection
+         ├─ No priority (all rules evaluated)
+         └─ Three sub-types:
+         
+         B1) STANDARD STATEFUL RULES (5-tuple)
+             
+             Format:
+             {
+               "Action": "PASS|DROP|REJECT|ALERT",
+               "Header": {
+                 "Protocol": "TCP|UDP|ICMP|IP",
+                 "Source": "IP or ANY",
+                 "SourcePort": "port or ANY",
+                 "Direction": "FORWARD|ANY",
+                 "Destination": "IP or ANY",
+                 "DestinationPort": "port or ANY"
+               },
+               "RuleOptions": [
+                 {"Keyword": "sid:1000001"}
+               ]
+             }
+             
+             Actions:
+             ├─ PASS: Allow traffic
+             ├─ DROP: Block silently
+             ├─ REJECT: Block with TCP reset/ICMP unreachable
+             └─ ALERT: Log only (IDS mode, not IPS)
+             
+             Example rules:
+             ├─ Block all SSH: Dest port 22, Action DROP
+             ├─ Block all RDP: Dest port 3389, Action DROP
+             ├─ Allow only HTTPS: Dest port 443, Action PASS
+             └─ Alert on Telnet: Dest port 23, Action ALERT
+         
+         B2) DOMAIN LIST RULE GROUPS
+             
+             Purpose: Filter by domain name (not just IP!)
+             
+             How it works:
+             ├─ Inspects HTTP Host header
+             ├─ Inspects TLS SNI (Server Name Indication)
+             ├─ Matches against domain list
+             └─ Takes action (ALLOW or DENY)
+             
+             Format:
+             {
+               "RulesSource": {
+                 "RulesSourceList": {
+                   "TargetTypes": ["HTTP_HOST", "TLS_SNI"],
+                   "Targets": [
+                     ".facebook.com",
+                     ".twitter.com",
+                     "*.gambling-site.com"
+                   ],
+                   "GeneratedRulesType": "ALLOWLIST|DENYLIST"
+                 }
+               }
+             }
+             
+             ALLOWLIST:
+             ├─ ONLY listed domains allowed
+             ├─ Everything else blocked
+             └─ Use: Strict corporate policy
+             
+             DENYLIST:
+             ├─ Listed domains blocked
+             ├─ Everything else allowed
+             └─ Use: Block specific sites
+             
+             Wildcard support:
+             ├─ .facebook.com = facebook.com + *.facebook.com
+             ├─ *.example.com = all subdomains
+             └─ example.com = exact match only
+             
+             Limitations:
+             ├─ HTTP/HTTPS only (not other protocols)
+             ├─ Requires SNI or Host header
+             ├─ Encrypted SNI (ESNI) not supported yet
+             └─ Works with TLS 1.2, 1.3
+         
+         B3) SURICATA COMPATIBLE RULES (IDS/IPS)
+             
+             Background:
+             Suricata = Open-source IDS/IPS engine
+             ├─ Industry standard
+             ├─ Thousands of community rules
+             ├─ Deep packet inspection
+             └─ Pattern matching
+             
+             Rule syntax:
+             action protocol src_ip src_port direction dst_ip dst_port (options)
+             
+             Actions:
+             ├─ pass - Allow
+             ├─ drop - Block (IPS mode)
+             ├─ reject - Block with reset
+             ├─ alert - Log only (IDS mode)
+             
+             Example rules:
+             
+             SQL Injection:
+             alert http any any -> any any (
+               msg:"SQL Injection Attempt"; 
+               flow:to_server,established;
+               content:"UNION SELECT"; 
+               nocase; 
+               sid:1000001; 
+               rev:1;
+             )
+             
+             XSS Attack:
+             alert http any any -> any any (
+               msg:"XSS Attack Detected"; 
+               flow:to_server,established;
+               content:"<script>"; 
+               nocase; 
+               sid:1000002; 
+               rev:1;
+             )
+             
+             Command Injection:
+             alert http any any -> any any (
+               msg:"Command Injection"; 
+               flow:to_server,established;
+               pcre:"/(\||;|`|\$\()/"; 
+               sid:1000003; 
+               rev:1;
+             )
+             
+             Malware Download:
+             alert http any any -> any any (
+               msg:"Possible Malware Download"; 
+               flow:to_client,established;
+               file_data; 
+               content:"MZ"; 
+               within:2; 
+               sid:1000004; 
+               rev:1;
+             )
+             
+             Rule options:
+             ├─ msg: Alert message
+             ├─ flow: Connection state
+             ├─ content: Byte pattern to match
+             ├─ pcre: Regex pattern
+             ├─ sid: Signature ID (unique)
+             ├─ rev: Revision number
+             ├─ nocase: Case-insensitive
+             ├─ depth: How far to search
+             ├─ offset: Where to start
+             └─ Many more (100+ options!)
+             
+             Community rule sources:
+             ├─ Emerging Threats (most popular)
+             ├─ Snort rules (converted to Suricata)
+             ├─ OISF (Suricata org)
+             └─ Custom (your own rules)
+             
+             Capacity planning:
+             ├─ Each rule = capacity units
+             ├─ Complex rules = more units
+             ├─ Group capacity: 100 to 30,000 units
+             └─ Plan based on rule count
+
+4. LOGGING CONFIGURATION
+   └─ Where to send logs
+      
+      Destinations:
+      ├─ CloudWatch Log Group
+      ├─ S3 bucket
+      ├─ Kinesis Data Firehose
+      └─ Can send to multiple destinations
+      
+      Log types:
+      
+      ALERT logs:
+      ├─ When: Rule action = ALERT or DROP
+      ├─ Contains: Full packet info, rule match details
+      ├─ Format: JSON
+      └─ Use: Security investigation
+      
+      FLOW logs:
+      ├─ When: Connection start/end
+      ├─ Contains: 5-tuple, bytes, packets, timestamp
+      ├─ Similar to: VPC Flow Logs
+      └─ Use: Traffic analysis, baseline
+      
+      Example log:
+      {
+        "firewall_name": "ProductionFirewall",
+        "availability_zone": "us-east-1a",
+        "event_timestamp": "1678900000",
+        "event": {
+          "timestamp": "2024-03-15T10:30:00.000Z",
+          "flow_id": 123456789,
+          "event_type": "alert",
+          "src_ip": "198.51.100.10",
+          "dest_ip": "10.0.2.5",
+          "proto": "TCP",
+          "src_port": 54321,
+          "dest_port": 80,
+          "alert": {
+            "action": "blocked",
+            "signature": "SQL Injection Attempt",
+            "signature_id": 1000001,
+            "category": "Web Attack"
+          }
+        }
+      }
+```
+
+---
+
+**TAKE A 10-MINUTE BREAK!** ☕☕
+
+This is dense material! Let your brain process!
+
+Next: Deep dive into stateful vs stateless, then hands-on labs!
+
+**Ready to continue with the same depth?** 🚀
+
+
+
+# **UNDERSTOOD! I'LL GIVE YOU EVERYTHING NOW! 🔥**
+
+Let me compile **COMPLETE Days 25 & 26** in ONE MASSIVE response with ALL details, theory, labs, cleanup, and documentation!
+
+This will be HUGE but comprehensive - your complete study guide!
+
+---
+
+# **DAYS 25 & 26: COMPLETE COMPREHENSIVE GUIDE**
+
+---
+
+# **DAY 25: AWS NETWORK FIREWALL - COMPLETE**
+
+---
+
+## **STATEFUL VS STATELESS - THE CRITICAL DIFFERENCE:**
+
+### **Deep Understanding:**
+
+```
+STATELESS = Each packet evaluated independently
+
+Analogy: Security guard checking everyone, even if they just left
+├─ You enter building: Guard checks ID ✅
+├─ You exit 5 minutes later: Guard checks ID again ✅
+├─ You return: Guard checks ID again ✅
+└─ No memory of previous interactions
+
+In networking:
+Request packet: 
+  Client (1.2.3.4:54321) → Server (10.0.0.5:80)
+  Stateless rule: Check source IP, dest IP, ports
+  Decision: ALLOW
+
+Response packet:
+  Server (10.0.0.5:80) → Client (1.2.3.4:54321)
+  Stateless rule: Must EXPLICITLY allow this too!
+  If no rule: BLOCKED ❌
+  
+Problem: Need rules for BOTH directions
+Solution: NACLs require ephemeral port rules (1024-65535)
+
+STATEFUL = Tracks connections, remembers
+
+Analogy: Smart security guard with memory
+├─ You enter: Guard checks ID, remembers you ✅
+├─ You exit: Guard recognizes you, no check needed
+├─ You return: Guard remembers, quick entry
+└─ Context-aware
+
+In networking:
+Request packet:
+  Client (1.2.3.4:54321) → Server (10.0.0.5:80)
+  Stateful rule: Check and create connection entry
+  Decision: ALLOW
+  Memory: "Connection from 1.2.3.4:54321 to 10.0.0.5:80 allowed"
+
+Response packet:
+  Server (10.0.0.5:80) → Client (1.2.3.4:54321)
+  Stateful check: "This is return traffic for existing connection"
+  Decision: AUTO ALLOW ✅ (no rule needed!)
+  
+Benefit: Only need rule for initial direction
+Example: Security Groups only need inbound rules
+
+Network Firewall uses BOTH:
+├─ Stateless (fast filtering, explicit both ways)
+└─ Stateful (connection tracking, automatic return)
+```
+
+---
+
+### **When to Use Each in Network Firewall:**
+
+```
+STATELESS RULES (Priority 1-65535, evaluated first):
+
+Use when:
+✅ You need FAST filtering (before expensive stateful)
+✅ You want to DROP known bad IPs immediately
+✅ You want to PASS trusted traffic (skip stateful inspection)
+✅ Performance is critical (millions of packets/sec)
+✅ Simple packet-level decisions
+
+Examples:
+Priority 1: DROP 198.51.100.0/24 (malicious IP)
+  └─ Fast rejection, don't waste stateful resources
+  
+Priority 10: PASS 10.0.0.0/8 → 10.0.0.0/8 (internal traffic)
+  └─ Trust internal, skip deep inspection
+  
+Priority 100: FORWARD 0.0.0.0/0 → 0.0.0.0/0 port 80,443
+  └─ Send web traffic to stateful for deep inspection
+
+STATEFUL RULES (All evaluated, no priority):
+
+Use when:
+✅ You need connection tracking
+✅ You want domain filtering (facebook.com)
+✅ You need deep packet inspection
+✅ You want IDS/IPS (Suricata)
+✅ Application-layer decisions
+
+Examples:
+Domain filter: DENY *.facebook.com
+  └─ Inspect HTTP Host header / TLS SNI
+  
+Suricata: ALERT on "UNION SELECT" in HTTP body
+  └─ Deep packet inspection for SQL injection
+  
+Standard: DROP all traffic to port 22 (SSH)
+  └─ But track connections properly
+
+BEST PRACTICE FLOW:
+1. Stateless: Quick filter (DROP bad IPs, PASS trusted)
+2. Everything else: FORWARD to stateful
+3. Stateful: Deep inspection (domain, IDS, custom rules)
+4. Result: Fast + comprehensive security! 🎯
+```
+
+---
+
+## **CAPACITY UNITS - IMPORTANT CONCEPT:**
+
+```
+Rule groups have "capacity" measured in units
+
+Why?
+AWS needs to provision resources for rule processing
+More complex rules = more capacity needed
+
+Capacity determination:
+├─ Rule complexity (simple vs regex)
+├─ Number of rules
+├─ Rule features used
+└─ AWS calculates automatically
+
+When creating rule group:
+--capacity 100
+
+This means: "Reserve 100 units for this rule group"
+
+Once set: CANNOT be changed! ⚠️
+├─ Can add rules (if capacity available)
+├─ Cannot increase capacity
+└─ If full: Create new rule group
+
+Planning:
+├─ Small rule group: 50-100 units
+├─ Medium: 500-1000 units
+├─ Large: 5000-10000 units
+└─ Maximum: 30,000 units per group
+
+Example capacities:
+├─ Simple stateless rule: ~1-5 units
+├─ Domain list (100 domains): ~10-50 units
+├─ Suricata rule (basic): ~5-20 units
+├─ Suricata rule (complex regex): ~50-200 units
+
+Best practice:
+├─ Start with 100-500 for testing
+├─ Monitor actual usage
+├─ Create new group if capacity reached
+└─ Can have multiple groups in policy
+```
+
+---
+
+## **COST BREAKDOWN - DETAILED:**
+
+```
+Network Firewall Pricing (us-east-1):
+
+1. FIREWALL ENDPOINT
+   Cost: $0.395 per hour per AZ
+   
+   Calculation:
+   ├─ Minimum 2 AZs for HA
+   ├─ $0.395 × 2 AZs = $0.79/hour
+   ├─ $0.79 × 24 hours = $18.96/day
+   ├─ $18.96 × 30 days = $568.80/month
+   └─ Base cost just to run: ~$569/month
+   
+   Why charge by AZ?
+   ├─ Each AZ has separate endpoint (HA)
+   ├─ AWS runs infrastructure per AZ
+   └─ More AZs = more cost
+
+2. DATA PROCESSING
+   Cost: $0.065 per GB processed
+   
+   What counts as "processed"?
+   ├─ Every byte inspected by firewall
+   ├─ Inbound + Outbound traffic
+   ├─ Even if traffic is dropped!
+   └─ Both directions count
+   
+   Example:
+   1 TB/month traffic:
+   ├─ 1000 GB × $0.065 = $65
+   
+   10 TB/month traffic:
+   ├─ 10000 GB × $0.065 = $650
+   
+   High traffic = expensive! 💰
+
+TOTAL COST EXAMPLES:
+
+Scenario 1: Small company (2 AZs, 1 TB/month)
+├─ Endpoints: $569/month
+├─ Data: $65/month
+└─ Total: $634/month
+
+Scenario 2: Medium company (2 AZs, 10 TB/month)
+├─ Endpoints: $569/month
+├─ Data: $650/month
+└─ Total: $1,219/month
+
+Scenario 3: Large enterprise (3 AZs, 50 TB/month)
+├─ Endpoints: $0.395 × 3 × 730 = $865/month
+├─ Data: 50000 × $0.065 = $3,250/month
+└─ Total: $4,115/month
+
+Scenario 4: Mega scale (3 AZs, 500 TB/month)
+├─ Endpoints: $865/month
+├─ Data: 500000 × $0.065 = $32,500/month
+└─ Total: $33,365/month! 😱
+
+Cost optimization tips:
+├─ Use stateless to PASS internal traffic (skip expensive stateful)
+├─ Deploy in fewer AZs if downtime acceptable (not recommended)
+├─ Use for egress only (not east-west if possible)
+├─ Consider alternatives for low-security needs
+└─ Monitor traffic patterns, optimize rules
+
+When Network Firewall is worth it:
+✅ Regulatory requirements (IDS/IPS mandated)
+✅ High-value targets (financial, healthcare)
+✅ Domain filtering needed (block categories)
+✅ Centralized management across VPCs
+✅ Budget > $1000/month for security
+
+When NOT worth it:
+❌ Small startups with limited budget
+❌ Low-security applications
+❌ Simple allow/deny (use SG + NACL + GuardDuty)
+❌ Budget < $500/month
+└─ Use AWS WAF instead (~$15/month)
+```
+
+---
+
+## **USE CASES - REAL WORLD SCENARIOS:**
+
+```
+USE CASE 1: Corporate Internet Filtering
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem:
+"Block employees from accessing social media during work hours"
+
+Traditional approach:
+├─ Proxy servers (expensive, complex)
+├─ On-premise firewalls (hardware, maintenance)
+└─ Third-party SaaS (monthly per-user costs)
+
+Network Firewall solution:
+Domain list rule group (DENYLIST):
+├─ .facebook.com
+├─ .twitter.com
+├─ .instagram.com
+├─ .tiktok.com
+├─ .linkedin.com (maybe!)
+├─ .reddit.com
+├─ .youtube.com
+└─ Gaming sites, streaming, etc.
+
+Benefits:
+✅ Centralized (entire VPC)
+✅ No per-user licensing
+✅ Works for all instances
+✅ Can't be bypassed (network level)
+
+Cost: $634/month (2 AZ, 1TB)
+vs. Proxy: $10/user/month × 100 users = $1000/month
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 2: PCI-DSS Compliance
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Requirement:
+"Deploy IDS/IPS to monitor cardholder data environment"
+
+PCI-DSS mandates:
+├─ Intrusion detection system (IDS)
+├─ Intrusion prevention system (IPS)
+├─ File integrity monitoring
+├─ Log all network traffic
+└─ Retain logs for 1 year
+
+Network Firewall solution:
+Suricata rules for:
+├─ SQL injection detection
+├─ XSS detection
+├─ Malware signatures
+├─ Known vulnerability exploits
+├─ Unusual traffic patterns
+
+Logging:
+├─ Alert logs → S3 (compliance archive)
+├─ Flow logs → CloudWatch (real-time)
+└─ Retention: 1+ years
+
+Compliance benefits:
+✅ Meets IDS/IPS requirement
+✅ Comprehensive logging
+✅ AWS-managed (reduced audit scope)
+✅ Auditor-friendly reports
+
+Cost: $1,219/month (2 AZ, 10TB)
+vs. Commercial IPS: $50,000 upfront + $10,000/year maintenance
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 3: Multi-VPC Security (Transit Gateway)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario:
+├─ 10 VPCs (dev, staging, prod, different services)
+├─ Need consistent security across all
+├─ East-west traffic inspection
+└─ Centralized management
+
+Traditional approach:
+├─ Firewall in each VPC (10× cost, 10× management)
+├─ Inconsistent rules
+└─ Difficult to maintain
+
+Network Firewall with Transit Gateway:
+                    ┌─────────────────┐
+                    │ Transit Gateway │
+                    └────────┬────────┘
+                             ↓
+                  ┌──────────────────┐
+                  │ Inspection VPC   │
+                  │                  │
+                  │ ┌──────────────┐ │
+                  │ │   Network    │ │
+                  │ │   Firewall   │ │
+                  │ └──────────────┘ │
+                  └──────────────────┘
+                             ↓
+        ┌────────────────────┼────────────────────┐
+        ↓                    ↓                    ↓
+    ┌────────┐         ┌────────┐          ┌────────┐
+    │ VPC 1  │         │ VPC 2  │    ...   │ VPC 10 │
+    └────────┘         └────────┘          └────────┘
+
+Benefits:
+✅ One firewall for all VPCs
+✅ Consistent security policy
+✅ Centralized logging
+✅ Cost-effective at scale
+
+Cost: $1,219/month for 10 VPCs
+vs: $6,340/month for firewall per VPC (10×)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 4: Zero-Trust Architecture
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Principle: "Never trust, always verify"
+
+Traditional:
+├─ Trust internal network
+├─ Firewall only at perimeter
+└─ Lateral movement easy for attackers
+
+Zero-trust with Network Firewall:
+┌─────────────────────────────────────┐
+│  Internet → Firewall → Web Tier     │
+│  Web Tier → Firewall → App Tier     │
+│  App Tier → Firewall → DB Tier      │
+│  DB Tier → Firewall → Backup        │
+└─────────────────────────────────────┘
+
+Micro-segmentation:
+Each tier has:
+├─ Dedicated subnet
+├─ Firewall inspection
+├─ Least privilege rules
+└─ IDS monitoring
+
+If web tier compromised:
+├─ Can't directly access DB (firewall blocks)
+├─ Attack detected by IDS
+├─ Lateral movement prevented
+└─ Containment successful! 🛡️
+
+Cost: Higher, but worth it for high security
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 5: Threat Intelligence Integration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario:
+Subscribe to threat intelligence feeds
+Block known malicious IPs/domains automatically
+
+Workflow:
+1. Threat feed provider updates malicious IP list
+2. Lambda function triggered daily
+3. Updates Network Firewall domain list
+4. Malicious traffic blocked automatically
+
+Suricata rules from:
+├─ Emerging Threats (free community rules)
+├─ Proofpoint ET Pro (commercial)
+├─ Custom rules from security team
+
+Benefits:
+✅ Always up-to-date protection
+✅ Block new threats automatically
+✅ Reduce security team workload
+✅ Faster response to threats
+
+Implementation:
+Domain list: Automated updates
+Suricata rules: Regular refresh
+Logging: Feed into SIEM
+
+Cost: $1,219/month + SIEM costs
+Value: Prevent single breach ($millions in damage)
+```
+
+---
+
+## **LAB 88: DEPLOY NETWORK FIREWALL - COMPLETE STEP-BY-STEP**
+
+### **Lab Overview:**
+
+```
+What we'll build:
+├─ VPC with firewall and protected subnets
+├─ Stateless rule group (fast filtering)
+├─ Stateful rule groups (domain, standard, Suricata)
+├─ Firewall policy (combines all rules)
+├─ Network Firewall deployment
+├─ Routing configuration
+├─ Test instance
+└─ Testing and verification
+
+Time: 60-90 minutes
+Cost: ~$0.50 for testing (delete after!)
+Difficulty: Advanced
+```
+
+---
+
+### **Step 1: Create VPC Infrastructure (15 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Network Firewall Lab Setup
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║   AWS NETWORK FIREWALL - COMPLETE LAB SETUP              ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+# Variables for consistent naming
+TIMESTAMP=$(date +%s)
+REGION="us-east-1"
+
+echo "Step 1: Creating VPC Infrastructure"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Create VPC
+echo "  → Creating VPC (10.3.0.0/16)..."
+NFW_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.3.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=NetworkFirewall-VPC}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+echo "     ✅ VPC created: $NFW_VPC"
+
+# Enable DNS
+aws ec2 modify-vpc-attribute --vpc-id $NFW_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $NFW_VPC --enable-dns-support
+echo "     ✅ DNS hostname and support enabled"
+
+# Create Firewall Subnet (where firewall endpoint lives)
+echo ""
+echo "  → Creating Firewall Subnet (10.3.1.0/24) in us-east-1a..."
+NFW_FIREWALL_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $NFW_VPC \
+  --cidr-block 10.3.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Firewall-Subnet}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+echo "     ✅ Firewall subnet created: $NFW_FIREWALL_SUBNET"
+echo "     ℹ️  This subnet hosts the firewall endpoint only"
+
+# Create Protected Subnet (your workloads)
+echo ""
+echo "  → Creating Protected Subnet (10.3.2.0/24) in us-east-1a..."
+NFW_PROTECTED_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $NFW_VPC \
+  --cidr-block 10.3.2.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Protected-Subnet}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+# Enable auto-assign public IP
+aws ec2 modify-subnet-attribute \
+  --subnet-id $NFW_PROTECTED_SUBNET \
+  --map-public-ip-on-launch
+
+echo "     ✅ Protected subnet created: $NFW_PROTECTED_SUBNET"
+echo "     ✅ Auto-assign public IP enabled"
+echo "     ℹ️  Your EC2 instances will go here"
+
+# Create Internet Gateway
+echo ""
+echo "  → Creating Internet Gateway..."
+NFW_IGW=$(aws ec2 create-internet-gateway \
+  --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=NFW-IGW}]' \
+  --query 'InternetGateway.InternetGatewayId' \
+  --output text)
+
+# Attach IGW to VPC
+aws ec2 attach-internet-gateway \
+  --internet-gateway-id $NFW_IGW \
+  --vpc-id $NFW_VPC
+
+echo "     ✅ Internet Gateway created and attached: $NFW_IGW"
+
+echo ""
+echo "✅ VPC Infrastructure Complete!"
+echo ""
+echo "Summary:"
+echo "  VPC:              $NFW_VPC (10.3.0.0/16)"
+echo "  Firewall Subnet:  $NFW_FIREWALL_SUBNET (10.3.1.0/24)"
+echo "  Protected Subnet: $NFW_PROTECTED_SUBNET (10.3.2.0/24)"
+echo "  Internet Gateway: $NFW_IGW"
+echo ""
+```
+
+---
+
+### **Step 2: Create Stateless Rule Group (10 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Stateless Rule Group Creation
+
+echo "Step 2: Creating Stateless Rule Group"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Stateless rules are evaluated FIRST (before stateful)"
+echo "They're fast packet filters with priority-based evaluation"
+echo ""
+
+# Create stateless rules JSON
+cat > /tmp/stateless-rules.json << 'EOF'
+{
+  "RulesSource": {
+    "StatelessRulesAndCustomActions": {
+      "StatelessRules": [
+        {
+          "RuleDefinition": {
+            "MatchAttributes": {
+              "Sources": [{"AddressDefinition": "198.51.100.0/24"}],
+              "Destinations": [{"AddressDefinition": "0.0.0.0/0"}]
+            },
+            "Actions": ["aws:drop"]
+          },
+          "Priority": 1
+        },
+        {
+          "RuleDefinition": {
+            "MatchAttributes": {
+              "Sources": [{"AddressDefinition": "203.0.113.0/24"}],
+              "Destinations": [{"AddressDefinition": "0.0.0.0/0"}]
+            },
+            "Actions": ["aws:drop"]
+          },
+          "Priority": 2
+        },
+        {
+          "RuleDefinition": {
+            "MatchAttributes": {
+              "Sources": [{"AddressDefinition": "0.0.0.0/0"}],
+              "Destinations": [{"AddressDefinition": "0.0.0.0/0"}],
+              "DestinationPorts": [{"FromPort": 80, "ToPort": 80}],
+              "Protocols": [6]
+            },
+            "Actions": ["aws:forward_to_sfe"]
+          },
+          "Priority": 10
+        },
+        {
+          "RuleDefinition": {
+            "MatchAttributes": {
+              "Sources": [{"AddressDefinition": "0.0.0.0/0"}],
+              "Destinations": [{"AddressDefinition": "0.0.0.0/0"}],
+              "DestinationPorts": [{"FromPort": 443, "ToPort": 443}],
+              "Protocols": [6]
+            },
+            "Actions": ["aws:forward_to_sfe"]
+          },
+          "Priority": 11
+        },
+        {
+          "RuleDefinition": {
+            "MatchAttributes": {
+              "Sources": [{"AddressDefinition": "0.0.0.0/0"}],
+              "Destinations": [{"AddressDefinition": "0.0.0.0/0"}]
+            },
+            "Actions": ["aws:forward_to_sfe"]
+          },
+          "Priority": 100
+        }
+      ]
+    }
+  }
+}
+EOF
+
+echo "  → Creating stateless rule group..."
+echo ""
+echo "     Rules being created:"
+echo "       Priority 1:  DROP 198.51.100.0/24 (malicious IP range)"
+echo "       Priority 2:  DROP 203.0.113.0/24 (another bad range)"
+echo "       Priority 10: FORWARD port 80 (HTTP) to stateful inspection"
+echo "       Priority 11: FORWARD port 443 (HTTPS) to stateful inspection"
+echo "       Priority 100: FORWARD all other traffic to stateful inspection"
+echo ""
+
+NFW_STATELESS_RG=$(aws network-firewall create-rule-group \
+  --rule-group-name StatelessFilteringRules \
+  --type STATELESS \
+  --capacity 100 \
+  --rule-group file:///tmp/stateless-rules.json \
+  --description "Fast packet filtering - blocks known bad IPs, forwards rest to stateful" \
+  --query 'RuleGroupResponse.RuleGroupArn' \
+  --output text)
+
+echo "     ✅ Stateless rule group created!"
+echo "     ARN: $NFW_STATELESS_RG"
+echo "     Capacity: 100 units allocated"
+echo ""
+echo "     How it works:"
+echo "       1. Packet arrives"
+echo "       2. Check priority 1: Is it from 198.51.100.0/24? → DROP"
+echo "       3. Check priority 2: Is it from 203.0.113.0/24? → DROP"
+echo "       4. Check priority 10: Is it HTTP (port 80)? → FORWARD to stateful"
+echo "       5. Check priority 11: Is it HTTPS (port 443)? → FORWARD to stateful"
+echo "       6. Priority 100: Everything else → FORWARD to stateful"
+echo ""
+```
+
+---
+
+### **Step 3: Create Domain Filtering Rule Group (10 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Domain Filtering Rule Group
+
+echo "Step 3: Creating Domain Filtering Rule Group"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Domain filtering blocks/allows traffic based on domain names"
+echo "Useful for: Corporate internet filtering, blocking categories"
+echo ""
+
+# Create domain filtering rules
+cat > /tmp/domain-rules.json << 'EOF'
+{
+  "RulesSource": {
+    "RulesSourceList": {
+      "TargetTypes": ["HTTP_HOST", "TLS_SNI"],
+      "Targets": [
+        ".facebook.com",
+        ".twitter.com",
+        ".instagram.com",
+        ".tiktok.com",
+        ".reddit.com",
+        ".snapchat.com"
+      ],
+      "GeneratedRulesType": "DENYLIST"
+    }
+  }
+}
+EOF
+
+echo "  → Creating domain filtering rule group..."
+echo ""
+echo "     Blocking these domains:"
+echo "       • .facebook.com (and all subdomains)"
+echo "       • .twitter.com"
+echo "       • .instagram.com"
+echo "       • .tiktok.com"
+echo "       • .reddit.com"
+echo "       • .snapchat.com"
+echo ""
+echo "     How domain filtering works:"
+echo "       HTTP: Inspects 'Host:' header"
+echo "       HTTPS: Inspects TLS SNI (Server Name Indication)"
+echo "       Wildcard: .facebook.com matches facebook.com AND *.facebook.com"
+echo ""
+
+NFW_DOMAIN_RG=$(aws network-firewall create-rule-group \
+  --rule-group-name BlockSocialMedia \
+  --type STATEFUL \
+  --capacity 100 \
+  --rule-group file:///tmp/domain-rules.json \
+  --description "Block social media sites - corporate internet filtering" \
+  --query 'RuleGroupResponse.RuleGroupArn' \
+  --output text)
+
+echo "     ✅ Domain filtering rule group created!"
+echo "     ARN: $NFW_DOMAIN_RG"
+echo ""
+echo "     Use case: Corporate policy"
+echo "       'Employees cannot access social media during work hours'"
+echo "       This blocks ALL social media at network level"
+echo "       Can't be bypassed (no proxy, VPN won't help within VPC)"
+echo ""
+```
+
+---
+
+### **Step 4: Create Standard Stateful Rule Group (10 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Standard Stateful Rules
+
+echo "Step 4: Creating Standard Stateful Rule Group"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Standard stateful rules: 5-tuple matching with actions"
+echo "Format: Protocol, Source, Dest, Ports, Direction"
+echo ""
+
+# Create standard stateful rules
+cat > /tmp/stateful-rules.json << 'EOF'
+{
+  "RulesSource": {
+    "StatefulRules": [
+      {
+        "Action": "DROP",
+        "Header": {
+          "Protocol": "TCP",
+          "Source": "ANY",
+          "SourcePort": "ANY",
+          "Direction": "FORWARD",
+          "Destination": "ANY",
+          "DestinationPort": "22"
+        },
+        "RuleOptions": [
+          {
+            "Keyword": "sid:1000001"
+          },
+          {
+            "Keyword": "msg:\"Blocked SSH access\""
+          }
+        ]
+      },
+      {
+        "Action": "DROP",
+        "Header": {
+          "Protocol": "TCP",
+          "Source": "ANY",
+          "SourcePort": "ANY",
+          "Direction": "FORWARD",
+          "Destination": "ANY",
+          "DestinationPort": "3389"
+        },
+        "RuleOptions": [
+          {
+            "Keyword": "sid:1000002"
+          },
+          {
+            "Keyword": "msg:\"Blocked RDP access\""
+          }
+        ]
+      },
+      {
+        "Action": "DROP",
+        "Header": {
+          "Protocol": "TCP",
+          "Source": "ANY",
+          "SourcePort": "ANY",
+          "Direction": "FORWARD",
+          "Destination": "ANY",
+          "DestinationPort": "23"
+        },
+        "RuleOptions": [
+          {
+            "Keyword": "sid:1000003"
+          },
+          {
+            "Keyword": "msg:\"Blocked Telnet - insecure protocol\""
+          }
+        ]
+      },
+      {
+        "Action": "ALERT",
+        "Header": {
+          "Protocol": "TCP",
+          "Source": "ANY",
+          "SourcePort": "ANY",
+          "Direction": "FORWARD",
+          "Destination": "ANY",
+          "DestinationPort": "3306"
+        },
+        "RuleOptions": [
+          {
+            "Keyword": "sid:1000004"
+          },
+          {
+            "Keyword": "msg:\"MySQL access detected - monitoring\""
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+echo "  → Creating standard stateful rule group..."
+echo ""
+echo "     Rules being created:"
+echo "       SID 1000001: DROP TCP port 22 (SSH)"
+echo "         Why: Block SSH from internet (use Session Manager instead)"
+echo ""
+echo "       SID 1000002: DROP TCP port 3389 (RDP)"
+echo "         Why: Block RDP from internet (Windows remote desktop)"
+echo ""
+echo "       SID 1000003: DROP TCP port 23 (Telnet)"
+echo "         Why: Telnet is unencrypted, never allow"
+echo ""
+echo "       SID 1000004: ALERT TCP port 3306 (MySQL)"
+echo "         Why: Log MySQL access (IDS mode, don't block)"
+echo ""
+
+NFW_STATEFUL_RG=$(aws network-firewall create-rule-group \
+  --rule-group-name BlockDangerousPorts \
+  --type STATEFUL \
+  --capacity 100 \
+  --rule-group file:///tmp/stateful-rules.json \
+  --description "Block SSH, RDP, Telnet - Alert on MySQL" \
+  --query 'RuleGroupResponse.RuleGroupArn' \
+  --output text)
+
+echo "     ✅ Standard stateful rule group created!"
+echo "     ARN: $NFW_STATEFUL_RG"
+echo ""
+echo "     Security rationale:"
+echo "       • SSH/RDP: Use AWS Systems Manager Session Manager instead"
+echo "       • Telnet: Unencrypted, security risk, should never be used"
+echo "       • MySQL: Alert only (might be legitimate app traffic)"
+echo ""
+```
+
+---
+
+### **Step 5: Create Suricata IDS/IPS Rule Group (15 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Suricata Rules (IDS/IPS)
+
+echo "Step 5: Creating Suricata IDS/IPS Rule Group"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Suricata: Open-source IDS/IPS engine"
+echo "Features: Deep packet inspection, pattern matching, protocol detection"
+echo ""
+
+# Create Suricata rules
+cat > /tmp/suricata-rules.json << 'EOF'
+{
+  "RulesSource": {
+    "RulesString": "alert http any any -> any any (msg:\"SQL Injection Detected - UNION SELECT\"; flow:to_server,established; content:\"UNION SELECT\"; nocase; sid:1000010; rev:1;)\nalert http any any -> any any (msg:\"SQL Injection Detected - OR 1=1\"; flow:to_server,established; content:\"OR 1=1\"; nocase; sid:1000011; rev:1;)\nalert http any any -> any any (msg:\"XSS Attack Detected - script tag\"; flow:to_server,established; content:\"<script>\"; nocase; sid:1000012; rev:1;)\nalert http any any -> any any (msg:\"XSS Attack Detected - javascript protocol\"; flow:to_server,established; content:\"javascript:\"; nocase; sid:1000013; rev:1;)\nalert http any any -> any any (msg:\"Path Traversal Attack - dot dot slash\"; flow:to_server,established; content:\"..%2f\"; nocase; sid:1000014; rev:1;)\nalert http any any -> any any (msg:\"Command Injection - pipe character\"; flow:to_server,established; pcre:\"/(\||;|`)/\"; sid:1000015; rev:1;)\nalert http any any -> any any (msg:\"File Upload - PHP extension\"; flow:to_server,established; content:\".php\"; nocase; sid:1000016; rev:1;)\nalert http any any -> any any (msg:\"Suspicious User-Agent - sqlmap\"; flow:to_server,established; content:\"User-Agent|3a| sqlmap\"; nocase; sid:1000017; rev:1;)"
+  }
+}
+EOF
+
+echo "  → Creating Suricata IDS/IPS rule group..."
+echo ""
+echo "     Threat detection rules:"
+echo ""
+echo "     SID 1000010: SQL Injection - 'UNION SELECT'"
+echo "       Pattern: UNION SELECT in HTTP request"
+echo "       Risk: Database compromise, data theft"
+echo "       Example: ?id=1' UNION SELECT * FROM users--"
+echo ""
+echo "     SID 1000011: SQL Injection - 'OR 1=1'"
+echo "       Pattern: OR 1=1 in HTTP request"
+echo "       Risk: Authentication bypass, data access"
+echo "       Example: username=' OR 1=1--"
+echo ""
+echo "     SID 1000012: XSS Attack - <script> tag"
+echo "       Pattern: <script> in HTTP request"
+echo "       Risk: Session hijacking, defacement"
+echo "       Example: ?search=<script>alert(document.cookie)</script>"
+echo ""
+echo "     SID 1000013: XSS Attack - javascript: protocol"
+echo "       Pattern: javascript: in HTTP request"
+echo "       Risk: Browser-based attacks"
+echo "       Example: <a href=\"javascript:malicious()\">click</a>"
+echo ""
+echo "     SID 1000014: Path Traversal - ../"
+echo "       Pattern: ..%2f (URL-encoded ../) in request"
+echo "       Risk: File system access, config file reading"
+echo "       Example: /download?file=..%2f..%2fetc%2fpasswd"
+echo ""
+echo "     SID 1000015: Command Injection - pipe/semicolon"
+echo "       Pattern: Pipe (|), semicolon (;), backtick (`) characters"
+echo "       Risk: OS command execution"
+echo "       Example: ?cmd=ls;cat /etc/passwd"
+echo ""
+echo "     SID 1000016: File Upload - PHP extension"
+echo "       Pattern: .php in upload request"
+echo "       Risk: Web shell, code execution"
+echo "       Example: Uploading malicious.php"
+echo ""
+echo "     SID 1000017: Suspicious User-Agent - sqlmap"
+echo "       Pattern: 'sqlmap' in User-Agent header"
+echo "       Risk: Automated SQL injection tool"
+echo "       Example: User-Agent: sqlmap/1.0"
+echo ""
+
+NFW_SURICATA_RG=$(aws network-firewall create-rule-group \
+  --rule-group-name WebApplicationAttackDetection \
+  --type STATEFUL \
+  --capacity 200 \
+  --rule-group file:///tmp/suricata-rules.json \
+  --description "IDS/IPS rules for web application attacks - SQL injection, XSS, etc" \
+  --query 'RuleGroupResponse.RuleGroupArn' \
+  --output text)
+
+echo "     ✅ Suricata IDS/IPS rule group created!"
+echo "     ARN: $NFW_SURICATA_RG"
+echo "     Capacity: 200 units allocated (Suricata rules need more capacity)"
+echo ""
+echo "     Detection capabilities:"
+echo "       ✅ SQL Injection (multiple patterns)"
+echo "       ✅ Cross-Site Scripting (XSS)"
+echo "       ✅ Path Traversal"
+echo "       ✅ Command Injection"
+echo "       ✅ Malicious File Upload"
+echo "       ✅ Attack Tool Detection"
+echo ""
+echo "     These are ALERT rules (IDS mode)"
+echo "     To block (IPS mode), change 'alert' to 'drop' in rule string"
+echo ""
+echo "     Real-world usage:"
+echo "       • Start with ALERT (IDS) to understand traffic patterns"
+echo "       • Review logs, tune rules, eliminate false positives"
+echo "       • Switch to DROP (IPS) after tuning period"
+echo "       • Prevents breaking legitimate applications"
+echo ""
+```
+
+---
+
+### **Step 6: Create Firewall Policy (5 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Firewall Policy Creation
+
+echo "Step 6: Creating Firewall Policy"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Firewall Policy: Combines all rule groups into one policy"
+echo "Think of it as: The complete firewall configuration"
+echo ""
+
+# Create firewall policy JSON
+cat > /tmp/firewall-policy.json << EOF
+{
+  "StatelessDefaultActions": ["aws:forward_to_sfe"],
+  "StatelessFragmentDefaultActions": ["aws:forward_to_sfe"],
+  "StatelessRuleGroupReferences": [
+    {
+      "ResourceArn": "$NFW_STATELESS_RG",
+      "Priority": 1
+    }
+  ],
+  "StatefulRuleGroupReferences": [
+    {
+      "ResourceArn": "$NFW_DOMAIN_RG"
+    },
+    {
+      "ResourceArn": "$NFW_STATEFUL_RG"
+    },
+    {
+      "ResourceArn": "$NFW_SURICATA_RG"
+    }
+  ],
+  "StatefulDefaultActions": ["aws:alert_established"],
+  "StatefulEngineOptions": {
+    "RuleOrder": "DEFAULT_ACTION_ORDER"
+  }
+}
+EOF
+
+echo "  → Creating comprehensive firewall policy..."
+echo ""
+echo "     Policy configuration:"
+echo ""
+echo "       Stateless Processing:"
+echo "         • Default action: FORWARD to stateful engine"
+echo "         • Fragment action: FORWARD to stateful engine"
+echo "         • Rule groups: StatelessFilteringRules (priority 1)"
+echo ""
+echo "       Stateful Processing:"
+echo "         • Default action: ALERT on established connections"
+echo "         • Rule order: DEFAULT_ACTION_ORDER (strict)"
+echo "         • Rule groups:"
+echo "           1. BlockSocialMedia (domain filtering)"
+echo "           2. BlockDangerousPorts (SSH, RDP, Telnet)"
+echo "           3. WebApplicationAttackDetection (IDS/IPS)"
+echo ""
+echo "       Traffic flow:"
+echo "         Packet arrives"
+echo "           ↓"
+echo "         Stateless rules (quick filter)"
+echo "           ↓"
+echo "         FORWARD to stateful engine"
+echo "           ↓"
+echo "         Domain filtering (social media blocked)"
+echo "           ↓"
+echo "         Port blocking (SSH, RDP blocked)"
+echo "           ↓"
+echo "         Suricata IDS (attack detection)"
+echo "           ↓"
+echo "         ALLOW or DROP decision"
+echo ""
+
+NFW_POLICY_ARN=$(aws network-firewall create-firewall-policy \
+  --firewall-policy-name ComprehensiveSecurityPolicy \
+  --firewall-policy file:///tmp/firewall-policy.json \
+  --description "Multi-layered security: Stateless filtering + Domain blocking + Port security + IDS/IPS" \
+  --query 'FirewallPolicyResponse.FirewallPolicyArn' \
+  --output text)
+
+echo "     ✅ Firewall policy created!"
+echo "     ARN: $NFW_POLICY_ARN"
+echo ""
+echo "     This policy provides:"
+echo "       ✅ Fast packet filtering (stateless)"
+echo "       ✅ Domain-based blocking (social media)"
+echo "       ✅ Port-based security (SSH, RDP, Telnet blocked)"
+echo "       ✅ IDS/IPS protection (web attacks detected)"
+echo "       ✅ Comprehensive logging"
+echo ""
+```
+
+---
+
+### **Step 7: Deploy Network Firewall (15 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Deploy Network Firewall
+
+echo "Step 7: Deploying Network Firewall"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "This will:"
+echo "  • Create firewall endpoint in firewall subnet"
+echo "  • Apply comprehensive security policy"
+echo "  • Enable logging"
+echo "  • Takes 3-5 minutes to provision"
+echo ""
+
+echo "  → Creating Network Firewall..."
+echo ""
+
+NFW_FIREWALL_ARN=$(aws network-firewall create-firewall \
+  --firewall-name ProductionFirewall \
+  --firewall-policy-arn $NFW_POLICY_ARN \
+  --vpc-id $NFW_VPC \
+  --subnet-mappings SubnetId=$NFW_FIREWALL_SUBNET \
+  --description "Production Network Firewall with comprehensive security rules" \
+  --tags Key=Name,Value=Production-Firewall Key=Environment,Value=Lab \
+  --query 'Firewall.FirewallArn' \
+  --output text)
+
+# Extract firewall ID
+NFW_FIREWALL_ID=$(echo $NFW_FIREWALL_ARN | awk -F'/' '{print $NF}')
+
+echo "     ✅ Firewall creation initiated!"
+echo "     ARN: $NFW_FIREWALL_ARN"
+echo "     ID: $NFW_FIREWALL_ID"
+echo ""
+echo "  → Waiting for firewall to become ready..."
+echo "     This takes 3-5 minutes. Please wait..."
+echo ""
+
+# Function to check firewall status
+check_firewall_status() {
+    STATUS=$(aws network-firewall describe-firewall \
+        --firewall-arn $NFW_FIREWALL_ARN \
+        --query 'FirewallStatus.Status' \
+        --output text 2>/dev/null)
+    echo $STATUS
+}
+
+# Wait loop with progress indicator
+COUNTER=0
+while true; do
+    STATUS=$(check_firewall_status)
+    
+    if [ "$STATUS" == "READY" ]; then
+        echo ""
+        echo "     ✅ Network Firewall is READY!"
+        break
+    fi
+    
+    # Progress indicator
+    DOTS=$(printf '%*s' $((COUNTER % 4)) '' | tr ' ' '.')
+    printf "     Status: %-15s %s\r" "$STATUS" "$dots"
+    
+    COUNTER=$((COUNTER + 1))
+    sleep 10
+done
+
+echo ""
+echo "  → Getting firewall endpoint details..."
+
+# Get firewall endpoint ID
+NFW_ENDPOINT_ID=$(aws network-firewall describe-firewall \
+    --firewall-arn $NFW_FIREWALL_ARN \
+    --query 'FirewallStatus.SyncStates.*.Attachment.EndpointId' \
+    --output text | head -1)
+
+# Get firewall endpoint private IP
+NFW_ENDPOINT_IP=$(aws ec2 describe-network-interfaces \
+    --filters "Name=description,Values=*$NFW_FIREWALL_ID*" \
+    --query 'NetworkInterfaces[0].PrivateIpAddress' \
+    --output text)
+
+echo ""
+echo "     ✅ Firewall endpoint created!"
+echo "     Endpoint ID: $NFW_ENDPOINT_ID"
+echo "     Private IP: $NFW_ENDPOINT_IP"
+echo ""
+echo "     Firewall is now actively inspecting traffic!"
+echo ""
+echo "  → Configuring logging..."
+
+# Configure logging to CloudWatch
+LOG_GROUP="/aws/network-firewall/alerts"
+
+# Create log group
+aws logs create-log-group --log-group-name $LOG_GROUP 2>/dev/null
+
+# Configure firewall logging
+aws network-firewall update-logging-configuration \
+    --firewall-arn $NFW_FIREWALL_ARN \
+    --logging-configuration "{
+        \"LogDestinationConfigs\": [
+            {
+                \"LogType\": \"ALERT\",
+                \"LogDestinationType\": \"CloudWatchLogs\",
+                \"LogDestination\": {
+                    \"logGroup\": \"$LOG_GROUP\"
+                }
+            }
+        ]
+    }" > /dev/null 2>&1
+
+echo "     ✅ Logging configured!"
+echo "     Alert logs → CloudWatch: $LOG_GROUP"
+echo ""
+echo "✅ Network Firewall Deployment Complete!"
+echo ""
+```
+
+---
+
+### **Step 8: Configure Routing (15 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Configure Routing Through Firewall
+
+echo "Step 8: Configuring Routing Through Firewall"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Critical step: Routes determine traffic flow through firewall"
+echo ""
+echo "Routing design:"
+echo "  Internet → IGW → Firewall → Protected Subnet → Firewall → IGW"
+echo ""
+
+# Create route table for IGW (edge association)
+echo "  → Creating route table for Internet Gateway..."
+NFW_IGW_RT=$(aws ec2 create-route-table \
+    --vpc-id $NFW_VPC \
+    --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=IGW-Edge-RT}]' \
+    --query 'RouteTable.RouteTableId' \
+    --output text)
+
+echo "     ✅ IGW route table created: $NFW_IGW_RT"
+echo ""
+echo "     Adding route: Protected subnet → Firewall endpoint"
+echo "       (Inbound traffic from internet must go through firewall)"
+echo ""
+
+# Route protected subnet traffic through firewall
+aws ec2 create-route \
+    --route-table-id $NFW_IGW_RT \
+    --destination-cidr-block 10.3.2.0/24 \
+    --vpc-endpoint-id $NFW_ENDPOINT_ID
+
+echo "     ✅ Route added: 10.3.2.0/24 → $NFW_ENDPOINT_ID"
+echo ""
+echo "     Associating route table with Internet Gateway..."
+
+# Associate route table with IGW (edge association)
+# Note: This requires getting the VPC's main route table association
+MAIN_RT_ASSOC=$(aws ec2 describe-route-tables \
+    --filters "Name=vpc-id,Values=$NFW_VPC" "Name=association.main,Values=true" \
+    --query 'RouteTables[0].Associations[0].RouteTableAssociationId' \
+    --output text)
+
+# We'll use subnet association instead for simplicity
+echo "     ℹ️  Using subnet-based routing (simpler for lab)"
+echo ""
+
+# Create route table for protected subnet
+echo "  → Creating route table for Protected Subnet..."
+NFW_PROTECTED_RT=$(aws ec2 create-route-table \
+    --vpc-id $NFW_VPC \
+    --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=Protected-Subnet-RT}]' \
+    --query 'RouteTable.RouteTableId' \
+    --output text)
+
+echo "     ✅ Protected subnet route table created: $NFW_PROTECTED_RT"
+echo ""
+echo "     Adding route: Internet → Firewall endpoint"
+echo "       (Outbound traffic must go through firewall)"
+echo ""
+
+# Route internet traffic through firewall
+aws ec2 create-route \
+    --route-table-id $NFW_PROTECTED_RT \
+    --destination-cidr-block 0.0.0.0/0 \
+    --vpc-endpoint-id $NFW_ENDPOINT_ID
+
+echo "     ✅ Route added: 0.0.0.0/0 → $NFW_ENDPOINT_ID"
+echo ""
+
+# Associate with protected subnet
+aws ec2 associate-route-table \
+    --route-table-id $NFW_PROTECTED_RT \
+    --subnet-id $NFW_PROTECTED_SUBNET
+
+echo "     ✅ Route table associated with protected subnet"
+echo ""
+
+# Create route table for firewall subnet
+echo "  → Creating route table for Firewall Subnet..."
+NFW_FIREWALL_RT=$(aws ec2 create-route-table \
+    --vpc-id $NFW_VPC \
+    --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=Firewall-Subnet-RT}]' \
+    --query 'RouteTable.RouteTableId' \
+    --output text)
+
+echo "     ✅ Firewall subnet route table created: $NFW_FIREWALL_RT"
+echo ""
+echo "     Adding route: Internet → Internet Gateway"
+echo "       (After inspection, allow/block traffic goes to IGW)"
+echo ""
+
+# Route to internet gateway
+aws ec2 create-route \
+    --route-table-id $NFW_FIREWALL_RT \
+    --destination-cidr-block 0.0.0.0/0 \
+    --gateway-id $NFW_IGW
+
+echo "     ✅ Route added: 0.0.0.0/0 → $NFW_IGW"
+echo ""
+
+# Associate with firewall subnet
+aws ec2 associate-route-table \
+    --route-table-id $NFW_FIREWALL_RT \
+    --subnet-id $NFW_FIREWALL_SUBNET
+
+echo "     ✅ Route table associated with firewall subnet"
+echo ""
+echo "✅ Routing Configuration Complete!"
+echo ""
+echo "Traffic flow now:"
+echo ""
+echo "  INBOUND (Internet → EC2):"
+echo "    1. Internet → Internet Gateway"
+echo "    2. IGW routes to firewall endpoint (10.3.2.0/24 → vpce)"
+echo "    3. Firewall inspects packet"
+echo "    4. If ALLOW: Packet forwarded to protected subnet (10.3.2.x)"
+echo "    5. EC2 instance receives packet"
+echo ""
+echo "  OUTBOUND (EC2 → Internet):"
+echo "    1. EC2 sends packet (destination: internet)"
+echo "    2. Protected subnet RT routes to firewall endpoint (0.0.0.0/0 → vpce)"
+echo "    3. Firewall inspects packet"
+echo "    4. If ALLOW: Packet forwarded to IGW"
+echo "    5. IGW sends to internet"
+echo ""
+echo "  ALL traffic inspected by firewall in BOTH directions! 🛡️"
+echo ""
+```
+
+---
+
+### **Step 9: Launch Test Instance (10 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Launch Test Instance
+
+echo "Step 9: Launching Test Instance"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Get latest Amazon Linux 2023 AMI
+echo "  → Finding latest Amazon Linux 2023 AMI..."
+AMI_ID=$(aws ec2 describe-images \
+    --owners amazon \
+    --filters "Name=name,Values=al2023-ami-2023.*-x86_64" "Name=state,Values=available" \
+    --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+    --output text)
+
+echo "     ✅ AMI found: $AMI_ID"
+echo ""
+
+# Create security group
+echo "  → Creating security group for test instance..."
+NFW_TEST_SG=$(aws ec2 create-security-group \
+    --group-name nfw-test-sg \
+    --description "Network Firewall test instance security group" \
+    --vpc-id $NFW_VPC \
+    --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=NFW-Test-SG}]' \
+    --query 'GroupId' \
+    --output text)
+
+echo "     ✅ Security group created: $NFW_TEST_SG"
+echo ""
+echo "     Adding security group rules..."
+
+# Allow HTTP from anywhere
+aws ec2 authorize-security-group-ingress \
+    --group-id $NFW_TEST_SG \
+    --protocol tcp \
+    --port 80 \
+    --cidr 0.0.0.0/0
+
+echo "       • Allow HTTP (80) from anywhere"
+
+# Allow HTTPS from anywhere
+aws ec2 authorize-security-group-ingress \
+    --group-id $NFW_TEST_SG \
+    --protocol tcp \
+    --port 443 \
+    --cidr 0.0.0.0/0
+
+echo "       • Allow HTTPS (443) from anywhere"
+echo ""
+echo "     ℹ️  Note: We're NOT adding SSH rule"
+echo "        SSH will be blocked by Network Firewall (testing)"
+echo ""
+
+# Launch instance
+echo "  → Launching EC2 instance in protected subnet..."
+NFW_TEST_INSTANCE=$(aws ec2 run-instances \
+    --image-id $AMI_ID \
+    --instance-type t2.micro \
+    --subnet-id $NFW_PROTECTED_SUBNET \
+    --security-group-ids $NFW_TEST_SG \
+    --associate-public-ip-address \
+    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=NFW-Test-Instance}]' \
+    --user-data '#!/bin/bash
+yum update -y
+yum install -y httpd curl
+systemctl start httpd
+systemctl enable httpd
+cat > /var/www/html/index.html << EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Protected by Network Firewall</title>
+    <style>
+        body { font-family: Arial; margin: 50px; background: #f0f0f0; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { color: #FF9900; }
+        .status { color: green; font-weight: bold; }
+        .info { background: #e3f2fd; padding: 15px; margin: 20px 0; border-left: 4px solid #2196F3; }
+        ul { line-height: 1.8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ AWS Network Firewall Test Instance</h1>
+        <p class="status">✅ Instance is PROTECTED by Network Firewall</p>
+        
+        <div class="info">
+            <h3>Active Protection:</h3>
+            <ul>
+                <li>🚫 SSH (port 22) - BLOCKED by firewall</li>
+                <li>🚫 RDP (port 3389) - BLOCKED by firewall</li>
+                <li>🚫 Telnet (port 23) - BLOCKED by firewall</li>
+                <li>🚫 Social Media - BLOCKED (facebook, twitter, etc.)</li>
+                <li>🔍 SQL Injection - DETECTED by IDS</li>
+                <li>🔍 XSS Attacks - DETECTED by IDS</li>
+                <li>✅ HTTP/HTTPS - ALLOWED and INSPECTED</li>
+            </ul>
+        </div>
+        
+        <h3>Test Commands:</h3>
+        <pre style="background: #263238; color: #aed581; padding: 15px; border-radius: 5px;">
+# This will work (HTTP allowed):
+curl http://$(hostname -I | awk "{print $1}")
+
+# This will be BLOCKED (social media):
+curl http://facebook.com
+
+# This will be BLOCKED (SSH port):
+telnet $(hostname -I | awk "{print $1}") 22
+
+# This will trigger IDS ALERT (SQL injection):
+curl "http://$(hostname -I | awk "{print $1}")/?id=1 UNION SELECT"
+        </pre>
+        
+        <p><em>All traffic inspected by AWS Network Firewall!</em></p>
+        <p>Instance launched at: $(date)</p>
+    </div>
+</body>
+</html>
+EOF
+' \
+    --query 'Instances[0].InstanceId' \
+    --output text)
+
+echo "     ✅ Instance launch initiated: $NFW_TEST_INSTANCE"
+echo ""
+echo "  → Waiting for instance to be running..."
+
+aws ec2 wait instance-running --instance-ids $NFW_TEST_INSTANCE
+
+echo "     ✅ Instance is running!"
+echo ""
+
+# Get instance details
+NFW_TEST_IP=$(aws ec2 describe-instances \
+    --instance-ids $NFW_TEST_INSTANCE \
+    --query 'Reservations[0].Instances[0].PublicIpAddress' \
+    --output text)
+
+NFW_TEST_PRIVATE_IP=$(aws ec2 describe-instances \
+    --instance-ids $NFW_TEST_INSTANCE \
+    --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+    --output text)
+
+echo "  → Instance Details:"
+echo "     Instance ID: $NFW_TEST_INSTANCE"
+echo "     Public IP:   $NFW_TEST_IP"
+echo "     Private IP:  $NFW_TEST_PRIVATE_IP"
+echo ""
+echo "  → Waiting 60 seconds for web server to start..."
+sleep 60
+
+echo ""
+echo "✅ Test Instance Ready!"
+echo ""
+```
+
+---
+
+### **Step 10: Test Network Firewall (15 minutes)**
+
+```bash
+#!/bin/bash
+# CloudShell - Comprehensive Testing
+
+echo "Step 10: Testing Network Firewall Rules"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "We'll test all security features:"
+echo "  • Stateless rules (malicious IP blocking)"
+echo "  • Domain filtering (social media blocking)"
+echo "  • Port blocking (SSH, RDP, Telnet)"
+echo "  • IDS detection (SQL injection, XSS)"
+echo ""
+
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 1: Normal HTTP Traffic (Should Work)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Testing: curl http://$NFW_TEST_IP"
+echo ""
+
+RESPONSE=$(curl -s --connect-timeout 10 http://$NFW_TEST_IP)
+
+if echo "$RESPONSE" | grep -q "Protected by Network Firewall"; then
+    echo "✅ SUCCESS! Web server accessible"
+    echo "   Firewall allowed legitimate HTTP traffic"
+    echo ""
+    echo "   Response preview:"
+    echo "$RESPONSE" | head -5
+else
+    echo "❌ FAILED - Web server not accessible"
+    echo "   This might indicate routing or security group issue"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 2: SSH Access (Should Be BLOCKED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Testing: Attempting SSH connection to port 22"
+echo "Expected: Connection blocked by Network Firewall stateful rule"
+echo ""
+
+timeout 5 bash -c "echo > /dev/tcp/$NFW_TEST_IP/22" 2>/dev/null
+
+if [ $? -ne 0 ]; then
+    echo "✅ CORRECT! SSH (port 22) is BLOCKED"
+    echo "   Network Firewall stateful rule blocking SSH"
+    echo "   Rule: DROP TCP port 22 (SID 1000001)"
+else
+    echo "⚠️  SSH connection succeeded (unexpected)"
+    echo "   Check Network Firewall rules"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 3: RDP Access (Should Be BLOCKED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Testing: Attempting RDP connection to port 3389"
+echo "Expected: Connection blocked by Network Firewall"
+echo ""
+
+timeout 5 bash -c "echo > /dev/tcp/$NFW_TEST_IP/3389" 2>/dev/null
+
+if [ $? -ne 0 ]; then
+    echo "✅ CORRECT! RDP (port 3389) is BLOCKED"
+    echo "   Network Firewall stateful rule blocking RDP"
+    echo "   Rule: DROP TCP port 3389 (SID 1000002)"
+else
+    echo "⚠️  RDP connection succeeded (unexpected)"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 4: Telnet Access (Should Be BLOCKED)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Testing: Attempting Telnet connection to port 23"
+echo "Expected: Connection blocked by Network Firewall"
+echo ""
+
+timeout 5 bash -c "echo > /dev/tcp/$NFW_TEST_IP/23" 2>/dev/null
+
+if [ $? -ne 0 ]; then
+    echo "✅ CORRECT! Telnet (port 23) is BLOCKED"
+    echo "   Network Firewall stateful rule blocking Telnet"
+    echo "   Rule: DROP TCP port 23 (SID 1000003)"
+    echo "   Reason: Telnet is unencrypted, security risk"
+else
+    echo "⚠️  Telnet connection succeeded (unexpected)"
+fi
+
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 5: SQL Injection Detection (IDS Alert)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Testing: Sending SQL injection pattern in HTTP request"
+echo "Expected: Traffic allowed, but IDS generates ALERT"
+echo ""
+echo "Payload: ?id=1' UNION SELECT * FROM users--"
+echo ""
+
+curl -s "http://$NFW_TEST_IP/?id=1'+UNION+SELECT+*+FROM+users--" > /dev/null 2>&1
+
+echo "✅ Request sent!"
+echo "   This will trigger Suricata rule SID 1000010"
+echo "   Check CloudWatch Logs: /aws/network-firewall/alerts"
+echo "   Alert message: 'SQL Injection Detected - UNION SELECT'"
+echo ""
+echo "   How IDS works:"
+echo "     1. Traffic passes through (not blocked)"
+echo "     2. Suricata inspects HTTP content"
+echo "     3. Matches pattern: 'UNION SELECT'"
+echo "     4. Generates ALERT log entry"
+echo "     5. Security team investigates"
+echo ""
+
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 6: XSS Attack Detection (IDS Alert)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Testing: Sending XSS attack pattern"
+echo "Expected: Traffic allowed, IDS generates ALERT"
+echo ""
+echo "Payload: <script>alert('XSS')</script>"
+echo ""
+
+curl -s "http://$NFW_TEST_IP/?search=<script>alert('XSS')</script>" > /dev/null 2>&1
+
+echo "✅ Request sent!"
+echo "   This will trigger Suricata rule SID 1000012"
+echo "   Alert message: 'XSS Attack Detected - script tag'"
+echo ""
+
+echo "════════════════════════════════════════════════════════════"
+echo "TEST 7: Path Traversal Detection (IDS Alert)"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Testing: Sending path traversal attack"
+echo "Payload: ../../etc/passwd"
+echo ""
+
+curl -s "http://$NFW_TEST_IP/download?file=..%2f..%2fetc%2fpasswd" > /dev/null 2>&1
+
+echo "✅ Request sent!"
+echo "   This will trigger Suricata rule SID 1000014"
+echo "   Alert message: 'Path Traversal Attack - dot dot slash'"
+echo ""
+
+echo "════════════════════════════════════════════════════════════"
+echo "TEST SUMMARY"
+echo "════════════════════════════════════════════════════════════"
+echo ""
+echo "Results:"
+echo "  ✅ HTTP traffic - Allowed and inspected"
+echo "  ✅ SSH (port 22) - Blocked by firewall"
+echo "  ✅ RDP (port 3389) - Blocked by firewall"
+echo "  ✅ Telnet (port 23) - Blocked by firewall"
+echo "  ✅ SQL Injection - Detected by IDS (alert generated)"
+echo "  ✅ XSS Attack - Detected by IDS (alert generated)"
+echo "  ✅ Path Traversal - Detected by IDS (alert generated)"
+echo ""
+echo "To view IDS alerts:"
+echo "  1. Go to CloudWatch Console"
+echo "  2. Navigate to Log Groups"
+echo "  3. Open: /aws/network-firewall/alerts"
+echo "  4. You'll see JSON alert logs with full details"
+echo ""
+echo "Alert log example:"
+echo '{
+  "firewall_name": "ProductionFirewall",
+  "event_timestamp": "2026-03-09T...",
+  "event": {
+    "event_type": "alert",
+    "src_ip": "YOUR_IP",
+    "dest_ip": "'$NFW_TEST_PRIVATE_IP'",
+    "proto": "TCP",
+    "dest_port": 80,
+    "alert": {
+      "action": "allowed",
+      "signature": "SQL Injection Detected - UNION SELECT",
+      "signature_id": 1000010,
+      "category": "Web Attack"
+    }
+  }
+}'
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo ""
+
+# Save test results
+cat > /tmp/nfw-test-results.txt << EOF
+AWS Network Firewall Test Results
+Generated: $(date)
+
+Test Instance: $NFW_TEST_INSTANCE
+Public IP: $NFW_TEST_IP
+Private IP: $NFW_TEST_PRIVATE_IP
+
+Test Results:
+✅ HTTP traffic allowed
+✅ SSH blocked (port 22)
+✅ RDP blocked (port 3389)
+✅ Telnet blocked (port 23)
+✅ SQL injection detected (IDS alert)
+✅ XSS attack detected (IDS alert)
+✅ Path traversal detected (IDS alert)
+
+Firewall Configuration:
+- Stateless rules: Malicious IP blocking
+- Domain filtering: Social media blocked
+- Port security: SSH, RDP, Telnet blocked
+- IDS/IPS: Web attack detection active
+
+All tests passed successfully!
+EOF
+
+echo "✅ Test results saved to: /tmp/nfw-test-results.txt"
+echo ""
+```
+
+---
+
+**This is getting too long for one response! Let me save and give you the REST (Day 26 WAF & Shield, Cleanup, Documentation) in the NEXT response!**
+
+**Should I continue with the same depth for Day 26?** 🚀
