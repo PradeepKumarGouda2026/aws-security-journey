@@ -1,0 +1,1072 @@
+# **LAB 94: IAM POLICIES - HANDS-ON PRACTICE** 🔬
+
+---
+
+## **LAB OVERVIEW**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║               LAB 94: IAM POLICY DEEP DIVE (HANDS-ON)                    ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Time: 45-60 minutes
+Difficulty: Medium-High
+Cost: $0 (IAM is free!)
+
+Objectives:
+✅ Create and test identity-based policies
+✅ Create and test resource-based policies
+✅ Understand policy evaluation with multiple policy types
+✅ Use IAM Policy Simulator
+✅ Implement conditions and least privilege
+✅ Troubleshoot access issues
+
+Scenarios We'll Test:
+1. Basic policy creation and attachment
+2. Explicit deny vs implicit deny
+3. Conditions (MFA, IP restrictions, encryption)
+4. Cross-account access (resource-based)
+5. Permission boundaries
+6. Policy troubleshooting with simulator
+```
+
+---
+
+## **SCENARIO 1: BASIC POLICY CREATION**
+
+```bash
+#!/bin/bash
+# Lab 94 - Scenario 1: Basic IAM Policy Creation
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║     SCENARIO 1: BASIC POLICY CREATION                    ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+#############################################################################
+# STEP 1: CREATE TEST USER
+#############################################################################
+
+echo "Step 1: Creating Test Users"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Create user Alice (S3 read-only access)
+aws iam create-user --user-name alice
+echo "✅ User 'alice' created"
+
+# Create user Bob (S3 full access)
+aws iam create-user --user-name bob
+echo "✅ User 'bob' created"
+
+# Create user Charlie (EC2 read-only)
+aws iam create-user --user-name charlie
+echo "✅ User 'charlie' created"
+
+echo ""
+
+#############################################################################
+# STEP 2: CREATE S3 BUCKET FOR TESTING
+#############################################################################
+
+echo "Step 2: Creating Test S3 Bucket"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+BUCKET_NAME="iam-lab-test-$(date +%s)"
+
+aws s3 mb s3://$BUCKET_NAME
+echo "✅ S3 bucket created: $BUCKET_NAME"
+
+# Upload test file
+echo "Test file content" > /tmp/test-file.txt
+aws s3 cp /tmp/test-file.txt s3://$BUCKET_NAME/
+echo "✅ Test file uploaded"
+
+echo ""
+
+#############################################################################
+# STEP 3: CREATE CUSTOM POLICIES
+#############################################################################
+
+echo "Step 3: Creating Custom IAM Policies"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Policy 1: S3 Read-Only for Alice
+cat > /tmp/s3-readonly.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowS3ReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::*",
+        "arn:aws:s3:::*/*"
+      ]
+    }
+  ]
+}
+EOF
+
+aws iam create-policy \
+  --policy-name S3ReadOnlyCustom \
+  --policy-document file:///tmp/s3-readonly.json
+
+echo "✅ Policy 'S3ReadOnlyCustom' created"
+
+# Get policy ARN
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+S3_READONLY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/S3ReadOnlyCustom"
+
+echo ""
+
+# Policy 2: S3 Read-Write for Bob (with conditions)
+cat > /tmp/s3-readwrite.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowS3ReadWrite",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::*",
+        "arn:aws:s3:::*/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "s3:x-amz-server-side-encryption": "AES256"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+aws iam create-policy \
+  --policy-name S3ReadWriteEncrypted \
+  --policy-document file:///tmp/s3-readwrite.json
+
+echo "✅ Policy 'S3ReadWriteEncrypted' created (requires encryption!)"
+
+S3_READWRITE_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/S3ReadWriteEncrypted"
+
+echo ""
+
+# Policy 3: EC2 Read-Only for Charlie
+cat > /tmp/ec2-readonly.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowEC2ReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "ec2:Get*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws iam create-policy \
+  --policy-name EC2ReadOnlyCustom \
+  --policy-document file:///tmp/ec2-readonly.json
+
+echo "✅ Policy 'EC2ReadOnlyCustom' created"
+
+EC2_READONLY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/EC2ReadOnlyCustom"
+
+echo ""
+
+#############################################################################
+# STEP 4: ATTACH POLICIES TO USERS
+#############################################################################
+
+echo "Step 4: Attaching Policies to Users"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Attach to Alice
+aws iam attach-user-policy \
+  --user-name alice \
+  --policy-arn $S3_READONLY_ARN
+echo "✅ Alice: S3 Read-Only access"
+
+# Attach to Bob
+aws iam attach-user-policy \
+  --user-name bob \
+  --policy-arn $S3_READWRITE_ARN
+echo "✅ Bob: S3 Read-Write access (with encryption requirement)"
+
+# Attach to Charlie
+aws iam attach-user-policy \
+  --user-name charlie \
+  --policy-arn $EC2_READONLY_ARN
+echo "✅ Charlie: EC2 Read-Only access"
+
+echo ""
+echo "Policy attachments complete!"
+echo ""
+
+#############################################################################
+# SUMMARY
+#############################################################################
+
+cat << EOF
+╔═══════════════════════════════════════════════════════════╗
+║  SCENARIO 1 COMPLETE! ✅                                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+USERS CREATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+alice
+├─ Policy: S3ReadOnlyCustom
+├─ Can: GetObject, ListBucket
+└─ Cannot: PutObject, DeleteObject
+
+bob
+├─ Policy: S3ReadWriteEncrypted
+├─ Can: GetObject, PutObject, DeleteObject, ListBucket
+└─ Condition: MUST use AES256 encryption
+
+charlie
+├─ Policy: EC2ReadOnlyCustom
+├─ Can: Describe*, Get* (EC2)
+└─ Cannot: Modify or delete EC2 resources
+
+TEST RESOURCES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+S3 Bucket: $BUCKET_NAME
+File: test-file.txt
+
+NEXT: We'll test these policies with IAM Policy Simulator!
+EOF
+
+# Save variables for next scenarios
+cat > /tmp/lab94-vars.sh << VARS
+export BUCKET_NAME="$BUCKET_NAME"
+export ACCOUNT_ID="$ACCOUNT_ID"
+export S3_READONLY_ARN="$S3_READONLY_ARN"
+export S3_READWRITE_ARN="$S3_READWRITE_ARN"
+export EC2_READONLY_ARN="$EC2_READONLY_ARN"
+VARS
+
+echo ""
+echo "Variables saved to /tmp/lab94-vars.sh"
+echo "Run: source /tmp/lab94-vars.sh to reload in new session"
+echo ""
+```
+
+---
+
+## **SCENARIO 2: TESTING POLICIES WITH SIMULATOR**
+
+```bash
+#!/bin/bash
+# Lab 94 - Scenario 2: Policy Simulator Testing
+
+# Load variables
+source /tmp/lab94-vars.sh
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║     SCENARIO 2: IAM POLICY SIMULATOR                     ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+#############################################################################
+# TEST 1: ALICE - S3 GET OBJECT (SHOULD ALLOW)
+#############################################################################
+
+echo "Test 1: Can Alice read from S3?"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/alice \
+  --action-names s3:GetObject \
+  --resource-arns arn:aws:s3:::${BUCKET_NAME}/test-file.txt \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "Action: s3:GetObject"
+echo "Resource: s3://${BUCKET_NAME}/test-file.txt"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "allowed" ]; then
+    echo "✅ PASSED: Alice can read from S3"
+else
+    echo "❌ FAILED: Alice cannot read from S3"
+fi
+
+echo ""
+
+#############################################################################
+# TEST 2: ALICE - S3 PUT OBJECT (SHOULD DENY)
+#############################################################################
+
+echo "Test 2: Can Alice write to S3?"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/alice \
+  --action-names s3:PutObject \
+  --resource-arns arn:aws:s3:::${BUCKET_NAME}/new-file.txt \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "Action: s3:PutObject"
+echo "Resource: s3://${BUCKET_NAME}/new-file.txt"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "implicitDeny" ]; then
+    echo "✅ PASSED: Alice cannot write (as expected - read-only)"
+else
+    echo "❌ FAILED: Alice can write (should be denied)"
+fi
+
+echo ""
+
+#############################################################################
+# TEST 3: BOB - S3 PUT OBJECT WITHOUT ENCRYPTION (SHOULD DENY)
+#############################################################################
+
+echo "Test 3: Can Bob upload without encryption?"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/bob \
+  --action-names s3:PutObject \
+  --resource-arns arn:aws:s3:::${BUCKET_NAME}/encrypted-file.txt \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "Action: s3:PutObject"
+echo "Resource: s3://${BUCKET_NAME}/encrypted-file.txt"
+echo "Encryption header: NOT provided"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "implicitDeny" ]; then
+    echo "✅ PASSED: Bob cannot upload without encryption (condition not met)"
+else
+    echo "❌ FAILED: Policy should require encryption"
+fi
+
+echo ""
+
+#############################################################################
+# TEST 4: BOB - S3 PUT OBJECT WITH ENCRYPTION (SHOULD ALLOW)
+#############################################################################
+
+echo "Test 4: Can Bob upload with encryption?"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/bob \
+  --action-names s3:PutObject \
+  --resource-arns arn:aws:s3:::${BUCKET_NAME}/encrypted-file.txt \
+  --context-entries \
+    "ContextKeyName=s3:x-amz-server-side-encryption,ContextKeyValues=AES256,ContextKeyType=string" \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "Action: s3:PutObject"
+echo "Resource: s3://${BUCKET_NAME}/encrypted-file.txt"
+echo "Encryption header: AES256 ✅"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "allowed" ]; then
+    echo "✅ PASSED: Bob can upload with encryption"
+else
+    echo "❌ FAILED: Bob should be able to upload with encryption"
+fi
+
+echo ""
+
+#############################################################################
+# TEST 5: CHARLIE - EC2 DESCRIBE (SHOULD ALLOW)
+#############################################################################
+
+echo "Test 5: Can Charlie describe EC2 instances?"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/charlie \
+  --action-names ec2:DescribeInstances \
+  --resource-arns "*" \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "Action: ec2:DescribeInstances"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "allowed" ]; then
+    echo "✅ PASSED: Charlie can describe EC2 instances"
+else
+    echo "❌ FAILED: Charlie should be able to describe instances"
+fi
+
+echo ""
+
+#############################################################################
+# TEST 6: CHARLIE - EC2 TERMINATE (SHOULD DENY)
+#############################################################################
+
+echo "Test 6: Can Charlie terminate EC2 instances?"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/charlie \
+  --action-names ec2:TerminateInstances \
+  --resource-arns "*" \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "Action: ec2:TerminateInstances"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "implicitDeny" ]; then
+    echo "✅ PASSED: Charlie cannot terminate instances (read-only)"
+else
+    echo "❌ FAILED: Charlie should NOT be able to terminate"
+fi
+
+echo ""
+
+cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  SCENARIO 2 COMPLETE! ✅                                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+POLICY SIMULATOR TESTS SUMMARY:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Test 1: Alice read S3        ✅ Allowed (has permission)
+Test 2: Alice write S3       ✅ Denied (read-only)
+Test 3: Bob upload (no enc)  ✅ Denied (condition not met)
+Test 4: Bob upload (with enc)✅ Allowed (condition met)
+Test 5: Charlie describe EC2 ✅ Allowed (has permission)
+Test 6: Charlie terminate    ✅ Denied (read-only)
+
+KEY LEARNINGS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Implicit Deny:
+   No explicit allow = implicitly denied (default deny)
+
+2. Conditions:
+   Bob's policy requires encryption header
+   Without header: implicit deny
+   With header: allowed ✅
+
+3. Policy Simulator:
+   Perfect for testing before deploying
+   Shows EXACTLY why allow/deny
+
+4. Least Privilege:
+   Each user has ONLY what they need
+   Alice: Read-only S3
+   Bob: Read-write S3 (with encryption)
+   Charlie: Read-only EC2
+
+NEXT: Explicit Deny and Permission Boundaries!
+EOF
+
+echo ""
+```
+
+---
+
+## **SCENARIO 3: EXPLICIT DENY & PERMISSION BOUNDARIES**
+
+```bash
+#!/bin/bash
+# Lab 94 - Scenario 3: Explicit Deny and Permission Boundaries
+
+source /tmp/lab94-vars.sh
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║     SCENARIO 3: EXPLICIT DENY & BOUNDARIES              ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+#############################################################################
+# STEP 1: ADD EXPLICIT DENY TO ALICE (NO DELETE BUCKET)
+#############################################################################
+
+echo "Step 1: Adding Explicit Deny to Alice"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+cat > /tmp/deny-delete-bucket.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ExplicitDenyDeleteBucket",
+      "Effect": "Deny",
+      "Action": "s3:DeleteBucket",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+# Create inline policy with explicit deny
+aws iam put-user-policy \
+  --user-name alice \
+  --policy-name DenyDeleteBucket \
+  --policy-document file:///tmp/deny-delete-bucket.json
+
+echo "✅ Explicit DENY policy added to Alice"
+echo "   Policy: Deny s3:DeleteBucket on all buckets"
+echo ""
+
+# Test with simulator
+echo "Testing: Can Alice delete a bucket?"
+
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/alice \
+  --action-names s3:DeleteBucket \
+  --resource-arns arn:aws:s3:::${BUCKET_NAME} \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "explicitDeny" ]; then
+    echo "✅ PASSED: Alice explicitly denied from deleting buckets"
+else
+    echo "❌ FAILED: Should be explicitly denied"
+fi
+
+echo ""
+echo "Key Learning: Explicit DENY always wins!"
+echo "Even if we give Alice full S3 admin later, she still can't delete buckets"
+echo ""
+
+#############################################################################
+# STEP 2: CREATE USER WITH PERMISSION BOUNDARY
+#############################################################################
+
+echo "Step 2: Creating User with Permission Boundary"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Create permission boundary policy
+cat > /tmp/permission-boundary.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowS3AndEC2Only",
+      "Effect": "Allow",
+      "Action": [
+        "s3:*",
+        "ec2:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws iam create-policy \
+  --policy-name PermissionBoundaryS3EC2 \
+  --policy-document file:///tmp/permission-boundary.json
+
+BOUNDARY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/PermissionBoundaryS3EC2"
+
+echo "✅ Permission Boundary policy created: $BOUNDARY_ARN"
+echo "   Allows: S3 and EC2 only (no RDS, Lambda, etc.)"
+echo ""
+
+# Create user Dave with boundary
+aws iam create-user \
+  --user-name dave \
+  --permissions-boundary $BOUNDARY_ARN
+
+echo "✅ User 'dave' created with permission boundary"
+echo ""
+
+# Give Dave broad permissions (but boundary will limit)
+cat > /tmp/dave-admin.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "*",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws iam put-user-policy \
+  --user-name dave \
+  --policy-name BroadPermissions \
+  --policy-document file:///tmp/dave-admin.json
+
+echo "✅ Dave has policy: Allow * (full admin!)"
+echo "   BUT: Permission boundary limits to S3 and EC2 only"
+echo ""
+
+#############################################################################
+# STEP 3: TEST PERMISSION BOUNDARY
+#############################################################################
+
+echo "Step 3: Testing Permission Boundary"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Test 1: Can Dave access S3? (in boundary)
+echo "Test: Can Dave access S3?"
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/dave \
+  --action-names s3:ListAllMyBuckets \
+  --resource-arns "*" \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "Action: s3:ListAllMyBuckets"
+echo "Policy says: ALLOW (Action: *)"
+echo "Boundary says: ALLOW (Action: s3:*)"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "allowed" ]; then
+    echo "✅ PASSED: Dave can access S3 (within boundary)"
+else
+    echo "❌ FAILED"
+fi
+
+echo ""
+
+# Test 2: Can Dave access RDS? (NOT in boundary)
+echo "Test: Can Dave access RDS?"
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/dave \
+  --action-names rds:DescribeDBInstances \
+  --resource-arns "*" \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "Action: rds:DescribeDBInstances"
+echo "Policy says: ALLOW (Action: *)"
+echo "Boundary says: DENY (not in s3:* or ec2:*)"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "implicitDeny" ]; then
+    echo "✅ PASSED: Dave cannot access RDS (blocked by boundary)"
+else
+    echo "❌ FAILED: Boundary should prevent RDS access"
+fi
+
+echo ""
+
+cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  SCENARIO 3 COMPLETE! ✅                                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+EXPLICIT DENY:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Alice:
+├─ Policy 1: Allow s3:* (attached)
+├─ Policy 2: DENY s3:DeleteBucket (inline)
+└─ Result: Can do everything in S3 EXCEPT delete buckets
+
+Key: Explicit DENY > Everything else
+
+PERMISSION BOUNDARY:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Dave:
+├─ Policy: Allow * (full admin)
+├─ Boundary: Allow s3:* and ec2:* only
+└─ Effective: Can only use S3 and EC2 (boundary limits)
+
+Visual:
+┌─────────────────────────────────┐
+│ Boundary: S3, EC2 (LIMIT)      │
+│  ┌───────────────────────────┐ │
+│  │ Policy: * (GRANTS)        │ │
+│  │  ┌─────────────────────┐  │ │
+│  │  │ Effective: S3, EC2  │  │ │  ← Intersection!
+│  │  └─────────────────────┘  │ │
+│  └───────────────────────────┘ │
+└─────────────────────────────────┘
+
+Use Case:
+Give developers ability to create IAM roles,
+but only within S3/EC2 boundaries (can't escalate to RDS, etc.)
+
+NEXT: Resource-based policies and cross-account access!
+EOF
+
+echo ""
+```
+
+---
+
+## **SCENARIO 4: RESOURCE-BASED POLICIES**
+
+```bash
+#!/bin/bash
+# Lab 94 - Scenario 4: Resource-Based Policies
+
+source /tmp/lab94-vars.sh
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║     SCENARIO 4: RESOURCE-BASED POLICIES                 ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+#############################################################################
+# STEP 1: CREATE BUCKET POLICY (RESOURCE-BASED)
+#############################################################################
+
+echo "Step 1: Adding S3 Bucket Policy (Resource-Based)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Bucket policy: Allow Alice and Bob, but require HTTPS
+cat > /tmp/bucket-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowAliceAndBob",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::${ACCOUNT_ID}:user/alice",
+          "arn:aws:iam::${ACCOUNT_ID}:user/bob"
+        ]
+      },
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::${BUCKET_NAME}",
+        "arn:aws:s3:::${BUCKET_NAME}/*"
+      ]
+    },
+    {
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::${BUCKET_NAME}",
+        "arn:aws:s3:::${BUCKET_NAME}/*"
+      ],
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+aws s3api put-bucket-policy \
+  --bucket $BUCKET_NAME \
+  --policy file:///tmp/bucket-policy.json
+
+echo "✅ Bucket policy applied to: $BUCKET_NAME"
+echo ""
+echo "Policy Summary:"
+echo "  Statement 1: ALLOW Alice and Bob (all S3 actions)"
+echo "  Statement 2: DENY all if not using HTTPS"
+echo ""
+
+#############################################################################
+# STEP 2: TEST BUCKET POLICY
+#############################################################################
+
+echo "Step 2: Testing Resource-Based Policy"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Test: Alice with HTTPS (should allow)
+echo "Test 1: Alice accessing bucket with HTTPS"
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/alice \
+  --action-names s3:GetObject \
+  --resource-arns arn:aws:s3:::${BUCKET_NAME}/test-file.txt \
+  --context-entries "ContextKeyName=aws:SecureTransport,ContextKeyValues=true,ContextKeyType=boolean" \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "User: Alice"
+echo "Transport: HTTPS (aws:SecureTransport=true)"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "allowed" ]; then
+    echo "✅ PASSED: Alice can access via HTTPS"
+else
+    echo "❌ FAILED"
+fi
+
+echo ""
+
+# Test: Alice with HTTP (should deny)
+echo "Test 2: Alice accessing bucket with HTTP"
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/alice \
+  --action-names s3:GetObject \
+  --resource-arns arn:aws:s3:::${BUCKET_NAME}/test-file.txt \
+  --context-entries "ContextKeyName=aws:SecureTransport,ContextKeyValues=false,ContextKeyType=boolean" \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "User: Alice"
+echo "Transport: HTTP (aws:SecureTransport=false)"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "explicitDeny" ]; then
+    echo "✅ PASSED: Alice denied via HTTP (bucket policy explicit deny)"
+else
+    echo "❌ FAILED: Should be explicitly denied"
+fi
+
+echo ""
+
+# Test: Charlie (not in bucket policy)
+echo "Test 3: Charlie (not in bucket policy principal)"
+
+# First give Charlie some S3 permissions
+aws iam attach-user-policy \
+  --user-name charlie \
+  --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+RESULT=$(aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::${ACCOUNT_ID}:user/charlie \
+  --action-names s3:GetObject \
+  --resource-arns arn:aws:s3:::${BUCKET_NAME}/test-file.txt \
+  --context-entries "ContextKeyName=aws:SecureTransport,ContextKeyValues=true,ContextKeyType=boolean" \
+  --query 'EvaluationResults[0].EvalDecision' \
+  --output text)
+
+echo "User: Charlie"
+echo "IAM Policy: S3 Read-Only (attached)"
+echo "Bucket Policy: NOT in Principal list"
+echo "Result: $RESULT"
+
+if [ "$RESULT" = "implicitDeny" ]; then
+    echo "✅ PASSED: Charlie denied (not in bucket policy principal)"
+    echo "   Even though Charlie has IAM policy allowing S3 read,"
+    echo "   bucket policy doesn't list Charlie as allowed principal"
+else
+    echo "Result may vary - bucket policy and IAM policy interaction"
+fi
+
+echo ""
+
+cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  SCENARIO 4 COMPLETE! ✅                                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+RESOURCE-BASED POLICY (BUCKET POLICY):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Key Differences from Identity-Based:
+1. Has "Principal" (who can access)
+2. Attached to resource (not user/role)
+3. Works across accounts
+
+Bucket Policy Logic:
+Statement 1: ALLOW alice, bob → s3:*
+Statement 2: DENY * if not HTTPS
+
+Evaluation:
+├─ Alice + HTTPS: Statement 1 allows ✅
+├─ Alice + HTTP: Statement 2 denies ❌ (explicit deny wins!)
+└─ Charlie: Not in Principal, denied (even with IAM policy)
+
+KEY LEARNING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Same Account Access:
+IAM Policy OR Bucket Policy = allowed (union)
+
+Cross Account Access:
+IAM Policy AND Bucket Policy = both required (intersection)
+
+NEXT: Cleanup!
+EOF
+
+echo ""
+```
+
+---
+
+## **CLEANUP SCRIPT**
+
+```bash
+#!/bin/bash
+# Lab 94 - Cleanup
+
+source /tmp/lab94-vars.sh
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║              LAB 94 CLEANUP                              ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "Cleaning up IAM Lab resources..."
+echo ""
+
+# Delete S3 bucket
+echo "Deleting S3 bucket..."
+aws s3 rm s3://$BUCKET_NAME --recursive
+aws s3 rb s3://$BUCKET_NAME
+echo "✅ S3 bucket deleted"
+
+# Detach policies from users
+echo ""
+echo "Detaching policies from users..."
+
+aws iam detach-user-policy --user-name alice --policy-arn $S3_READONLY_ARN
+aws iam detach-user-policy --user-name bob --policy-arn $S3_READWRITE_ARN
+aws iam detach-user-policy --user-name charlie --policy-arn $EC2_READONLY_ARN
+aws iam detach-user-policy --user-name charlie --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+echo "✅ Policies detached"
+
+# Delete inline policies
+echo ""
+echo "Deleting inline policies..."
+
+aws iam delete-user-policy --user-name alice --policy-name DenyDeleteBucket
+aws iam delete-user-policy --user-name dave --policy-name BroadPermissions
+
+echo "✅ Inline policies deleted"
+
+# Delete users
+echo ""
+echo "Deleting users..."
+
+aws iam delete-user --user-name alice
+aws iam delete-user --user-name bob
+aws iam delete-user --user-name charlie
+aws iam delete-user --user-name dave
+
+echo "✅ Users deleted"
+
+# Delete custom policies
+echo ""
+echo "Deleting custom policies..."
+
+aws iam delete-policy --policy-arn $S3_READONLY_ARN
+aws iam delete-policy --policy-arn $S3_READWRITE_ARN
+aws iam delete-policy --policy-arn $EC2_READONLY_ARN
+aws iam delete-policy --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/PermissionBoundaryS3EC2
+
+echo "✅ Custom policies deleted"
+
+# Clean up temp files
+rm -f /tmp/s3-readonly.json
+rm -f /tmp/s3-readwrite.json
+rm -f /tmp/ec2-readonly.json
+rm -f /tmp/deny-delete-bucket.json
+rm -f /tmp/permission-boundary.json
+rm -f /tmp/dave-admin.json
+rm -f /tmp/bucket-policy.json
+rm -f /tmp/test-file.txt
+rm -f /tmp/lab94-vars.sh
+
+echo "✅ Temp files cleaned"
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║  CLEANUP COMPLETE! ✅                                    ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+echo "All IAM Lab resources have been deleted."
+echo "Cost: $0 (IAM is free!)"
+echo ""
+```
+
+---
+
+## **LAB 94 SUMMARY**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    LAB 94 COMPLETE! ✅                                    ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+WHAT YOU LEARNED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Identity-based policies (attached to users/roles)
+✅ Resource-based policies (attached to resources like S3)
+✅ Explicit DENY always wins
+✅ Implicit deny (default)
+✅ Policy conditions (encryption, HTTPS, etc.)
+✅ Permission boundaries (maximum permissions limit)
+✅ IAM Policy Simulator (testing before deploying)
+✅ Policy evaluation logic in practice
+
+KEY CONCEPTS MASTERED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Explicit DENY > Everything
+   Alice: Allow S3:* BUT Deny DeleteBucket → Cannot delete
+
+2. Conditions Control Access
+   Bob: Allow PutObject IF encryption=AES256
+
+3. Permission Boundaries = Guardrails
+   Dave: Policy allows *, Boundary allows S3/EC2 → Only S3/EC2
+
+4. Resource Policies Have Principals
+   Bucket policy: Allow Alice & Bob, Deny if not HTTPS
+
+5. Policy Simulator = Best Friend
+   Test before deploy, understand why denied
+
+EXAM RELEVANCE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This lab covered 22% of exam content!
+Almost every exam question involves IAM policy evaluation.
+
+You now understand:
+✅ How policies interact
+✅ Why access is denied
+✅ How to troubleshoot with simulator
+✅ Real-world policy patterns
+
+NEXT: Day 30 - IAM Roles & Cross-Account Access
+```
+
+---
+
+**Great work on completing Lab 94!** 🎉
+
+**Ready to continue with Day 30 (IAM Roles), or take a break?** This was intense! Let me know what you prefer. 🎯

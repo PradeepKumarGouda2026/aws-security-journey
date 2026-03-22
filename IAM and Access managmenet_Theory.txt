@@ -1,0 +1,1299 @@
+# **DAY 29: IAM POLICIES DEEP DIVE** 🔑
+
+---
+
+## **OVERVIEW**
+
+```
+╔═══════════════════════════════════════════════════════════╗
+║          DAY 29: IAM POLICIES DEEP DIVE                  ║
+╚═══════════════════════════════════════════════════════════╝
+
+Time: 3 hours
+Difficulty: High (Most complex topic in AWS Security!)
+Exam Weight: 22% (CRITICAL!)
+
+Topics Covered:
+✅ Policy types (identity-based, resource-based, etc.)
+✅ Policy evaluation logic (THE MOST IMPORTANT!)
+✅ Policy structure (JSON deep dive)
+✅ IAM Policy Simulator
+✅ IAM Access Analyzer
+✅ Common policy patterns
+✅ Troubleshooting access issues
+
+Lab: Policy creation and troubleshooting scenarios
+Cost: $0 (no resources created, IAM is free!)
+```
+
+---
+
+## **PART 1: IAM POLICY TYPES (30 MIN)**
+
+### **The 6 Types of IAM Policies**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    IAM POLICY TYPES OVERVIEW                              ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+1. IDENTITY-BASED POLICIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Attached to: Users, Groups, Roles
+Controls: What the identity can do
+Scope: All AWS resources
+
+Types:
+├─ Managed Policies (AWS managed or customer managed)
+│   • Standalone policy (can attach to multiple identities)
+│   • Has its own ARN
+│   • Version-controlled (up to 5 versions)
+│   • Reusable
+│
+└─ Inline Policies
+    • Embedded directly in user/group/role
+    • 1:1 relationship (deleted when identity deleted)
+    • Use for unique, one-off permissions
+
+Example - AWS Managed Policy:
+Policy Name: AmazonS3ReadOnlyAccess
+ARN: arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+Can attach to: Multiple users/roles
+
+Example - Customer Managed Policy:
+Policy Name: MyAppDevelopers
+ARN: arn:aws:iam::123456789012:policy/MyAppDevelopers
+Can attach to: Multiple users/roles
+
+Example - Inline Policy:
+Attached to: User "john-temp-contractor"
+No ARN (part of the user)
+Deleted when: User is deleted
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. RESOURCE-BASED POLICIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Attached to: AWS resources (S3 buckets, SQS queues, KMS keys, etc.)
+Controls: Who can access the resource
+Scope: Specific resource only
+Always inline: Cannot be managed policies
+
+Example - S3 Bucket Policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::111111111111:user/Alice"
+    },
+    "Action": "s3:GetObject",
+    "Resource": "arn:aws:s3:::my-bucket/*"
+  }]
+}
+
+Key difference: Has "Principal" (who can access)
+Identity-based policies DON'T have Principal (because attached to identity)
+
+Supports:
+✅ S3 buckets
+✅ SQS queues
+✅ SNS topics
+✅ KMS keys
+✅ Lambda functions
+✅ Secrets Manager secrets
+✅ ECR repositories
+✅ API Gateway
+❌ EC2 instances (use IAM roles instead)
+❌ RDS databases (use IAM database authentication)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. PERMISSIONS BOUNDARIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Attached to: Users or Roles (not groups!)
+Controls: Maximum permissions an identity can have
+Effect: Sets upper limit, doesn't grant permissions
+
+Think of it as: "Guardrails"
+
+Example scenario:
+User has policy: "Allow S3:*, EC2:*, RDS:*" (very broad)
+Permission boundary: "Allow S3:*, EC2:*" (no RDS)
+
+Result: User can access S3 and EC2, but NOT RDS
+→ Boundary prevents RDS even though policy allows it
+
+Use case: Delegated administration
+"You can create IAM users, but they can't exceed these permissions"
+
+Visual:
+┌─────────────────────────────────────┐
+│  Permissions Boundary (LIMIT)      │
+│  ┌───────────────────────────────┐ │
+│  │  Identity Policy (GRANTS)     │ │
+│  │  ┌─────────────────────────┐  │ │
+│  │  │ Effective Permissions   │  │ │  ← Intersection!
+│  │  └─────────────────────────┘  │ │
+│  └───────────────────────────────┘ │
+└─────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. SERVICE CONTROL POLICIES (SCPs)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Attached to: AWS Organizations (OUs or accounts)
+Controls: Maximum permissions for ALL identities in account
+Effect: Account-wide guardrails
+Applies to: Everyone (even root user!)
+
+Example:
+SCP on Production OU: "Deny EC2:TerminateInstances"
+
+Result: Nobody in Production accounts can terminate instances
+→ Not even administrators
+→ Not even root user
+→ Account-level restriction
+
+Use case: Compliance, governance, prevent destructive actions
+
+Important:
+• SCPs DON'T grant permissions (only restrict)
+• Must also have IAM policy to do anything
+• Root user still affected by SCPs! (rare exception)
+
+We'll deep dive on Day 31!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5. SESSION POLICIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Attached to: AssumeRole session (temporary)
+Controls: Further restrict temporary credentials
+Effect: Additional limitations for specific session
+
+Example:
+Role has policy: "Allow S3:*"
+Session policy passed during AssumeRole: "Allow S3:GetObject only"
+
+Result: This session can ONLY GetObject (not PutObject, DeleteObject)
+
+Use case: Pass temporary, limited credentials to application
+
+Command:
+aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/MyRole \
+  --role-session-name session1 \
+  --policy '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}'
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. ACCESS CONTROL LISTS (ACLs)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Attached to: S3 buckets and objects (legacy!)
+Controls: Coarse-grained access
+Effect: Allow read/write access
+
+⚠️ LEGACY! Don't use for new implementations!
+
+Use bucket policies or IAM policies instead.
+
+AWS recommendation: Disable ACLs
+S3 bucket settings: "Bucket owner enforced" (disables ACLs)
+```
+
+---
+
+## **PART 2: POLICY EVALUATION LOGIC (45 MIN)** ⭐⭐⭐
+
+**THIS IS THE MOST IMPORTANT SECTION FOR THE EXAM!**
+
+### **The IAM Policy Evaluation Flow**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║               IAM POLICY EVALUATION LOGIC (MEMORIZE THIS!)                ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+When a principal (user/role) makes a request, AWS evaluates:
+
+STEP 1: EXPLICIT DENY?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Check ALL policies for explicit DENY:
+├─ SCPs (Organizations)
+├─ Permissions boundaries
+├─ Identity-based policies
+├─ Resource-based policies
+└─ Session policies
+
+If ANY policy has explicit DENY → REQUEST DENIED ❌ (STOP HERE)
+
+Example:
+IAM Policy: Allow S3:*
+SCP: Deny S3:DeleteBucket
+Result: DENIED (SCP explicit deny wins)
+
+RULE: Explicit DENY always wins! 🚫
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 2: EXPLICIT ALLOW?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If no explicit DENY, check for explicit ALLOW in:
+
+SAME ACCOUNT:
+├─ Identity-based policy: ALLOW → Proceed to Step 3
+├─ Resource-based policy: ALLOW → Proceed to Step 3
+└─ Must pass permissions boundary (if set)
+
+CROSS ACCOUNT:
+├─ Identity-based policy in Account A: ALLOW
+├─ AND resource-based policy in Account B: ALLOW
+└─ Both required! (Union, not intersection)
+
+If explicit ALLOW found → Check Step 3
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 3: PERMISSIONS BOUNDARY CHECK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If permissions boundary is set:
+├─ Does boundary ALLOW this action?
+│   ├─ YES → Proceed to Step 4
+│   └─ NO → REQUEST DENIED ❌
+
+If no permissions boundary:
+└─ Proceed to Step 4
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 4: SCP CHECK (If using AWS Organizations)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If account is in AWS Organization:
+├─ Does SCP ALLOW this action?
+│   ├─ YES → REQUEST ALLOWED ✅
+│   └─ NO → REQUEST DENIED ❌
+
+If not in Organization:
+└─ REQUEST ALLOWED ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DEFAULT: IMPLICIT DENY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If NONE of the above allow the action:
+→ REQUEST DENIED ❌ (implicit deny)
+
+By default, everything is denied unless explicitly allowed.
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                         GOLDEN RULES                                      ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+1. Explicit DENY > Everything else
+2. Explicit ALLOW needed (from at least one policy)
+3. Permissions boundary = maximum permissions (limit)
+4. SCP = account-level limit (applies to everyone)
+5. Default = DENY (unless explicitly allowed)
+
+MEMORIZE THIS: "Deny, Allow, Boundary, SCP, or Deny"
+```
+
+---
+
+### **VISUAL DECISION TREE**
+
+```
+                        REQUEST MADE
+                             |
+                             ▼
+                  ┌──────────────────────┐
+                  │ Explicit DENY in any │
+                  │ policy?              │
+                  └──────────┬───────────┘
+                             │
+                   ┌─────────┴─────────┐
+                   │ YES               │ NO
+                   ▼                   ▼
+              ┌─────────┐      ┌──────────────────┐
+              │ DENIED  │      │ Explicit ALLOW   │
+              │    ❌   │      │ in any policy?   │
+              └─────────┘      └────────┬─────────┘
+                                        │
+                              ┌─────────┴─────────┐
+                              │ YES               │ NO
+                              ▼                   ▼
+                     ┌─────────────────┐     ┌─────────┐
+                     │ Permissions     │     │ DENIED  │
+                     │ boundary set?   │     │    ❌   │
+                     └────────┬────────┘     └─────────┘
+                              │
+                    ┌─────────┴─────────┐
+                    │ YES               │ NO
+                    ▼                   ▼
+           ┌─────────────────┐   ┌──────────────┐
+           │ Boundary allows?│   │ In AWS Org?  │
+           └────────┬────────┘   └──────┬───────┘
+                    │                   │
+          ┌─────────┴──────┐   ┌────────┴────────┐
+          │ YES            │ NO│ YES             │ NO
+          ▼                ▼   ▼                 ▼
+    ┌──────────┐    ┌─────────┐  ┌─────────┐  ┌─────────┐
+    │In AWS Org│    │ DENIED  │  │SCP allow│  │ ALLOWED │
+    └────┬─────┘    │    ❌   │  └────┬────┘  │    ✅   │
+         │          └─────────┘       │       └─────────┘
+    ┌────┴────┐                  ┌────┴────┐
+    │SCP allow│                  │   YES   │ NO
+    └────┬────┘                  ▼         ▼
+         │                  ┌─────────┐ ┌─────────┐
+    ┌────┴────┐             │ ALLOWED │ │ DENIED  │
+    │   YES   │ NO          │    ✅   │ │    ❌   │
+    ▼         ▼             └─────────┘ └─────────┘
+┌─────────┐ ┌─────────┐
+│ ALLOWED │ │ DENIED  │
+│    ✅   │ │    ❌   │
+└─────────┘ └─────────┘
+```
+
+---
+
+## **PART 3: POLICY STRUCTURE (20 MIN)**
+
+### **Anatomy of an IAM Policy**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                      IAM POLICY JSON STRUCTURE                            ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+{
+  "Version": "2012-10-17",                    ← Policy language version
+  "Statement": [                              ← Array of statements
+    {
+      "Sid": "Allo	wS3ReadAccess",            ← Statement ID (optional)
+      "Effect": "Allow",                      ← Allow or Deny
+      "Principal": {                          ← Who (resource-based only!)
+        "AWS": "arn:aws:iam::123456789012:user/Alice"
+      },
+      "Action": [                             ← What actions
+        "s3:GetObject",
+        "s3:GetObjectVersion"
+      ],
+      "Resource": [                           ← Which resources
+        "arn:aws:s3:::my-bucket/*"
+      ],
+      "Condition": {                          ← When/under what conditions
+        "StringEquals": {
+          "s3:x-amz-server-side-encryption": "AES256"
+        }
+      }
+    }
+  ]
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ELEMENT DETAILS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Version (Required)
+   Always: "2012-10-17" (latest policy language version)
+
+2. Statement (Required)
+   Array of permission statements
+   Each statement = one permission rule
+
+3. Sid (Optional)
+   Statement ID - human-readable identifier
+   Example: "AllowEC2ReadOnly"
+
+4. Effect (Required)
+   - "Allow": Grants permission
+   - "Deny": Explicitly denies permission
+
+5. Principal (Resource-based policies only!)
+   Who this policy applies to:
+   - AWS account: "AWS": "123456789012"
+   - IAM user: "AWS": "arn:aws:iam::123456789012:user/Alice"
+   - IAM role: "AWS": "arn:aws:iam::123456789012:role/MyRole"
+   - Federated user: "Federated": "arn:aws:iam::123456789012:saml-provider/MyProvider"
+   - Service: "Service": "ec2.amazonaws.com"
+   - Everyone: "*" (public access)
+
+6. Action (Required)
+   What API actions are allowed/denied:
+   - Specific: "s3:GetObject"
+   - Wildcard: "s3:Get*" or "s3:*" or "*"
+   - Multiple: ["s3:GetObject", "s3:PutObject"]
+
+7. Resource (Required)
+   Which AWS resources:
+   - Specific: "arn:aws:s3:::my-bucket/file.txt"
+   - Wildcard: "arn:aws:s3:::my-bucket/*"
+   - All: "*"
+   - Multiple: ["arn:aws:s3:::bucket1/*", "arn:aws:s3:::bucket2/*"]
+
+8. Condition (Optional)
+   When the policy applies (conditional logic)
+   See next section for details!
+```
+
+---
+
+### **Common Actions Wildcards**
+
+```
+ACTION PATTERNS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Read-only:
+"s3:Get*", "s3:List*"
+→ All Get and List operations
+
+Write:
+"s3:Put*", "s3:Delete*"
+→ All Put and Delete operations
+
+Full access to service:
+"s3:*"
+→ All S3 actions
+
+Full access to everything:
+"*"
+→ All actions on all services (dangerous!)
+
+Specific actions:
+["s3:GetObject", "s3:GetObjectVersion", "s3:ListBucket"]
+→ Only these specific actions
+
+Best practice:
+✅ Use specific actions when possible
+❌ Avoid "*" unless absolutely necessary
+```
+
+---
+
+### **Resource ARN Patterns**
+
+```
+ARN FORMAT:
+arn:partition:service:region:account-id:resource-type/resource-id
+
+EXAMPLES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+S3 bucket:
+"arn:aws:s3:::my-bucket"
+
+S3 objects in bucket:
+"arn:aws:s3:::my-bucket/*"
+
+Specific S3 object:
+"arn:aws:s3:::my-bucket/folder/file.txt"
+
+EC2 instance:
+"arn:aws:ec2:us-east-1:123456789012:instance/i-1234567890abcdef"
+
+All EC2 instances in account:
+"arn:aws:ec2:*:123456789012:instance/*"
+
+IAM user:
+"arn:aws:iam::123456789012:user/Alice"
+
+All resources:
+"*"
+
+WILDCARDS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Any region:
+"arn:aws:ec2:*:123456789012:instance/*"
+
+Any account:
+"arn:aws:s3:::*"
+
+Pattern matching:
+"arn:aws:s3:::project-*/logs/*"
+→ Matches: project-alpha/logs/file.txt, project-beta/logs/data.csv
+```
+
+---
+
+**Continue to Part 4: Conditions and Policy Simulator?** 
+
+This is getting long - should I continue or break here? 🎯
+
+
+
+
+# **PART 4: POLICY CONDITIONS (30 MIN)** 🔍
+
+---
+
+## **IAM Policy Conditions - Advanced Control**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    POLICY CONDITIONS DEEP DIVE                            ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Conditions add "IF/WHEN" logic to policies
+Format: "Condition": { "Operator": { "Key": "Value" } }
+
+CONDITION STRUCTURE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Condition": {
+    "StringEquals": {                    ← Operator
+      "aws:RequestedRegion": "us-east-1" ← Key: Value
+    }
+  }
+}
+
+Meaning: "Only if the requested region is us-east-1"
+```
+
+---
+
+### **Common Condition Operators**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                      CONDITION OPERATORS                                  ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+STRING OPERATORS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+StringEquals - Exact match (case-sensitive)
+Example:
+"Condition": {
+  "StringEquals": {
+    "s3:x-amz-server-side-encryption": "AES256"
+  }
+}
+→ Only if encryption is AES256
+
+StringNotEquals - Does not match
+"StringNotEquals": {
+  "aws:username": "root"
+}
+→ Everyone except root
+
+StringLike - Pattern matching with wildcards (* and ?)
+"StringLike": {
+  "s3:prefix": "home/${aws:username}/*"
+}
+→ Matches paths like home/alice/*, home/bob/*
+
+StringNotLike - Does not match pattern
+"StringNotLike": {
+  "aws:userid": "AIDAI*"
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NUMERIC OPERATORS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NumericEquals - Equal to
+"NumericEquals": {
+  "s3:max-keys": "10"
+}
+
+NumericLessThan - Less than
+"NumericLessThan": {
+  "s3:max-keys": "100"
+}
+
+NumericLessThanEquals - Less than or equal
+NumericGreaterThan - Greater than
+NumericGreaterThanEquals - Greater than or equal
+NumericNotEquals - Not equal
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DATE/TIME OPERATORS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DateEquals - Specific date
+"DateEquals": {
+  "aws:CurrentTime": "2026-12-31T23:59:59Z"
+}
+
+DateNotEquals
+DateLessThan - Before this date
+"DateLessThan": {
+  "aws:CurrentTime": "2027-01-01T00:00:00Z"
+}
+→ Only before January 1, 2027
+
+DateLessThanEquals
+DateGreaterThan - After this date
+DateGreaterThanEquals
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BOOLEAN OPERATORS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Bool - True or False
+"Bool": {
+  "aws:SecureTransport": "true"
+}
+→ Only if using HTTPS (SSL/TLS)
+
+"Bool": {
+  "aws:MultiFactorAuthPresent": "true"
+}
+→ Only if MFA was used
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IP ADDRESS OPERATORS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IpAddress - IP is in range
+"IpAddress": {
+  "aws:SourceIp": ["192.0.2.0/24", "203.0.113.0/24"]
+}
+→ Only from these IP ranges
+
+NotIpAddress - IP is NOT in range
+"NotIpAddress": {
+  "aws:SourceIp": "203.0.113.0/24"
+}
+→ Block this IP range
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ARN OPERATORS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ArnEquals - ARN matches exactly
+ArnNotEquals
+ArnLike - ARN matches pattern
+"ArnLike": {
+  "aws:SourceArn": "arn:aws:s3:::my-bucket/*"
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NULL CHECK:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Null - Check if key exists
+"Null": {
+  "aws:TokenIssueTime": "false"
+}
+→ Only if token issue time is present (using temporary credentials)
+
+"Null": {
+  "s3:x-amz-server-side-encryption": "true"
+}
+→ Only if encryption header is NOT present
+```
+
+---
+
+### **Common Condition Keys**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     COMMON CONDITION KEYS                                 ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+GLOBAL CONDITION KEYS (work with all services):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+aws:CurrentTime
+→ Date/time of request
+→ Example: "2026-03-22T14:30:00Z"
+
+aws:SourceIp
+→ IP address of requester
+→ Example: "203.0.113.50"
+
+aws:SourceVpc
+→ VPC ID where request originated
+→ Example: "vpc-12345678"
+
+aws:SourceVpce
+→ VPC Endpoint ID
+→ Example: "vpce-1a2b3c4d"
+
+aws:RequestedRegion
+→ AWS region requested
+→ Example: "us-east-1"
+
+aws:SecureTransport
+→ Whether request used HTTPS
+→ Example: "true" or "false"
+
+aws:MultiFactorAuthPresent
+→ Whether MFA was used
+→ Example: "true" or "false"
+
+aws:MultiFactorAuthAge
+→ How long ago MFA was validated (seconds)
+→ Example: "3600" (1 hour)
+
+aws:username
+→ IAM user name
+→ Example: "alice"
+
+aws:userid
+→ Unique ID of principal
+→ Example: "AIDAI1234567890EXAMPLE"
+
+aws:PrincipalOrgID
+→ AWS Organization ID of principal
+→ Example: "o-a1b2c3d4e5"
+
+aws:PrincipalTag/TagKey
+→ Tag attached to principal
+→ Example: aws:PrincipalTag/Department = "Engineering"
+
+aws:RequestTag/TagKey
+→ Tag in the request
+→ Example: aws:RequestTag/Environment = "Production"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+S3-SPECIFIC CONDITION KEYS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+s3:x-amz-server-side-encryption
+→ Encryption type requested
+→ Example: "AES256" or "aws:kms"
+
+s3:x-amz-server-side-encryption-aws-kms-key-id
+→ KMS key ID for encryption
+→ Example: "arn:aws:kms:us-east-1:123456789012:key/1234..."
+
+s3:x-amz-acl
+→ Canned ACL being set
+→ Example: "private", "public-read"
+
+s3:prefix
+→ Prefix for ListBucket operation
+→ Example: "home/alice/"
+
+s3:delimiter
+→ Delimiter character
+→ Example: "/"
+
+s3:max-keys
+→ Maximum keys to return
+→ Example: "1000"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EC2-SPECIFIC CONDITION KEYS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ec2:InstanceType
+→ Instance type being launched
+→ Example: "t2.micro"
+
+ec2:Region
+→ Region where instance is launched
+→ Example: "us-east-1"
+
+ec2:ResourceTag/TagKey
+→ Tag on EC2 resource
+→ Example: ec2:ResourceTag/Environment = "Production"
+
+ec2:Vpc
+→ VPC where instance is launched
+→ Example: "vpc-12345678"
+```
+
+---
+
+### **Real-World Condition Examples**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                   PRACTICAL CONDITION EXAMPLES                            ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+EXAMPLE 1: Require MFA for Sensitive Operations
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Deny",
+    "Action": [
+      "ec2:TerminateInstances",
+      "rds:DeleteDBInstance",
+      "s3:DeleteBucket"
+    ],
+    "Resource": "*",
+    "Condition": {
+      "BoolIfExists": {
+        "aws:MultiFactorAuthPresent": "false"
+      }
+    }
+  }]
+}
+
+Meaning: DENY destructive operations unless MFA is present
+Result: Users must use MFA to terminate instances/delete databases
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE 2: Require HTTPS for S3
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Deny",
+    "Principal": "*",
+    "Action": "s3:*",
+    "Resource": [
+      "arn:aws:s3:::my-bucket",
+      "arn:aws:s3:::my-bucket/*"
+    ],
+    "Condition": {
+      "Bool": {
+        "aws:SecureTransport": "false"
+      }
+    }
+  }]
+}
+
+Meaning: DENY all S3 operations if NOT using HTTPS
+Result: Forces all access to use SSL/TLS encryption in transit
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE 3: Restrict to Specific IP Range (VPN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Deny",
+    "Action": "*",
+    "Resource": "*",
+    "Condition": {
+      "NotIpAddress": {
+        "aws:SourceIp": [
+          "203.0.113.0/24",
+          "198.51.100.0/24"
+        ]
+      }
+    }
+  }]
+}
+
+Meaning: DENY everything unless from corporate IP ranges
+Result: Users must be on VPN to access AWS
+Exception: VPC endpoints bypass this (aws:SourceVpc condition)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE 4: Require Encryption for S3 Uploads
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Deny",
+    "Principal": "*",
+    "Action": "s3:PutObject",
+    "Resource": "arn:aws:s3:::my-bucket/*",
+    "Condition": {
+      "StringNotEquals": {
+        "s3:x-amz-server-side-encryption": "AES256"
+      }
+    }
+  }]
+}
+
+Meaning: DENY PutObject unless encryption header = AES256
+Result: All uploads must be encrypted with AES256
+
+Alternative for KMS:
+"
+": {
+  "s3:x-amz-server-side-encryption": "aws:kms"
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE 5: Prevent Public S3 Buckets
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Deny",
+    "Action": [
+      "s3:PutBucketAcl",
+      "s3:PutObjectAcl"
+    ],
+    "Resource": "*",
+    "Condition": {
+      "StringEquals": {
+        "s3:x-amz-acl": [
+          "public-read",
+          "public-read-write",
+          "authenticated-read"
+        ]
+      }
+    }
+  }]
+}
+
+Meaning: DENY setting public ACLs on buckets/objects
+Result: Prevents accidental public exposure of data
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE 6: Region Restriction
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Deny",
+    "Action": "*",
+    "Resource": "*",
+    "Condition": {
+      "StringNotEquals": {
+        "aws:RequestedRegion": [
+          "us-east-1",
+          "us-west-2"
+        ]
+      }
+    }
+  }]
+}
+
+Meaning: DENY all actions except in us-east-1 and us-west-2
+Result: Data residency compliance (e.g., keep data in US)
+
+Exception: Global services (IAM, CloudFront, Route 53) still work
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE 7: Time-Based Access
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "ec2:*",
+    "Resource": "*",
+    "Condition": {
+      "DateGreaterThan": {
+        "aws:CurrentTime": "2026-01-01T00:00:00Z"
+      },
+      "DateLessThan": {
+        "aws:CurrentTime": "2026-12-31T23:59:59Z"
+      }
+    }
+  }]
+}
+
+Meaning: Allow EC2 access only during year 2026
+Result: Temporary access for contractors/interns
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE 8: Tag-Based Access Control (ABAC)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "ec2:*",
+    "Resource": "*",
+    "Condition": {
+      "StringEquals": {
+        "ec2:ResourceTag/Owner": "${aws:username}"
+      }
+    }
+  }]
+}
+
+Meaning: Users can only manage EC2 instances tagged with Owner = their username
+Result: Self-service, users can't affect each other's resources
+
+Example:
+- User "alice" can manage instances tagged Owner=alice
+- User "alice" CANNOT manage instances tagged Owner=bob
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE 9: Organization-Based Access
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": "*",
+    "Action": "s3:*",
+    "Resource": [
+      "arn:aws:s3:::my-bucket",
+      "arn:aws:s3:::my-bucket/*"
+    ],
+    "Condition": {
+      "StringEquals": {
+        "aws:PrincipalOrgID": "o-a1b2c3d4e5"
+      }
+    }
+  }]
+}
+
+Meaning: Allow S3 access only from principals in my AWS Organization
+Result: Share bucket with all accounts in org (without listing each account)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE 10: VPC Endpoint Access Only
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Deny",
+    "Principal": "*",
+    "Action": "s3:*",
+    "Resource": [
+      "arn:aws:s3:::my-bucket",
+      "arn:aws:s3:::my-bucket/*"
+    ],
+    "Condition": {
+      "StringNotEquals": {
+        "aws:SourceVpce": "vpce-1a2b3c4d"
+      }
+    }
+  }]
+}
+
+Meaning: DENY S3 access unless from specific VPC endpoint
+Result: Bucket only accessible from VPC (not internet)
+```
+
+---
+
+## **PART 5: IAM POLICY SIMULATOR (15 MIN)**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     IAM POLICY SIMULATOR                                  ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+WHAT IS IT?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IAM Policy Simulator = Tool to test IAM policies before applying them
+
+Purpose:
+✅ Test if a user/role can perform an action
+✅ Understand why access was denied
+✅ Validate policies before deployment
+✅ Troubleshoot permission issues
+
+URL: https://policysim.aws.amazon.com/
+
+HOW IT WORKS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Select User/Role/Group
+2. Select Service (e.g., S3)
+3. Select Actions (e.g., GetObject, PutObject)
+4. (Optional) Specify resource ARN
+5. (Optional) Add condition context (IP, MFA, etc.)
+6. Run Simulation
+7. See results: Allowed or Denied (with explanation!)
+
+SIMULATION RESULTS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Allowed
+   "The action is allowed by the evaluated policies"
+   Shows which policy allowed it
+
+❌ Denied
+   "The action is denied by the evaluated policies"
+   Shows which policy denied it OR "implicit deny" if no allow
+
+Example output:
+Action: s3:GetObject
+Resource: arn:aws:s3:::my-bucket/file.txt
+Result: ❌ Denied
+
+Reason: "Explicitly denied by SCP 'PreventProductionDataAccess'"
+
+Matched Statements:
+- SCP: Deny s3:* on arn:aws:s3:::my-bucket/*
+
+CLI VERSION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::123456789012:user/Alice \
+  --action-names s3:GetObject \
+  --resource-arns arn:aws:s3:::my-bucket/file.txt
+
+Output:
+{
+  "EvaluationResults": [{
+    "EvalActionName": "s3:GetObject",
+    "EvalResourceName": "arn:aws:s3:::my-bucket/file.txt",
+    "EvalDecision": "allowed",
+    "MatchedStatements": [...]
+  }]
+}
+
+EXAM TIP:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question: "A user reports they can't access S3. How do you troubleshoot?"
+
+Answer: "Use IAM Policy Simulator to test the user's permissions"
+✅ Shows understanding of AWS troubleshooting tools
+✅ Demonstrates methodical approach
+✅ Better than guessing!
+```
+
+---
+
+## **PART 6: IAM ACCESS ANALYZER (15 MIN)**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                      IAM ACCESS ANALYZER                                  ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+WHAT IS IT?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IAM Access Analyzer = Identifies resources shared with external entities
+
+Uses: Automated reasoning (formal logic analysis)
+
+Finds:
+✅ S3 buckets accessible from other accounts
+✅ IAM roles assumable by external accounts
+✅ KMS keys usable by external accounts
+✅ Lambda functions invokable externally
+✅ SQS queues, SNS topics, Secrets with external access
+
+KEY FEATURES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. EXTERNAL ACCESS FINDINGS
+   Detects resources shared outside your "zone of trust"
+   
+   Zone of trust:
+   - Your AWS account
+   - Your AWS Organization (if configured)
+   
+   Example finding:
+   "S3 bucket 'my-data' allows access from account 111111111111"
+
+2. UNUSED ACCESS FINDINGS
+   Identifies unused permissions
+   
+   Example:
+   "Role 'DataScientist' has s3:DeleteBucket but never used it"
+   
+   Recommendation: Remove unused permissions (least privilege!)
+
+3. POLICY VALIDATION
+   Checks policies for errors and security best practices
+   
+   Finds:
+   - Syntax errors
+   - Security warnings (e.g., wildcards in Principal)
+   - Suggestions for improvement
+
+4. POLICY GENERATION
+   Generates least-privilege policies based on CloudTrail logs
+   
+   Process:
+   1. Analyze CloudTrail (what actions were actually used)
+   2. Generate policy with ONLY those actions
+   3. Review and apply
+   
+   Result: Least privilege automatically! ✅
+
+HOW TO USE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Console: IAM → Access Analyzer → Create analyzer
+
+Analyzer types:
+1. Account analyzer (single account)
+2. Organization analyzer (entire AWS Organization)
+
+Findings:
+- Active: External access detected
+- Archived: You've reviewed and accepted
+- Resolved: Access removed or changed
+
+Example workflow:
+1. Access Analyzer finds: "S3 bucket shared with account 222222222222"
+2. You investigate: "This is intentional, we share data with partner"
+3. You archive the finding: "Accepted - business requirement"
+4. Or you fix: Remove the bucket policy allowing external access
+
+CLI:
+aws accessanalyzer list-findings \
+  --analyzer-arn arn:aws:access-analyzer:us-east-1:123456789012:analyzer/MyAnalyzer
+
+EXAM SCENARIOS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: "How do you identify S3 buckets shared with external accounts?"
+A: "Use IAM Access Analyzer" ✅
+
+Q: "How do you implement least privilege?"
+A: "Use IAM Access Analyzer to identify unused permissions, 
+    then generate policy based on actual usage from CloudTrail" ✅
+
+Q: "A security audit requires finding all externally accessible resources"
+A: "Enable IAM Access Analyzer and review findings" ✅
+```
+
+---
+
+**Taking a breath here!** 
+
+We've covered:
+✅ Policy types
+✅ Policy evaluation logic (CRITICAL!)
+✅ Policy structure & conditions
+✅ Policy Simulator
+✅ Access Analyzer
+
+**Next up: LAB 94 (Hands-on Policy Practice)**
+
+**Should I continue with the lab, or do you want to take a break?** 🎯
+
+This has been intense content - it's okay to pause and digest! Let me know what you prefer.
+
+
+

@@ -49,7 +49,7 @@ NFW_VPC=$(aws ec2 create-vpc \
   --output text)
 
 echo "     ✅ VPC created: $NFW_VPC"
-
+	
 # Enable DNS
 aws ec2 modify-vpc-attribute --vpc-id $NFW_VPC --enable-dns-hostnames
 aws ec2 modify-vpc-attribute --vpc-id $NFW_VPC --enable-dns-support
@@ -512,6 +512,33 @@ NFW_SURICATA_RG=$(aws network-firewall create-rule-group \
   --description "IDS/IPS rules for web application attacks - SQL injection, XSS, etc" \
   --query 'RuleGroupResponse.RuleGroupArn' \
   --output text)
+  
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+ABOVE SURICATA SYNTAX GAVE ME ERROR. FOLLOWING IS NEW MINIMLAISTIC APPROACH - 
+
+#!/bin/bash
+# Just 3 rules - easiest to create
+
+echo "Creating minimal Suricata rule group (3 rules)..."
+
+SURICATA_RULE_GROUP=$(aws network-firewall create-rule-group \
+  --rule-group-name WebApplicationAttackDetection \
+  --type STATEFUL \
+  --rule-group '{
+    "RulesSource": {
+      "RulesString": "alert http any any -> any any (msg:\"SQL Injection Detected\"; content:\"UNION SELECT\"; nocase; sid:1000010; rev:1;)\nalert http any any -> any any (msg:\"XSS Attack Detected\"; content:\"<script>\"; nocase; sid:1000012; rev:1;)\nalert http any any -> any any (msg:\"Path Traversal Detected\"; content:\"../\"; nocase; sid:1000014; rev:1;)"
+    }
+  }' \
+  --capacity 100 \
+  --description "Basic web attack detection" \
+  --query 'RuleGroupResponse.RuleGroupArn' \
+  --output text)
+
+echo "✅ Rule group created: $SURICATA_RULE_GROUP"
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+
 
 echo "     ✅ Suricata IDS/IPS rule group created!"
 echo "     ARN: $NFW_SURICATA_RG"

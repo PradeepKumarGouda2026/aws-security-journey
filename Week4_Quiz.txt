@@ -1,0 +1,1357 @@
+# **PART 4: WEEK 4 PRACTICE QUESTIONS (30 QUESTIONS)** 📝
+
+---
+
+## **INSTRUCTIONS:**
+
+```
+Time: 45 minutes (90 seconds per question)
+Passing: 70% (21/30 correct)
+Format: Multiple choice (choose ONE best answer)
+
+Read each question carefully!
+Some have multiple correct answers, but choose the BEST one.
+```
+
+---
+
+## **PRACTICE QUESTIONS**
+
+### **QUESTIONS 1-10: VPC SECURITY FUNDAMENTALS**
+
+**Question 1:**
+A company is designing a 3-tier web application in AWS. The web tier must be publicly accessible, the application tier should only accept traffic from the web tier, and the database tier should only accept traffic from the application tier. Which combination of AWS services best implements this architecture?
+
+A) Use a single Security Group with different rules for each tier  
+B) Place each tier in a separate subnet with NACLs controlling traffic between them  
+C) Place each tier in a separate subnet with Security Groups referencing each other  
+D) Use AWS WAF to control traffic between tiers  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+- Each tier in separate subnet = network isolation
+- Security Groups can reference other Security Groups
+- Example:
+  - Web SG: Allow 80/443 from 0.0.0.0/0
+  - App SG: Allow 8080 from Web SG (reference sg-xxx)
+  - DB SG: Allow 3306 from App SG (reference sg-yyy)
+- Stateful = return traffic automatic
+- Most secure and manageable approach
+
+Why others are wrong:
+- A: Single SG doesn't provide separation
+- B: NACLs are stateless (more complex)
+- D: WAF only works for HTTP/HTTPS, not between tiers
+
+**Key Concept:** Security Group references for tier isolation!
+</details>
+
+---
+
+**Question 2:**
+An application running on EC2 needs to access S3 buckets without traversing the internet. The solution must not require an internet gateway or NAT gateway. What should be implemented?
+
+A) VPC Peering to S3  
+B) AWS PrivateLink for S3  
+C) VPC Gateway Endpoint for S3  
+D) VPC Interface Endpoint for S3  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+- S3 supports Gateway Endpoints (FREE!)
+- Gateway endpoint routes traffic to S3 via route table
+- Traffic stays on AWS network
+- No internet gateway or NAT needed
+- No additional cost
+
+Configuration:
+1. Create Gateway Endpoint for S3
+2. Associate with VPC
+3. Select route tables
+4. Route table automatically gets: pl-xxx (S3 prefix list) → vpce-xxx
+
+Why others are wrong:
+- A: Can't peer with S3 (not a VPC)
+- B: S3 uses Gateway endpoint, not PrivateLink
+- D: Interface endpoints exist for S3, but Gateway is FREE and preferred
+
+**Key Concept:** Gateway Endpoints for S3 and DynamoDB (FREE)!
+</details>
+
+---
+
+**Question 3:**
+A Security Group has the following inbound rules:
+- Allow TCP 443 from 0.0.0.0/0
+- Allow TCP 80 from 10.0.0.0/16
+
+An EC2 instance with this Security Group receives an HTTPS request from 203.0.113.50. What outbound rule is required to allow the response?
+
+A) Allow TCP 443 to 203.0.113.50  
+B) Allow TCP 1024-65535 to 203.0.113.50  
+C) Allow all traffic to 0.0.0.0/0  
+D) No outbound rule needed  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: D ✅**
+
+**Explanation:**
+- Security Groups are STATEFUL
+- Inbound rule: TCP 443 from anywhere
+- Return traffic automatically allowed
+- No outbound configuration needed
+- This is the key benefit of Security Groups!
+
+Flow:
+1. Client (203.0.113.50) → Instance: TCP 443 (allowed by inbound rule)
+2. Instance → Client: Response (automatically allowed, stateful)
+
+If this were a NACL (stateless):
+- Would need: Outbound TCP 1024-65535 to 0.0.0.0/0
+- Because NACLs don't track connections
+
+**Key Concept:** Security Groups = stateful, return traffic automatic!
+</details>
+
+---
+
+**Question 4:**
+Which statement about NACLs is TRUE?
+
+A) NACLs are stateful and automatically allow return traffic  
+B) NACLs are evaluated after Security Groups  
+C) NACL rules are evaluated in order starting with the lowest numbered rule  
+D) NACLs can reference other NACLs for traffic control  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+- NACL rules have numbers (1-32766)
+- Evaluated in order: lowest to highest
+- First match wins
+- Remaining rules not evaluated
+
+Example:
+- Rule 100: ALLOW 0.0.0.0/0
+- Rule 200: DENY 192.0.2.0/24
+- Result: 192.0.2.0/24 is ALLOWED (Rule 100 matches first)
+
+Correct order:
+- Rule 100: DENY 192.0.2.0/24
+- Rule 200: ALLOW 0.0.0.0/0
+- Result: 192.0.2.0/24 is DENIED ✅
+
+Why others are wrong:
+- A: NACLs are STATELESS (not stateful)
+- B: NACLs evaluated BEFORE Security Groups
+- D: NACLs can't reference each other (IP/CIDR only)
+
+**Key Concept:** NACL rule order matters, lowest first!
+</details>
+
+---
+
+**Question 5:**
+A company wants to monitor all accepted and rejected network connections to their EC2 instances for security analysis. The solution should capture source/destination IPs, ports, and protocols. Which AWS service provides this?
+
+A) CloudTrail  
+B) VPC Flow Logs  
+C) AWS Config  
+D) GuardDuty  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+- VPC Flow Logs capture network traffic metadata
+- Records: Source IP, Dest IP, Source Port, Dest Port, Protocol, Action (ACCEPT/REJECT)
+- Can be enabled on: VPC, Subnet, or ENI
+- Sent to: CloudWatch Logs or S3
+
+Flow Log record example:
+```
+2 123456789012 eni-abc123 203.0.113.50 10.0.1.5 443 49152 6 10 5000 1620000000 1620000060 ACCEPT OK
+```
+
+Use cases:
+- Troubleshoot connectivity
+- Monitor traffic patterns
+- Detect anomalies
+- Security analysis
+- Compliance logging
+
+Why others are wrong:
+- A: CloudTrail logs API calls (not network traffic)
+- C: AWS Config tracks resource configuration changes
+- D: GuardDuty detects threats, doesn't provide raw flow logs
+
+**Key Concept:** VPC Flow Logs for network traffic monitoring!
+</details>
+
+---
+
+**Question 6:**
+An application must block all traffic from a specific country for compliance reasons. The application uses CloudFront and ALB. What is the MOST cost-effective solution?
+
+A) Use NACL rules to block IP ranges from that country  
+B) Deploy AWS WAF with geo-blocking rule on CloudFront  
+C) Use Security Groups to deny traffic from country IP ranges  
+D) Deploy Network Firewall with country-based rules  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+- WAF supports geo-blocking (country-level)
+- Uses ISO 3166-1 alpha-2 country codes (US, CN, RU, etc.)
+- Blocks at edge (CloudFront) before reaching origin
+- Cost: ~$15/month (WAF + rules + requests)
+- 95-99% accuracy
+
+Configuration:
+```
+WAF Rule: Geo match
+Country: CN (China)
+Action: BLOCK
+```
+
+Why others are wrong:
+- A: NACLs can't determine country (IP ranges change constantly)
+- C: Security Groups can't DENY (only ALLOW)
+- D: Network Firewall works but costs $600/month (overkill)
+
+Limitations:
+- VPNs can bypass geo-blocking
+- Accuracy not 100%
+- Should combine with other controls for high security
+
+**Key Concept:** WAF geo-blocking for country restrictions!
+</details>
+
+---
+
+**Question 7:**
+A company needs to allow SSH access (port 22) to EC2 instances ONLY from their corporate IP address (203.0.113.0/24). All other SSH attempts should be denied. Which is the MOST secure approach?
+
+A) Security Group: Allow TCP 22 from 203.0.113.0/24  
+B) NACL: Allow TCP 22 from 203.0.113.0/24, Deny all others  
+C) Security Group: Deny TCP 22 from 0.0.0.0/0 except 203.0.113.0/24  
+D) AWS WAF: Block SSH connections from non-corporate IPs  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: A ✅**
+
+**Explanation:**
+- Security Groups use implicit DENY
+- Only specify what to ALLOW
+- Everything else automatically denied
+- Simple, secure, manageable
+
+Security Group configuration:
+```
+Inbound Rules:
+Type: SSH
+Protocol: TCP
+Port: 22
+Source: 203.0.113.0/24
+Action: ALLOW (implicit)
+
+All other traffic: DENIED (implicit)
+```
+
+Why others are wrong:
+- B: NACL works but is stateless (need outbound rule too)
+- C: Security Groups don't support explicit DENY
+- D: WAF doesn't inspect SSH (Layer 7 only, SSH is Layer 4)
+
+Best practice:
+- Use Security Group for instance-level control
+- Add NACL for subnet-level defense in depth
+
+**Key Concept:** Security Groups = implicit deny, specify only allows!
+</details>
+
+---
+
+**Question 8:**
+An organization has 10 VPCs that need to communicate with each other. All VPCs also need to access a shared Active Directory in a central VPC. What is the MOST scalable solution?
+
+A) Create VPC Peering connections between all VPCs (45 connections)  
+B) Deploy Transit Gateway with all VPCs attached  
+C) Use VPN connections between all VPCs  
+D) Deploy PrivateLink endpoints in each VPC  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+VPC Peering (Option A):
+- 10 VPCs = 10 × 9 / 2 = 45 peering connections
+- Complex to manage
+- No transitive routing
+- Doesn't scale
+
+Transit Gateway (Option B):
+- Hub-and-spoke architecture
+- 10 VPC attachments (not 45 connections!)
+- Transitive routing (any-to-any)
+- Easy to add more VPCs
+- Cost: 10 × $36/month = $360/month
+
+Architecture:
+```
+VPC 1 ──┐
+VPC 2 ──┤
+VPC 3 ──┼─→ Transit Gateway ←─ Shared Services VPC (AD)
+...     │
+VPC 10 ─┘
+```
+
+Why others are wrong:
+- A: Doesn't scale, too complex
+- C: VPN is for on-premises, not VPC-to-VPC
+- D: PrivateLink for specific services, not full connectivity
+
+**Key Concept:** Transit Gateway for many VPCs (10+)!
+</details>
+
+---
+
+**Question 9:**
+A VPC Flow Log record shows: `REJECT` action for traffic from 203.0.113.50 to an EC2 instance on port 3306. The Security Group allows port 3306 from 0.0.0.0/0. What is the MOST likely cause?
+
+A) The NACL is blocking the traffic  
+B) The Security Group has an explicit deny rule  
+C) The instance firewall (OS-level) is blocking  
+D) AWS Shield is blocking suspicious traffic  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: A ✅**
+
+**Explanation:**
+Order of evaluation:
+1. NACL (subnet level) ← Traffic blocked here
+2. Security Group (instance level)
+3. Instance OS firewall
+
+Since Security Group allows the traffic, but Flow Logs show REJECT:
+- Must be blocked BEFORE reaching Security Group
+- NACL is evaluated first
+- NACLs can have explicit DENY rules
+
+Troubleshooting steps:
+1. Check NACL rules for the subnet
+2. Look for DENY rule matching:
+   - Source: 203.0.113.50 or 203.0.113.0/24
+   - Port: 3306
+   - Protocol: TCP
+3. Check rule order (lowest numbered rule wins)
+
+Why others are wrong:
+- B: Security Groups can't have explicit DENY
+- C: OS firewall wouldn't show in VPC Flow Logs
+- D: Shield protects against DDoS, doesn't block individual connections
+
+**Key Concept:** NACL evaluated before Security Group!
+</details>
+
+---
+
+**Question 10:**
+A company wants to privately connect their VPC to AWS services (S3, DynamoDB, EC2 API) without internet gateway. Which combination is MOST cost-effective?
+
+A) Gateway Endpoints for all services  
+B) Interface Endpoints for all services  
+C) Gateway Endpoints for S3/DynamoDB, Interface Endpoints for others  
+D) AWS PrivateLink for all services  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+Gateway Endpoints (FREE):
+- S3 ✅
+- DynamoDB ✅
+- Routes via route table
+- No hourly charge
+
+Interface Endpoints ($0.01/hour = $7.20/month each):
+- EC2 API
+- Lambda
+- SQS, SNS
+- 100+ AWS services
+- Uses ENI with private IP
+
+Cost comparison for this scenario:
+Option A: Not possible (EC2 API doesn't support Gateway)
+Option B: 3 × $7.20/month = $21.60/month
+Option C: $0 (Gateway) + $7.20 (EC2 API) = $7.20/month ✅
+Option D: Same as Interface Endpoints = expensive
+
+Best practice:
+- Always use Gateway Endpoints when available (FREE!)
+- Use Interface Endpoints for services without Gateway option
+
+**Key Concept:** Gateway Endpoints FREE, Interface cost $7/month each!
+</details>
+
+---
+
+### **QUESTIONS 11-20: NETWORK FIREWALL & WAF**
+
+**Question 11:**
+A web application behind an ALB is experiencing SQL injection attacks. Which AWS service provides the MOST appropriate protection?
+
+A) AWS Shield Standard  
+B) AWS WAF with SQL injection rule set  
+C) AWS Network Firewall with Suricata rules  
+D) Security Groups with application-aware rules  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+- SQL injection = Layer 7 (application layer) attack
+- WAF specializes in web application attacks
+- AWS Managed Rules: SQL injection protection (FREE)
+- Attaches directly to ALB
+- Cost: ~$15/month
+
+Why others are wrong:
+- A: Shield protects against DDoS (Layer 3/4), not SQL injection
+- C: Network Firewall can detect but WAF is more appropriate/cheaper
+- D: Security Groups are Layer 4, can't inspect SQL in HTTP
+
+**Key Concept:** WAF for OWASP Top 10 attacks!
+</details>
+
+---
+
+**Question 12:**
+A company must block employee access to gambling websites at the network level for compliance. The solution should work for both HTTP and HTTPS traffic. What AWS service provides this capability?
+
+A) AWS WAF with URL filtering  
+B) Security Groups with domain-based rules  
+C) Route 53 Resolver DNS Firewall  
+D) AWS Network Firewall with domain filtering  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: D ✅**
+
+**Explanation:**
+For HTTPS domain blocking, you need:
+- HTTP: Inspect HTTP Host header
+- HTTPS: Inspect TLS SNI (Server Name Indication)
+
+Network Firewall domain filtering:
+- Inspects both HTTP Host and TLS SNI
+- Works without decrypting HTTPS
+- Supports wildcards: .gambling.com
+- Action: DENYLIST
+- Cost: $600/month
+
+Why others are wrong:
+- A: WAF can't do egress filtering (only ingress to protected resources)
+- B: Security Groups don't support domain names
+- C: DNS Firewall also works ($90/month) but question asks for "network level"
+
+Both C and D work! But D is more comprehensive:
+- DNS Firewall: Blocks at DNS resolution
+- Network Firewall: Blocks at network level (even if DNS bypassed)
+
+**Key Concept:** Network Firewall or DNS Firewall for domain blocking!
+</details>
+
+---
+
+**Question 13:**
+An application needs protection against DDoS attacks at both Layer 3/4 (SYN floods) and Layer 7 (HTTP floods). The solution should be cost-effective. What combination is BEST?
+
+A) Shield Advanced only  
+B) Shield Standard + WAF rate-based rules  
+C) Network Firewall with anti-DDoS rules  
+D) CloudFront with automatic DDoS protection  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+Layer 3/4 protection (SYN flood, UDP reflection):
+- Shield Standard (FREE, automatic)
+- Always enabled for CloudFront, Route 53, ALB
+- Absorbs most DDoS attacks
+
+Layer 7 protection (HTTP flood):
+- WAF rate-based rules
+- Example: Block IPs exceeding 2000 requests/5min
+- Cost: ~$15/month
+
+Total cost: $15/month ✅
+
+Why others are wrong:
+- A: Shield Advanced ($3,000/month) - only for critical apps
+- C: Network Firewall ($600/month) - can help but overkill
+- D: CloudFront has Shield Standard but no Layer 7 rate limiting without WAF
+
+When to use Shield Advanced:
+- Cost protection (AWS credits for DDoS-related scaling)
+- 24/7 DDoS Response Team (DRT)
+- Advanced metrics
+- Critical applications (>$3k/month value)
+
+**Key Concept:** Shield Standard (free) + WAF (cheap) = good protection!
+</details>
+
+---
+
+**Question 14:**
+A healthcare company requires intrusion detection AND prevention for HIPAA compliance. Which AWS service meets this requirement?
+
+A) GuardDuty with automated response  
+B) AWS WAF with managed rule groups  
+C) AWS Network Firewall with Suricata IPS mode  
+D) VPC Flow Logs with anomaly detection  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+IDS vs IPS:
+- IDS (Intrusion Detection): Alerts only
+- IPS (Intrusion Prevention): Blocks/Drops
+
+Network Firewall Suricata modes:
+- ALERT: IDS mode (log but allow)
+- DROP: IPS mode (block traffic)
+- REJECT: IPS mode (block + send reset)
+
+Example rule:
+```
+alert http any any -> any any (msg:"SQL Injection"; content:"UNION SELECT"; sid:1;)
+→ IDS mode
+
+drop http any any -> any any (msg:"SQL Injection"; content:"UNION SELECT"; sid:1;)
+→ IPS mode
+```
+
+Why others are wrong:
+- A: GuardDuty = detection only (not prevention)
+- B: WAF = prevention but only Layer 7
+- D: Flow Logs = logging only
+
+**Key Concept:** Network Firewall for IDS/IPS compliance!
+</details>
+
+---
+
+**Question 15:**
+A WAF is configured with the following rules (in order):
+1. Priority 1: Block IPs in IP Set "Malicious"
+2. Priority 2: Rate limit: 1000 req/5min
+3. Priority 3: Allow all
+
+An IP in the "Malicious" set sends 500 requests. What happens?
+
+A) Requests are allowed (rate limit not exceeded)  
+B) Requests are blocked by rule 1  
+C) Requests are rate limited by rule 2  
+D) Requests are counted but allowed by rule 3  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+WAF rule evaluation:
+- Rules evaluated in priority order
+- First match wins
+- Remaining rules not evaluated
+
+Flow:
+1. Check Priority 1 (Block Malicious IPs)
+   - IP is in Malicious set → BLOCK ✅
+   - Stop evaluation
+
+2. Priority 2 never reached
+3. Priority 3 never reached
+
+Even though:
+- Rate limit not exceeded (500 < 1000)
+- Rule 3 would allow
+- Rule 1 blocked first!
+
+Key: Order matters in WAF!
+
+**Key Concept:** WAF rules evaluated by priority, first match wins!
+</details>
+
+---
+
+**Question 16:**
+What is the maximum Web ACL Capacity Unit (WCU) limit for a single Web ACL?
+
+A) 500 WCU  
+B) 1000 WCU  
+C) 1500 WCU  
+D) 5000 WCU  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+WAF Capacity limits:
+- Web ACL: 1500 WCU maximum
+- Rule Group: 1500 WCU maximum
+
+WCU consumption examples:
+- IP set match: 1 WCU
+- String match: 10 WCU
+- Regex pattern: 25 WCU
+- AWS Managed Core Rule Set: 700 WCU
+- Rate-based rule: 2 WCU
+
+Example Web ACL:
+```
+Core Rule Set: 700 WCU
+SQL Injection: 200 WCU
+IP blocklist: 1 WCU
+Rate limiting: 2 WCU
+Custom rules: 100 WCU
+─────────────────────
+Total: 1003 WCU ✅ (under 1500 limit)
+```
+
+If you exceed 1500 WCU:
+- Create multiple Web ACLs
+- Or use fewer/simpler rules
+
+**Key Concept:** Web ACL limit = 1500 WCU!
+</details>
+
+---
+
+**Question 17:**
+A Network Firewall has stateless and stateful rule groups. In what order are they evaluated?
+
+A) Stateful first, then stateless  
+B) Stateless first, then stateful  
+C) Based on priority numbers  
+D) Evaluated simultaneously  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+Network Firewall packet flow:
+```
+1. Stateless rules (fast, priority-based)
+   ↓
+   Actions: DROP, PASS, FORWARD to stateful
+   ↓
+2. Stateful rules (deep inspection)
+   ↓
+   Actions: PASS, DROP, REJECT, ALERT
+```
+
+Why this order:
+- Stateless is FAST (simple packet filtering)
+- Drop obviously bad traffic early
+- Forward complex decisions to stateful
+- Stateful is SLOWER (connection tracking, deep inspection)
+
+Example flow:
+```
+Packet arrives
+→ Stateless rule 1 (priority 1): DROP known bad IPs
+→ Stateless rule 10: FORWARD port 80/443 to stateful
+→ Stateful domain filter: Check if domain blocked
+→ Stateful Suricata: Deep packet inspection for attacks
+→ Decision: PASS or DROP
+```
+
+**Key Concept:** Stateless THEN stateful in Network Firewall!
+</details>
+
+---
+
+**Question 18:**
+Which statement about AWS Shield Standard is TRUE?
+
+A) Costs $3,000 per month  
+B) Requires manual activation  
+C) Only protects EC2 instances  
+D) Automatically protects CloudFront and Route 53  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: D ✅**
+
+**Explanation:**
+Shield Standard:
+- FREE ✅
+- Automatic (no activation needed) ✅
+- Always active
+- Protects: CloudFront, Route 53, ALB, Global Accelerator
+- Mitigates 99.99% of Layer 3/4 DDoS attacks
+
+Shield Advanced ($3,000/month):
+- Manual activation required
+- 24/7 DDoS Response Team (DRT)
+- Cost protection (AWS credits)
+- Advanced metrics
+- Protects EC2 Elastic IPs additionally
+
+Why others are wrong:
+- A: Shield Standard is FREE, Advanced costs $3k
+- B: Shield Standard is automatic (no activation)
+- C: Shield Standard protects edge services, not EC2 (need Advanced for EC2)
+
+**Key Concept:** Shield Standard = FREE + automatic!
+</details>
+
+---
+
+**Question 19:**
+A company wants to block access to their API from all countries except the United States and Canada. They use API Gateway with a custom domain. What is the MOST cost-effective solution?
+
+A) Create NACL rules blocking non-US/CA IP ranges  
+B) Use AWS WAF with geo-match rule (allow US/CA only)  
+C) Deploy Network Firewall with country-based filtering  
+D) Use Route 53 geo-routing policies  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+WAF geo-blocking for API Gateway:
+```
+WAF Rule:
+Type: Geo match
+Countries: US, CA
+Action: ALLOW
+
+Default action: BLOCK
+```
+
+Cost: ~$15/month (WAF + rules + API requests)
+
+Why this works:
+- API Gateway supports WAF ✅
+- Geo-match uses country codes (ISO 3166-1 alpha-2)
+- US = United States
+- CA = Canada
+- Blocks all others at edge
+
+Why others are wrong:
+- A: IP ranges change constantly, unmaintainable
+- C: Network Firewall costs $600/month (overkill)
+- D: Geo-routing is for DNS routing, not blocking
+
+Limitation:
+- VPNs can bypass (user in China using US VPN → allowed)
+- 95-99% accuracy
+
+**Key Concept:** WAF geo-match for API geo-restrictions!
+</details>
+
+---
+
+**Question 20:**
+Network Firewall domain filtering can inspect which of the following? (Choose the BEST answer)
+
+A) HTTP Host header only  
+B) TLS SNI only  
+C) Both HTTP Host header and TLS SNI  
+D) DNS queries  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+Network Firewall domain filtering inspects:
+
+HTTP (unencrypted):
+- HTTP Host header
+- Example: `Host: www.facebook.com`
+
+HTTPS (encrypted):
+- TLS SNI (Server Name Indication)
+- Sent during TLS handshake (before encryption)
+- Contains domain name
+- Example: SNI = `www.facebook.com`
+
+Domain list configuration:
+```
+Target Types: HTTP_HOST, TLS_SNI
+Targets: .facebook.com, .twitter.com
+Generated Rules Type: DENYLIST
+```
+
+Result:
+- Blocks facebook.com over HTTP (Host header)
+- Blocks facebook.com over HTTPS (TLS SNI)
+- Doesn't decrypt HTTPS traffic ✅
+
+Why D is wrong:
+- DNS Firewall inspects DNS queries
+- Network Firewall inspects network traffic (not DNS queries)
+
+**Key Concept:** Network Firewall sees HTTP Host + TLS SNI!
+</details>
+
+---
+
+### **QUESTIONS 21-30: ADVANCED NETWORKING**
+
+**Question 21:**
+A company has 50 VPCs and wants to provide centralized egress to the internet through a single NAT Gateway and Network Firewall for inspection. What architecture should they use?
+
+A) VPC Peering mesh with shared NAT VPC  
+B) Transit Gateway with inspection VPC  
+C) PrivateLink endpoints in each VPC  
+D) Direct Connect with centralized gateway  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+Architecture:
+```
+50 VPCs → Transit Gateway → Inspection VPC → Network Firewall → NAT → Internet
+```
+
+Inspection VPC contains:
+- Network Firewall (IDS/IPS, domain filtering)
+- NAT Gateway (single egress point)
+- All traffic inspected centrally
+
+Routing:
+- VPCs: 0.0.0.0/0 → Transit Gateway
+- TGW: 0.0.0.0/0 → Inspection VPC attachment
+- Inspection VPC: Traffic → Firewall → NAT → IGW
+
+Cost savings:
+Without TGW:
+- 50 NAT Gateways: 50 × $32 = $1,600/month
+- 50 Network Firewalls: 50 × $600 = $30,000/month
+
+With TGW:
+- Transit Gateway: 50 × $36 = $1,800/month
+- 1 NAT Gateway: $32/month
+- 1 Network Firewall: $600/month
+- Total: $2,432/month
+
+**Savings: $29,168/month!** 💰
+
+**Key Concept:** TGW + Inspection VPC = centralized security!
+</details>
+
+---
+
+**Question 22:**
+A SaaS provider needs to expose their analytics API to 200 customer VPCs without exposing their infrastructure. Customers must access via private connectivity. What is the MOST scalable solution?
+
+A) Create 200 VPC Peering connections  
+B) Use Transit Gateway with 200 attachments  
+C) Deploy AWS PrivateLink with VPC Endpoint Service  
+D) Provide public API with API key authentication  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+PrivateLink architecture:
+```
+Provider:
+API Service → NLB → VPC Endpoint Service
+
+200 Customers:
+VPC Endpoint → Private IP in their VPC → Calls API
+```
+
+Scalability:
+- Supports thousands of consumers
+- No VPC peering needed
+- No IP overlap issues
+- Provider approves each connection
+
+Cost:
+- Provider: $7/month (endpoint service)
+- Each customer: $7/month (endpoint)
+- Total: $7 + (200 × $7) = $1,407/month
+
+Why others won't work:
+- A: 200 peering connections (unmanageable!)
+- B: Transit Gateway exposes entire VPC (security risk)
+- D: Public API requires internet, not "private connectivity"
+
+**Key Concept:** PrivateLink for multi-tenant SaaS!
+</details>
+
+---
+
+**Question 23:**
+Two VPCs need to communicate: VPC A (10.0.0.0/16) and VPC B (10.0.0.0/16). Both use the same CIDR block. What solution allows communication?
+
+A) VPC Peering (with CIDR modification)  
+B) Transit Gateway (with NAT)  
+C) AWS PrivateLink  
+D) Cannot connect (overlapping CIDRs not supported)  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+Problem:
+- VPC Peering: Doesn't support overlapping CIDRs ❌
+- Transit Gateway: Doesn't support overlapping CIDRs ❌
+
+Solution: PrivateLink
+- Doesn't require routing between VPCs
+- Service exposed via endpoint (gets IP in consumer VPC)
+- Consumer sees endpoint IP (in their own CIDR)
+- No IP conflict!
+
+Example:
+VPC A (10.0.0.0/16):
+- Runs service
+- NLB: 10.0.1.5
+- VPC Endpoint Service
+
+VPC B (10.0.0.0/16):
+- Creates VPC Endpoint
+- Gets endpoint IP: 10.0.2.50 (in VPC B's CIDR!)
+- App calls 10.0.2.50 → routed to VPC A service
+
+No overlap because:
+- VPC B never sees VPC A's IP space
+- Only sees endpoint IP in its own space
+
+**Key Concept:** PrivateLink solves IP overlap!
+</details>
+
+---
+
+**Question 24:**
+Route 53 Resolver DNS Firewall is deployed in a VPC. Where is it enforced?
+
+A) At the internet gateway  
+B) At Route 53 Resolver (VPC DNS)  
+C) At the NACL level  
+D) At each EC2 instance  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+DNS query flow with DNS Firewall:
+```
+1. EC2 instance queries domain: "facebook.com"
+   ↓
+2. Query goes to VPC DNS (Route 53 Resolver: 10.0.0.2)
+   ↓
+3. DNS Firewall intercepts and checks rules:
+   - Is "facebook.com" in blocklist? → YES
+   - Action: BLOCK (return NXDOMAIN)
+   ↓
+4. Response: "facebook.com does not exist"
+   ↓
+5. EC2 instance: Cannot resolve domain
+```
+
+Key point:
+- Blocks at DNS resolution
+- BEFORE any network connection attempted
+- Instance never gets IP address
+- Cannot connect even if they try!
+
+Why others are wrong:
+- A: IGW doesn't do DNS filtering
+- C: NACLs filter by IP, not domain
+- D: Not at instance level (at VPC DNS level)
+
+**Key Concept:** DNS Firewall at Route 53 Resolver!
+</details>
+
+---
+
+**Question 25:**
+What is the difference between VPC Interface Endpoint and VPC Gateway Endpoint?
+
+A) Interface endpoints are free, Gateway endpoints cost money  
+B) Gateway endpoints use ENI, Interface endpoints use route tables  
+C) Interface endpoints use ENI with private IP, Gateway endpoints use route tables  
+D) They are the same, just different names  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+Interface Endpoint (PrivateLink):
+- Creates ENI (Elastic Network Interface) in your subnet
+- Gets private IP address (e.g., 10.0.1.50)
+- Access via private IP or endpoint DNS name
+- Cost: $0.01/hour = $7.20/month
+- Supports 100+ AWS services
+- Examples: EC2 API, Lambda, SQS, SNS
+
+Gateway Endpoint:
+- Uses route table entry
+- No ENI, no IP address
+- Route: pl-xxx (prefix list) → vpce-xxx
+- Cost: FREE ✅
+- Supports: S3, DynamoDB only
+
+Example comparison:
+```
+S3 access:
+
+Interface Endpoint:
+→ ENI: 10.0.1.50
+→ Access: https://10.0.1.50 or vpce-xxx.s3.us-east-1.vpce.amazonaws.com
+→ Cost: $7.20/month
+
+Gateway Endpoint:
+→ Route: pl-s3-123 → vpce-abc
+→ Access: https://s3.us-east-1.amazonaws.com (same as public)
+→ Cost: FREE
+```
+
+**Always use Gateway when available!**
+
+**Key Concept:** Gateway = FREE + route table, Interface = $7/mo + ENI!
+</details>
+
+---
+
+**Question 26:**
+A Transit Gateway has two route tables: Production-RT and Development-RT. Production VPCs are associated with Production-RT, and Dev VPCs with Development-RT. How can you prevent Dev VPCs from communicating with Production VPCs?
+
+A) Use Security Groups to block cross-environment traffic  
+B) Don't add routes between the route tables  
+C) Deploy Network Firewall between environments  
+D) Use NACLs to block cross-VPC traffic  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+Transit Gateway route table isolation:
+
+Production-RT routes:
+```
+10.1.0.0/16 → Prod-VPC-1 attachment
+10.2.0.0/16 → Prod-VPC-2 attachment
+10.100.0.0/16 → Shared-Services attachment
+(NO routes to Dev VPCs!)
+```
+
+Development-RT routes:
+```
+10.10.0.0/16 → Dev-VPC-1 attachment
+10.20.0.0/16 → Dev-VPC-2 attachment
+10.100.0.0/16 → Shared-Services attachment
+(NO routes to Prod VPCs!)
+```
+
+Result:
+- Prod VPCs can talk to each other ✅
+- Prod VPCs can talk to Shared Services ✅
+- Dev VPCs can talk to each other ✅
+- Dev VPCs can talk to Shared Services ✅
+- Prod ↔ Dev: NO ROUTES = NO COMMUNICATION ✅
+
+This is network segmentation at TGW level!
+
+**Key Concept:** TGW route table isolation = network segmentation!
+</details>
+
+---
+
+**Question 27:**
+A company uses VPC Flow Logs to monitor traffic. They notice many REJECT entries for port 22 from various IPs. What is the MOST likely cause?
+
+A) SSH brute force attack attempts  
+B) Legitimate SSH traffic being blocked by Security Groups  
+C) VPC misconfiguration  
+D) CloudTrail logging SSH connections  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: A ✅**
+
+**Explanation:**
+Flow Log pattern:
+```
+... 203.0.113.50 10.0.1.5 45123 22 6 1 40 ... REJECT OK
+... 203.0.113.51 10.0.1.5 45124 22 6 1 40 ... REJECT OK
+... 203.0.113.52 10.0.1.5 45125 22 6 1 40 ... REJECT OK
+(many IPs trying port 22)
+```
+
+This indicates:
+- Multiple different source IPs
+- All targeting port 22 (SSH)
+- All being REJECTED
+- Classic brute force attack pattern
+
+Action:
+- Verify Security Group only allows SSH from trusted IPs
+- Consider using Systems Manager Session Manager (no port 22 needed)
+- Add NACL rule to block attacker IP ranges
+- Review CloudTrail for any successful SSH logins
+
+Why others are wrong:
+- B: Would show REJECT, but not from "various IPs" (would be expected source)
+- C: Misconfiguration would affect specific traffic, not random IPs
+- D: CloudTrail logs API calls, not network connections
+
+**Key Concept:** Flow Logs REJECT patterns show attack attempts!
+</details>
+
+---
+
+**Question 28:**
+Which AWS service can block C2 (Command and Control) communication from compromised EC2 instances?
+
+A) Security Groups  
+B) NACLs  
+C) Network Firewall with AWS managed threat intelligence  
+D) VPC Flow Logs  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: C ✅**
+
+**Explanation:**
+C2 communication:
+- Malware on compromised instance
+- Tries to contact attacker's server (C2 server)
+- Downloads instructions, exfiltrates data
+
+Network Firewall protection:
+```
+AWS Managed Domain Lists:
+- AWSManagedDomainsMalwareDomainList
+- AWSManagedDomainsBotnetCommandAndControlDomainList
+- Updated automatically by AWS
+
+Action: BLOCK
+
+Result: 
+Instance tries to resolve "evil-c2-server.com"
+→ Network Firewall blocks (domain in C2 list)
+→ Cannot communicate with attacker ✅
+```
+
+Also blocks:
+- Known malware distribution sites
+- Botnet infrastructure
+- Phishing domains
+
+Why others don't work:
+- A/B: Security Groups/NACLs need specific IPs (C2 servers change constantly)
+- D: Flow Logs only log, don't block
+
+Alternative:
+- GuardDuty detects C2 communication
+- But doesn't prevent (detection only)
+- Network Firewall = prevention ✅
+
+**Key Concept:** Network Firewall blocks C2 with threat intel!
+</details>
+
+---
+
+**Question 29:**
+A company needs to ensure all outbound HTTPS traffic from EC2 instances is inspected for data exfiltration. The solution should not require decrypting TLS traffic. What approach works?
+
+A) AWS WAF on ALB  
+B) Network Firewall with TLS SNI inspection  
+C) VPC Flow Logs analysis  
+D) Cannot inspect HTTPS without decryption  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+TLS SNI (Server Name Indication):
+- Sent during TLS handshake
+- BEFORE encryption starts
+- Contains destination domain name
+- Can be inspected without decryption!
+
+Network Firewall domain filtering:
+```
+Target Types: TLS_SNI
+Targets: 
+  - .dropbox.com
+  - .box.com
+  - .mega.nz (file sharing services)
+Generated Rules Type: DENYLIST
+
+Result:
+Instance → exfil-data → dropbox.com
+→ Network Firewall sees SNI: dropbox.com
+→ Blocks connection (in DENYLIST)
+→ Data exfiltration prevented ✅
+```
+
+What you CAN see:
+- Which domain is being accessed
+- Can block/allow based on domain
+
+What you CANNOT see:
+- Content of HTTPS traffic (encrypted)
+- Specific files being transferred
+
+For full inspection:
+- Need TLS decryption (SSL inspection)
+- Requires third-party firewall (Palo Alto, Fortinet)
+- Network Firewall doesn't decrypt
+
+**Key Concept:** TLS SNI inspection = domain visibility without decryption!
+</details>
+
+---
+
+**Question 30:**
+An organization has the following requirements:
+- 15 VPCs need connectivity
+- Centralized egress through one NAT Gateway
+- IDS/IPS for all traffic
+- Network segmentation (Prod isolated from Dev)
+
+What architecture meets ALL requirements MOST cost-effectively?
+
+A) Full-mesh VPC Peering + Network Firewall in each VPC  
+B) Transit Gateway + Inspection VPC + Network Firewall + route table isolation  
+C) PrivateLink endpoints + AWS WAF  
+D) Direct Connect + on-premises firewall  
+
+<details>
+<summary>Click to reveal answer</summary>
+
+**Answer: B ✅**
+
+**Explanation:**
+Architecture:
+```
+Production VPCs (1-5) ──┐
+                        ├──> TGW (Prod RT) ──┐
+Development VPCs (6-10)─┤                     │
+                        └──> TGW (Dev RT) ────┤
+                                               │
+Shared Services VPC ───────────────────────────┤
+                                               │
+                        ┌──────────────────────┘
+                        ↓
+                 Inspection VPC
+                 ├─ Network Firewall (IDS/IPS)
+                 └─ NAT Gateway (single egress)
+                        ↓
+                   Internet
+```
+
+Meets all requirements:
+✅ 15 VPCs connected via Transit Gateway
+✅ Centralized egress (one NAT Gateway in Inspection VPC)
+✅ IDS/IPS (Network Firewall with Suricata)
+✅ Network segmentation (separate TGW route tables)
+
+Cost:
+- Transit Gateway: 15 × $36 = $540/month
+- Network Firewall: $600/month
+- NAT Gateway: $32/month
+- Total: $1,172/month ✅
+
+vs alternatives:
+- A: 15 Network Firewalls = $9,000/month
+- C: Doesn't provide full connectivity or IDS/IPS
+- D: Direct Connect = expensive, on-prem dependency
+
+**Key Concept:** TGW + Inspection VPC = comprehensive solution!
+</details>
+
+---
+
+## **SCORING YOUR PRACTICE TEST**
+
+```
+Count your correct answers:
+
+21-30 correct (70-100%): ✅ EXCELLENT! Ready for exam
+16-20 correct (53-67%):  🟡 GOOD, review weak areas
+11-15 correct (37-50%):  🟠 NEEDS WORK, more study needed
+0-10 correct (0-33%):    🔴 REVIEW ALL TOPICS
+
+Week 4 Topics to Review Based on Score:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q1-10 weak:  VPC Security Fundamentals (SG, NACL, Flow Logs)
+Q11-20 weak: Network Firewall & WAF (Layer 7 protection)
+Q21-30 weak: Advanced Networking (TGW, PrivateLink, Integration)
+```
+
+---
+
+**How did you do? Want to review any specific topics?** 🎯

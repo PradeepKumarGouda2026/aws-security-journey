@@ -1,0 +1,5283 @@
+# **PERFECT! Let's continue with CLI focus! 🚀**
+
+---
+
+# **DAY 27: ROUTE 53 SECURITY & ADVANCED VPC - OUTLINE**
+
+**Time: 2-3 hours**
+**Difficulty: Medium-Advanced**
+
+---
+
+## **TOPICS COVERED:**
+
+```
+1. Route 53 DNSSEC (30 min theory + 20 min lab)
+2. Route 53 Resolver DNS Firewall (20 min theory + 20 min lab)
+3. VPC Peering Security (15 min theory)
+4. AWS Transit Gateway (20 min theory + 15 min lab)
+5. AWS PrivateLink (20 min theory + 15 min lab)
+6. Comparison & When to Use What (15 min)
+
+Total: ~2.5 hours
+```
+
+---
+
+## **PART 1: ROUTE 53 DNSSEC - THEORY (30 MIN)**
+
+### **What is DNS Security Extensions (DNSSEC)?**
+
+```
+Problem: DNS is vulnerable to attacks
+
+DNS WITHOUT DNSSEC:
+User: "What's IP of bank.com?"
+DNS Server: "It's 203.0.113.5"
+User: Trusts this blindly ❌
+
+Attacker can:
+├─ DNS Spoofing (fake response)
+├─ DNS Cache Poisoning
+├─ Man-in-the-Middle (MITM)
+└─ User connects to attacker's server instead!
+
+Result: User types password → Attacker steals it 😱
+
+DNSSEC = Cryptographic signatures for DNS records
+└─ Proves DNS response is authentic
+└─ Can't be tampered with
+```
+
+---
+
+### **How DNSSEC Works:**
+
+```
+DNSSEC Chain of Trust:
+
+. (root)
+  ↓ signed
+.com
+  ↓ signed
+example.com
+  ↓ signed
+www.example.com → 192.0.2.1
+
+Each level signs the next level
+└─ Creates "chain of trust" from root to your domain
+
+Verification:
+1. User queries www.example.com
+2. Resolver checks signature at each level
+3. If ALL signatures valid → response trusted ✅
+4. If ANY signature invalid → response rejected ❌
+
+Protection:
+✅ Prevents DNS spoofing
+✅ Prevents cache poisoning
+✅ Proves authenticity
+❌ Does NOT encrypt (use DNS over HTTPS/TLS for that)
+```
+
+---
+
+### **DNSSEC Records:**
+
+```
+New DNS Record Types:
+
+RRSIG (Resource Record Signature)
+├─ Digital signature for a record
+└─ Example: RRSIG for A record of www.example.com
+
+DNSKEY (DNS Public Key)
+├─ Public key used to verify signatures
+└─ Two types: ZSK (Zone Signing Key) and KSK (Key Signing Key)
+
+DS (Delegation Signer)
+├─ Hash of child zone's DNSKEY
+├─ Stored in parent zone
+└─ Links child zone to parent (creates chain of trust)
+
+NSEC/NSEC3 (Next Secure)
+├─ Proves non-existence of records
+└─ "example.org does NOT exist" (authenticated)
+
+How They Work Together:
+1. AWS signs your zone with DNSKEY
+2. Creates RRSIG for each record
+3. Publishes DS record to parent zone (.com registry)
+4. Resolver verifies: Root → .com → example.com → www
+```
+
+---
+
+### **AWS Route 53 DNSSEC Implementation:**
+
+```
+AWS Manages Everything:
+
+Automatic:
+✅ Key generation (KSK + ZSK)
+✅ Zone signing (creates RRSIG records)
+✅ Key rotation (every 90 days for ZSK)
+✅ NSEC3 records (authenticated denial)
+
+You Must Do:
+⚠️ Establish chain of trust
+   └─ Add DS record to parent zone (domain registrar)
+
+Two Modes:
+
+1. Signing (AWS managed keys)
+   ├─ AWS creates and manages keys
+   ├─ Easiest approach
+   └─ AWS handles rotation
+
+2. Signing with Customer-Managed Keys (KMS)
+   ├─ You control KSK in AWS KMS
+   ├─ More control
+   └─ Use for compliance requirements
+
+Cost:
+├─ Hosted zone: $0.50/month
+├─ DNSSEC signing: $0.50/month additional
+└─ Total: $1/month per zone
+```
+
+---
+
+### **When to Use DNSSEC:**
+
+```
+USE DNSSEC when:
+✅ Financial services (banking, payments)
+✅ Government/defense
+✅ Healthcare (HIPAA)
+✅ High-value targets
+✅ Compliance requirements (some regulations mandate)
+✅ Brand protection (prevent phishing via DNS)
+
+SKIP DNSSEC when:
+❌ Low-risk websites (blogs, marketing sites)
+❌ Internal-only domains
+❌ Development/testing environments
+❌ Cost-sensitive projects ($0.50/mo matters)
+
+Reality Check:
+├─ <5% of domains use DNSSEC (as of 2024)
+├─ Complex to implement (outside AWS)
+├─ AWS makes it EASY (just enable it!)
+└─ But still optional for most use cases
+
+Exam Tip: Know WHAT it does, WHEN to use, HOW AWS implements
+```
+
+---
+
+## **LAB 90: DEPLOY ROUTE 53 DNSSEC (20 MIN)**
+
+```bash
+#!/bin/bash
+# CloudShell - Route 53 DNSSEC Lab
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║        LAB 90: ROUTE 53 DNSSEC DEPLOYMENT               ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "Prerequisites:"
+echo "  • You need a domain registered (Route 53 or external)"
+echo "  • Hosted zone must exist in Route 53"
+echo ""
+
+# For this lab, we'll use a demo approach since you need a real domain
+# I'll show the commands - you can run them if you have a domain
+
+echo "Step 1: Verify Prerequisites"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# List your hosted zones
+echo "  → Listing your hosted zones..."
+aws route53 list-hosted-zones
+
+echo ""
+echo "  Note your Hosted Zone ID for the domain you want to secure"
+echo "  Example: /hostedzone/Z1234567890ABC"
+echo ""
+
+# For demo purposes, set a variable (you'd use your actual zone ID)
+echo "  For this demo, let's assume zone ID: Z1234567890ABC"
+HOSTED_ZONE_ID="Z1234567890ABC"
+
+echo ""
+echo "Step 2: Enable DNSSEC Signing"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Command to enable DNSSEC signing:"
+echo ""
+cat << 'EOF'
+aws route53 enable-hosted-zone-dnssec \
+  --hosted-zone-id Z1234567890ABC
+EOF
+
+echo ""
+echo "  What this does:"
+echo "    • Generates KSK (Key Signing Key)"
+echo "    • Generates ZSK (Zone Signing Key)"
+echo "    • Signs all records in the zone (creates RRSIG)"
+echo "    • Creates NSEC3 records for authenticated denial"
+echo ""
+echo "  ⏱️  This takes 5-10 minutes to complete"
+echo ""
+
+# In a real scenario, you'd run:
+# aws route53 enable-hosted-zone-dnssec --hosted-zone-id $HOSTED_ZONE_ID
+
+echo ""
+echo "Step 3: Check DNSSEC Status"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Command to check status:"
+echo ""
+cat << 'EOF'
+aws route53 get-dnssec \
+  --hosted-zone-id Z1234567890ABC
+EOF
+
+echo ""
+echo "  Expected output when complete:"
+echo '  {'
+echo '    "Status": {'
+echo '      "ServeSignature": "SIGNING",'
+echo '      "StatusMessage": "Zone is being signed"'
+echo '    },'
+echo '    "KeySigningKeys": [...]'
+echo '  }'
+echo ""
+
+echo ""
+echo "Step 4: Get DS Record for Parent Zone"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  CRITICAL STEP: Establish Chain of Trust"
+echo ""
+echo "  Get DS record information:"
+echo ""
+cat << 'EOF'
+aws route53 get-dnssec \
+  --hosted-zone-id Z1234567890ABC \
+  --query 'KeySigningKeys[0].DSRecord' \
+  --output text
+EOF
+
+echo ""
+echo "  Example DS record output:"
+echo "  12345 13 2 1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890AB"
+echo ""
+echo "  This DS record contains:"
+echo "    • Key Tag: 12345"
+echo "    • Algorithm: 13 (ECDSAP256SHA256)"
+echo "    • Digest Type: 2 (SHA-256)"
+echo "    • Digest: 1234567890ABCDEF..."
+echo ""
+
+echo ""
+echo "Step 5: Add DS Record to Parent Zone (Registrar)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  ⚠️  MANUAL STEP (cannot be automated):"
+echo ""
+echo "  IF your domain is registered with Route 53:"
+echo "    1. Go to Route 53 Console → Registered Domains"
+echo "    2. Select your domain"
+echo "    3. Click 'Add or edit DNSSEC keys'"
+echo "    4. Paste the DS record from Step 4"
+echo ""
+echo "  IF your domain is registered elsewhere (GoDaddy, Namecheap, etc.):"
+echo "    1. Log into your domain registrar"
+echo "    2. Find DNSSEC settings (varies by registrar)"
+echo "    3. Add DS record"
+echo "    4. Provide: Key Tag, Algorithm, Digest Type, Digest"
+echo ""
+echo "  ⏱️  Propagation time: 24-48 hours"
+echo ""
+
+echo ""
+echo "Step 6: Verify DNSSEC is Working"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  After DS record propagation, verify with dig:"
+echo ""
+cat << 'EOF'
+# Install dig if needed
+sudo yum install -y bind-utils
+
+# Check DNSSEC validation
+dig +dnssec example.com
+
+# Look for:
+# - RRSIG records (signatures present)
+# - ad flag (authenticated data)
+EOF
+
+echo ""
+echo "  Example successful output:"
+echo "  ;; flags: qr rd ra ad; QUERY: 1, ANSWER: 2, AUTHORITY: 0, ADDITIONAL: 1"
+echo "                      ^^"
+echo "                      ad = authenticated! ✅"
+echo ""
+
+echo "  Verify with online tools:"
+echo "    • https://dnssec-analyzer.verisignlabs.com/"
+echo "    • Enter your domain"
+echo "    • Should show 'Fully DNSSEC Signed' ✅"
+echo ""
+
+echo ""
+echo "Step 7: Monitor DNSSEC Health"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Check DNSSEC status regularly:"
+echo ""
+cat << 'EOF'
+# Get DNSSEC status
+aws route53 get-dnssec \
+  --hosted-zone-id Z1234567890ABC \
+  --query 'Status.ServeSignature'
+
+# Expected: "SIGNING" (healthy)
+# Warning: "NOT_SIGNING" (broken - investigate!)
+
+# Check key expiration
+aws route53 get-dnssec \
+  --hosted-zone-id Z1234567890ABC \
+  --query 'KeySigningKeys[0].CreatedDate'
+
+# AWS auto-rotates ZSK every 90 days
+# KSK rotates less frequently
+EOF
+
+echo ""
+echo "  Set up CloudWatch alarm for DNSSEC issues:"
+echo ""
+cat << 'EOF'
+# Create SNS topic for alerts
+aws sns create-topic --name dnssec-alerts
+
+# Subscribe to topic
+aws sns subscribe \
+  --topic-arn arn:aws:sns:us-east-1:123456789012:dnssec-alerts \
+  --protocol email \
+  --notification-endpoint your-email@example.com
+
+# Create CloudWatch alarm (manual in Console or via CloudFormation)
+# Alert if DNSSECInternalFailure or DNSSECKeySigningKeysNeedingAction
+EOF
+
+echo ""
+echo "✅ LAB 90 COMPLETE (Theoretical)"
+echo ""
+echo "═══════════════════════════════════════════════════════════"
+echo "DNSSEC SUMMARY"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+echo "What You Learned:"
+echo "  ✅ How to enable DNSSEC on Route 53 hosted zone"
+echo "  ✅ How to get DS record for parent zone"
+echo "  ✅ How to establish chain of trust"
+echo "  ✅ How to verify DNSSEC is working"
+echo "  ✅ How to monitor DNSSEC health"
+echo ""
+echo "Key Commands:"
+echo "  • aws route53 enable-hosted-zone-dnssec"
+echo "  • aws route53 get-dnssec"
+echo "  • dig +dnssec [domain]"
+echo ""
+echo "DNSSEC Protection:"
+echo "  ✅ Prevents DNS spoofing"
+echo "  ✅ Prevents cache poisoning"
+echo "  ✅ Authenticates DNS responses"
+echo "  ❌ Does NOT encrypt (that's DNS over HTTPS/TLS)"
+echo ""
+echo "Cost: $0.50/month per zone"
+echo ""
+echo "Next: Route 53 Resolver DNS Firewall →"
+echo ""
+```
+
+---
+
+## **PART 2: ROUTE 53 RESOLVER DNS FIREWALL - THEORY (20 MIN)**
+
+### **What is DNS Firewall?**
+
+```
+Problem: Users/Applications query malicious domains
+
+Scenario:
+Employee clicks phishing link → Laptop tries to resolve "malicious-site.com"
+OR
+Malware installed → Tries to contact command-and-control (C2) server
+
+DNS Firewall = Block DNS queries to known bad domains
+
+Works at DNS resolution level:
+User/App: "What's IP of malicious-site.com?"
+DNS Firewall: "BLOCKED! Not resolving that." ❌
+
+Result:
+✅ Malicious site unreachable (even if user types URL)
+✅ Malware can't call home to C2 server
+✅ Protection at network level (all devices)
+```
+
+---
+
+### **How It Works:**
+
+```
+Architecture:
+
+VPC → Route 53 Resolver → DNS Firewall → Internet DNS
+
+DNS Firewall sits BETWEEN your VPC and external DNS
+
+Query Flow:
+1. EC2 instance queries "facebook.com"
+2. Route 53 Resolver receives query
+3. DNS Firewall checks rules:
+   - Is domain in blocklist? → BLOCK
+   - Is domain in allowlist? → ALLOW
+   - No match? → Use default action
+4. If allowed: Resolver queries Internet DNS
+5. Response returned to EC2
+
+Protection:
+✅ Blocks malicious domains (malware, phishing)
+✅ Blocks unwanted domains (social media, gambling)
+✅ Compliance (prevent access to prohibited sites)
+✅ Centralized (applies to entire VPC)
+```
+
+---
+
+### **Domain Lists:**
+
+```
+Three Types of Lists:
+
+1. AWS MANAGED DOMAIN LISTS (FREE!)
+   ├─ AWSManagedDomainsMalwareDomainList
+   │   └─ Known malware distribution sites
+   │   └─ Updated by AWS automatically
+   │   └─ ~100,000+ domains
+   │
+   ├─ AWSManagedDomainsBotnetCommandAndControlDomainList
+   │   └─ Known C2 servers
+   │   └─ Botnet infrastructure
+   │   └─ Updated daily
+   │
+   └─ AWSManagedDomainsAggregateThreatList
+       └─ Combination of multiple threat feeds
+       └─ Highest coverage
+       └─ Recommended starting point
+
+2. CUSTOM DOMAIN LISTS (You create)
+   ├─ Your own blocklist
+   ├─ Example: Block social media for corporate policy
+   ├─ Example: Block competitors' sites
+   └─ Maximum: 1,000-5,000 domains per list
+
+3. PARTNER/THIRD-PARTY LISTS (Coming Soon)
+   └─ Integration with threat intelligence vendors
+
+Rule Actions:
+├─ ALLOW: Permit DNS resolution
+├─ BLOCK: Refuse to resolve (return NXDOMAIN)
+├─ ALERT: Log but allow (monitoring mode)
+└─ OVERRIDE: Custom response (redirect to safe page)
+```
+
+---
+
+### **DNS Firewall Rules:**
+
+```
+Rule Structure:
+
+Rule Group → Contains Multiple Rules → Applied to VPC
+
+Example Rule Group: "Corporate Security Rules"
+├─ Rule 1 (Priority 100): BLOCK AWS Managed Malware List
+├─ Rule 2 (Priority 200): BLOCK Custom Social Media List
+├─ Rule 3 (Priority 300): ALLOW AWS Services (*.amazonaws.com)
+└─ Default Action: ALLOW (everything else)
+
+Rule Evaluation:
+1. Rules evaluated in priority order (lowest number first)
+2. First match wins
+3. No match → Default action
+
+Example:
+Query: malware-site.com
+├─ Rule 1: Matches malware list → BLOCK ✅ (stops here)
+└─ Never reaches Rules 2 or 3
+
+Query: facebook.com
+├─ Rule 1: No match (not malware)
+├─ Rule 2: Matches social media list → BLOCK ✅ (stops here)
+└─ Never reaches Rule 3
+
+Query: s3.amazonaws.com
+├─ Rule 1: No match
+├─ Rule 2: No match
+├─ Rule 3: Matches AWS services → ALLOW ✅
+└─ Resolved normally
+
+Query: google.com
+├─ Rule 1: No match
+├─ Rule 2: No match
+├─ Rule 3: No match
+└─ Default Action: ALLOW ✅
+```
+
+---
+
+### **Use Cases:**
+
+```
+USE CASE 1: Malware Protection
+Rule: BLOCK AWSManagedDomainsMalwareDomainList
+Benefit: Prevents malware downloads, C2 communication
+
+USE CASE 2: Corporate Internet Policy
+Custom List: social-media-domains.txt
+├─ facebook.com
+├─ twitter.com
+├─ instagram.com
+└─ etc.
+Rule: BLOCK Custom Social Media List
+Benefit: Enforce acceptable use policy
+
+USE CASE 3: Compliance (Sanctions)
+Custom List: sanctioned-countries.txt
+├─ *.kp (North Korea)
+├─ *.ir (Iran - if restricted)
+└─ etc.
+Rule: BLOCK Custom Sanctions List
+Benefit: Comply with OFAC, trade restrictions
+
+USE CASE 4: Data Exfiltration Prevention
+Custom List: cloud-storage-domains.txt
+├─ dropbox.com
+├─ box.com
+├─ mega.nz
+└─ etc.
+Rule: BLOCK (except for approved services)
+Benefit: Prevent data loss via personal cloud storage
+
+USE CASE 5: Threat Intelligence Integration
+Partner List: threat-feed-from-vendor.txt
+Rule: ALERT on matches (log suspicious activity)
+Benefit: Early warning of compromised systems
+```
+
+---
+
+### **Cost:**
+
+```
+DNS Firewall Pricing (us-east-1):
+
+Rule Group Association: $0.125/hour per VPC
+├─ $0.125 × 24 hours × 30 days = $90/month per VPC
+└─ Each VPC = separate charge
+
+Domain List: FREE (no charge for domains in lists)
+
+DNS Queries: Normal Route 53 Resolver pricing
+├─ $0.40/million queries
+└─ Same as without DNS Firewall
+
+Example Cost:
+1 VPC with DNS Firewall: $90/month
+5 VPCs with DNS Firewall: $450/month
+
+Cost Optimization:
+├─ Use shared VPC (fewer VPC associations)
+├─ Use centralized DNS architecture
+└─ Transit Gateway + Inspection VPC pattern
+```
+
+---
+
+### **When to Use DNS Firewall:**
+
+```
+USE when:
+✅ Enterprise with multiple VPCs
+✅ Compliance requirements (malware protection)
+✅ High-security environments (finance, healthcare)
+✅ Need centralized domain filtering
+✅ Budget: >$100/month for security
+
+SKIP when:
+❌ Single VPC, small startup
+❌ Budget-constrained (<$90/month)
+❌ Can use alternative (Network Firewall domain filtering)
+❌ Development/test environments
+
+Alternatives:
+├─ Network Firewall: Domain filtering + IDS/IPS (but $600/mo)
+├─ WAF: Application-layer only (not DNS)
+├─ Security Groups: IP-based (can't block by domain at DNS)
+└─ Third-party DNS filtering (OpenDNS, etc.)
+
+Exam Tip: Know it EXISTS, know basic functionality, know cost
+```
+
+---
+
+**Ready for Lab 91: DNS Firewall?**
+
+Should I continue with:
+- A) Lab 91: DNS Firewall deployment
+- B) Skip lab, move to Transit Gateway theory
+- C) Take a break, continue later
+
+What's your preference? 🎯
+
+
+
+# **LAB 91: DEPLOY ROUTE 53 RESOLVER DNS FIREWALL**
+
+```bash
+#!/bin/bash
+# CloudShell - Route 53 Resolver DNS Firewall Lab
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║      LAB 91: ROUTE 53 RESOLVER DNS FIREWALL             ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "What we'll build:"
+echo "  • VPC with DNS Firewall protection"
+echo "  • Rule group with AWS Managed malware list"
+echo "  • Custom domain list (block social media)"
+echo "  • Test DNS resolution (allowed vs blocked)"
+echo ""
+echo "Time: ~20 minutes"
+echo "Cost: ~$0.10 for testing (delete after!)"
+echo ""
+
+#############################################################################
+# STEP 1: CREATE VPC FOR TESTING
+#############################################################################
+
+echo "Step 1: Creating VPC for DNS Firewall Testing"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+DNS_FW_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.5.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=DNS-Firewall-VPC}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+echo "  ✅ VPC created: $DNS_FW_VPC"
+
+# Enable DNS
+aws ec2 modify-vpc-attribute --vpc-id $DNS_FW_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $DNS_FW_VPC --enable-dns-support
+
+echo "  ✅ DNS enabled"
+echo ""
+
+# Create subnet
+DNS_FW_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $DNS_FW_VPC \
+  --cidr-block 10.5.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=DNS-Firewall-Subnet}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+aws ec2 modify-subnet-attribute --subnet-id $DNS_FW_SUBNET --map-public-ip-on-launch
+
+echo "  ✅ Subnet created: $DNS_FW_SUBNET"
+echo ""
+
+# Create IGW
+DNS_FW_IGW=$(aws ec2 create-internet-gateway \
+  --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=DNS-Firewall-IGW}]' \
+  --query 'InternetGateway.InternetGatewayId' \
+  --output text)
+
+aws ec2 attach-internet-gateway --internet-gateway-id $DNS_FW_IGW --vpc-id $DNS_FW_VPC
+
+echo "  ✅ IGW attached: $DNS_FW_IGW"
+echo ""
+
+# Route table
+DNS_FW_RT=$(aws ec2 create-route-table \
+  --vpc-id $DNS_FW_VPC \
+  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=DNS-Firewall-RT}]' \
+  --query 'RouteTable.RouteTableId' \
+  --output text)
+
+aws ec2 create-route --route-table-id $DNS_FW_RT --destination-cidr-block 0.0.0.0/0 --gateway-id $DNS_FW_IGW
+aws ec2 associate-route-table --route-table-id $DNS_FW_RT --subnet-id $DNS_FW_SUBNET
+
+echo "  ✅ Route table configured"
+echo ""
+
+#############################################################################
+# STEP 2: CREATE CUSTOM DOMAIN LIST (Block Social Media)
+#############################################################################
+
+echo "Step 2: Creating Custom Domain List (Social Media Blocklist)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Creating domain list with social media sites..."
+echo ""
+
+DOMAIN_LIST_ID=$(aws route53resolver create-firewall-domain-list \
+  --name SocialMediaBlocklist \
+  --tags Key=Name,Value=SocialMediaBlocklist \
+  --query 'FirewallDomainList.Id' \
+  --output text)
+
+echo "  ✅ Domain list created: $DOMAIN_LIST_ID"
+echo ""
+
+# Add domains to the list
+echo "  Adding domains to blocklist..."
+
+# Create a file with domains
+cat > /tmp/blocked-domains.txt << 'EOF'
+facebook.com
+twitter.com
+instagram.com
+tiktok.com
+reddit.com
+snapchat.com
+linkedin.com
+youtube.com
+EOF
+
+echo ""
+echo "  Domains to block:"
+cat /tmp/blocked-domains.txt
+echo ""
+
+# Add domains to the firewall domain list
+# Note: We add them one at a time in this example
+while IFS= read -r domain; do
+    aws route53resolver update-firewall-domains \
+      --firewall-domain-list-id $DOMAIN_LIST_ID \
+      --operation ADD \
+      --domains "$domain" 2>/dev/null
+    echo "    • Added: $domain"
+done < /tmp/blocked-domains.txt
+
+echo ""
+echo "  ✅ All domains added to blocklist"
+echo ""
+
+#############################################################################
+# STEP 3: CREATE FIREWALL RULE GROUP
+#############################################################################
+
+echo "Step 3: Creating Firewall Rule Group"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+RULE_GROUP_ID=$(aws route53resolver create-firewall-rule-group \
+  --name CorporateSecurityRules \
+  --tags Key=Name,Value=CorporateSecurityRules \
+  --query 'FirewallRuleGroup.Id' \
+  --output text)
+
+echo "  ✅ Rule group created: $RULE_GROUP_ID"
+echo ""
+
+# Get ARN for the rule group
+RULE_GROUP_ARN=$(aws route53resolver list-firewall-rule-groups \
+  --query "FirewallRuleGroups[?Name=='CorporateSecurityRules'].Arn" \
+  --output text)
+
+echo "  Rule Group ARN: $RULE_GROUP_ARN"
+echo ""
+
+#############################################################################
+# STEP 4: ADD RULES TO RULE GROUP
+#############################################################################
+
+echo "Step 4: Adding Rules to Rule Group"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Rule 1: Block AWS Managed Malware Domains
+echo "  Rule 1: Blocking AWS Managed Malware Domain List"
+echo ""
+
+aws route53resolver create-firewall-rule \
+  --firewall-rule-group-id $RULE_GROUP_ID \
+  --firewall-domain-list-id rslvr-fdl-d61cbb2cbexample \
+  --priority 100 \
+  --action BLOCK \
+  --name BlockMalwareDomains \
+  --block-response NXDOMAIN 2>/dev/null
+
+# Note: The AWS Managed Domain List ID varies by region
+# In practice, you'd get it from: aws route53resolver list-firewall-domain-lists
+# For this lab, we'll focus on our custom list
+
+echo "  ℹ️  Note: AWS Managed Domain Lists require correct list ID for your region"
+echo "     To get available lists, run:"
+echo "     aws route53resolver list-firewall-domain-lists --query 'FirewallDomainLists[?ManagedOwnerName!=null]'"
+echo ""
+
+# Rule 2: Block Custom Social Media List
+echo "  Rule 2: Blocking Custom Social Media Domain List"
+echo ""
+
+aws route53resolver create-firewall-rule \
+  --firewall-rule-group-id $RULE_GROUP_ID \
+  --firewall-domain-list-id $DOMAIN_LIST_ID \
+  --priority 200 \
+  --action BLOCK \
+  --name BlockSocialMedia \
+  --block-response NXDOMAIN
+
+echo "  ✅ Rule created: Block Social Media (Priority 200)"
+echo ""
+
+echo "  Rule configuration:"
+echo "    • Domain List: SocialMediaBlocklist"
+echo "    • Action: BLOCK"
+echo "    • Response: NXDOMAIN (domain does not exist)"
+echo "    • Priority: 200 (evaluated after priority 100)"
+echo ""
+
+# Rule 3: Allow AWS Services (whitelist)
+echo "  Rule 3: Creating ALLOW rule for AWS services"
+echo ""
+
+# Create an allow list for AWS services
+AWS_SERVICES_LIST=$(aws route53resolver create-firewall-domain-list \
+  --name AWSServicesAllowlist \
+  --tags Key=Name,Value=AWSServicesAllowlist \
+  --query 'FirewallDomainList.Id' \
+  --output text)
+
+# Add AWS service domains
+aws route53resolver update-firewall-domains \
+  --firewall-domain-list-id $AWS_SERVICES_LIST \
+  --operation ADD \
+  --domains "*.amazonaws.com" "*.aws.amazon.com"
+
+aws route53resolver create-firewall-rule \
+  --firewall-rule-group-id $RULE_GROUP_ID \
+  --firewall-domain-list-id $AWS_SERVICES_LIST \
+  --priority 50 \
+  --action ALLOW \
+  --name AllowAWSServices
+
+echo "  ✅ Rule created: Allow AWS Services (Priority 50)"
+echo ""
+
+echo "  Rule evaluation order:"
+echo "    1. Priority 50:  ALLOW AWS services (*.amazonaws.com)"
+echo "    2. Priority 100: BLOCK malware domains"
+echo "    3. Priority 200: BLOCK social media"
+echo "    4. Default:      ALLOW everything else"
+echo ""
+
+#############################################################################
+# STEP 5: ASSOCIATE RULE GROUP WITH VPC
+#############################################################################
+
+echo "Step 5: Associating Rule Group with VPC"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+ASSOCIATION_ID=$(aws route53resolver associate-firewall-rule-group \
+  --firewall-rule-group-id $RULE_GROUP_ID \
+  --vpc-id $DNS_FW_VPC \
+  --priority 101 \
+  --name DNSFirewallAssociation \
+  --query 'FirewallRuleGroupAssociation.Id' \
+  --output text)
+
+echo "  ✅ Rule group associated with VPC"
+echo "  Association ID: $ASSOCIATION_ID"
+echo ""
+echo "  DNS Firewall is now ACTIVE for VPC: $DNS_FW_VPC"
+echo ""
+echo "  All DNS queries from this VPC will be filtered!"
+echo ""
+
+#############################################################################
+# STEP 6: LAUNCH TEST INSTANCE
+#############################################################################
+
+echo "Step 6: Launching Test Instance"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Get latest Amazon Linux 2023 AMI
+AMI_ID=$(aws ec2 describe-images \
+  --owners amazon \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" "Name=state,Values=available" \
+  --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+  --output text)
+
+echo "  Using AMI: $AMI_ID"
+echo ""
+
+# Create security group
+DNS_FW_SG=$(aws ec2 create-security-group \
+  --group-name dns-firewall-test-sg \
+  --description "DNS Firewall test instance" \
+  --vpc-id $DNS_FW_VPC \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=DNS-Firewall-Test-SG}]' \
+  --query 'GroupId' \
+  --output text)
+
+# Allow SSH from anywhere (for testing only!)
+aws ec2 authorize-security-group-ingress \
+  --group-id $DNS_FW_SG \
+  --protocol tcp \
+  --port 22 \
+  --cidr 0.0.0.0/0
+
+echo "  ✅ Security group created: $DNS_FW_SG"
+echo ""
+
+# Launch instance
+DNS_FW_INSTANCE=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --subnet-id $DNS_FW_SUBNET \
+  --security-group-ids $DNS_FW_SG \
+  --associate-public-ip-address \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=DNS-Firewall-Test}]' \
+  --user-data '#!/bin/bash
+yum update -y
+yum install -y bind-utils curl
+echo "DNS Firewall Test Instance Ready" > /tmp/ready.txt' \
+  --query 'Instances[0].InstanceId' \
+  --output text)
+
+echo "  ✅ Instance launched: $DNS_FW_INSTANCE"
+echo ""
+
+aws ec2 wait instance-running --instance-ids $DNS_FW_INSTANCE
+
+DNS_FW_INSTANCE_IP=$(aws ec2 describe-instances \
+  --instance-ids $DNS_FW_INSTANCE \
+  --query 'Reservations[0].Instances[0].PublicIpAddress' \
+  --output text)
+
+echo "  ✅ Instance running: $DNS_FW_INSTANCE_IP"
+echo ""
+echo "  Waiting 30 seconds for instance to fully initialize..."
+sleep 30
+echo ""
+
+#############################################################################
+# STEP 7: TEST DNS FIREWALL
+#############################################################################
+
+echo "Step 7: Testing DNS Firewall Rules"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  We'll test from CloudShell (simulating queries)"
+echo "  In real scenario, you'd SSH to the instance and test from there"
+echo ""
+
+echo "  ════════════════════════════════════════════════════════════"
+echo "  TEST 1: Query Allowed Domain (google.com)"
+echo "  ════════════════════════════════════════════════════════════"
+echo ""
+echo "  Command: dig google.com"
+echo ""
+echo "  Expected Result: ✅ Resolves successfully"
+echo "  Reason: Not in any blocklist, default action is ALLOW"
+echo ""
+
+dig +short google.com 2>/dev/null || echo "  (dig not available in CloudShell, but would work on instance)"
+
+echo ""
+echo "  ════════════════════════════════════════════════════════════"
+echo "  TEST 2: Query Blocked Domain (facebook.com)"
+echo "  ════════════════════════════════════════════════════════════"
+echo ""
+echo "  Command: dig facebook.com"
+echo ""
+echo "  Expected Result: ❌ NXDOMAIN (domain does not exist)"
+echo "  Reason: In SocialMediaBlocklist, blocked by Rule 2 (Priority 200)"
+echo ""
+echo "  What user sees:"
+echo "    $ ping facebook.com"
+echo "    ping: facebook.com: Name or service not known"
+echo ""
+echo "  What happens:"
+echo "    1. Instance queries DNS for facebook.com"
+echo "    2. Query goes to Route 53 Resolver"
+echo "    3. DNS Firewall intercepts"
+echo "    4. Checks Rule 1 (Priority 50): No match"
+echo "    5. Checks Rule 2 (Priority 200): MATCH! → BLOCK"
+echo "    6. Returns NXDOMAIN to instance"
+echo "    7. facebook.com unreachable ✅"
+echo ""
+
+echo ""
+echo "  ════════════════════════════════════════════════════════════"
+echo "  TEST 3: Query Allowed AWS Service (s3.amazonaws.com)"
+echo "  ════════════════════════════════════════════════════════════"
+echo ""
+echo "  Command: dig s3.amazonaws.com"
+echo ""
+echo "  Expected Result: ✅ Resolves successfully"
+echo "  Reason: Matches ALLOW rule (Priority 50) for *.amazonaws.com"
+echo ""
+
+dig +short s3.amazonaws.com 2>/dev/null || echo "  (Would resolve successfully on instance)"
+
+echo ""
+echo "  What happens:"
+echo "    1. Instance queries DNS for s3.amazonaws.com"
+echo "    2. DNS Firewall checks rules in priority order"
+echo "    3. Rule 1 (Priority 50): MATCH *.amazonaws.com → ALLOW ✅"
+echo "    4. Stops evaluation (first match wins)"
+echo "    5. Query forwarded to Internet DNS"
+echo "    6. IP address returned normally"
+echo ""
+
+echo ""
+echo "  ════════════════════════════════════════════════════════════"
+echo "  TEST 4: Query Blocked Domain (twitter.com)"
+echo "  ════════════════════════════════════════════════════════════"
+echo ""
+echo "  Expected Result: ❌ NXDOMAIN"
+echo "  Reason: In SocialMediaBlocklist"
+echo ""
+
+echo ""
+echo "  Complete blocklist:"
+while IFS= read -r domain; do
+    echo "    ❌ $domain"
+done < /tmp/blocked-domains.txt
+
+echo ""
+
+#############################################################################
+# STEP 8: CONFIGURE LOGGING (OPTIONAL)
+#############################################################################
+
+echo "Step 8: Configuring DNS Query Logging"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  DNS Firewall logs to CloudWatch Logs..."
+echo ""
+
+# Create CloudWatch Log Group
+LOG_GROUP="/aws/route53/dnsfirewall"
+
+aws logs create-log-group --log-group-name $LOG_GROUP 2>/dev/null
+
+echo "  ✅ Log group created: $LOG_GROUP"
+echo ""
+
+# Create query logging config
+QUERY_LOG_CONFIG=$(aws route53resolver create-resolver-query-log-config \
+  --name DNSFirewallQueryLogs \
+  --destination-arn "arn:aws:logs:us-east-1:$(aws sts get-caller-identity --query Account --output text):log-group:$LOG_GROUP" \
+  --query 'ResolverQueryLogConfig.Id' \
+  --output text 2>/dev/null)
+
+if [ $? -eq 0 ]; then
+    echo "  ✅ Query logging config created: $QUERY_LOG_CONFIG"
+    
+    # Associate with VPC
+    aws route53resolver associate-resolver-query-log-config \
+      --resolver-query-log-config-id $QUERY_LOG_CONFIG \
+      --resource-id $DNS_FW_VPC 2>/dev/null
+    
+    echo "  ✅ Query logging associated with VPC"
+else
+    echo "  ℹ️  Query logging config may already exist or failed to create"
+fi
+
+echo ""
+echo "  Log format (JSON):"
+cat << 'EOF'
+{
+  "version": "1.100000",
+  "account_id": "123456789012",
+  "region": "us-east-1",
+  "vpc_id": "vpc-12345678",
+  "query_timestamp": "2026-03-19T10:30:00Z",
+  "query_name": "facebook.com",
+  "query_type": "A",
+  "firewall_rule_action": "BLOCK",
+  "firewall_rule_group_id": "rslvr-frg-abc123",
+  "firewall_domain_list_id": "rslvr-fdl-xyz789"
+}
+EOF
+
+echo ""
+echo "  To view logs:"
+echo "    CloudWatch Console → Log Groups → $LOG_GROUP"
+echo ""
+
+#############################################################################
+# STEP 9: VIEW METRICS
+#############################################################################
+
+echo "Step 9: CloudWatch Metrics"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Available metrics (after queries are made):"
+echo ""
+echo "    Namespace: AWS/Route53Resolver"
+echo ""
+echo "    Metrics:"
+echo "      • FirewallQueryCount - Total queries evaluated"
+echo "      • FirewallBlockedQueries - Queries blocked"
+echo "      • FirewallAllowedQueries - Queries allowed"
+echo ""
+echo "    Dimensions:"
+echo "      • FirewallRuleGroupId: $RULE_GROUP_ID"
+echo "      • VpcId: $DNS_FW_VPC"
+echo ""
+
+# Try to get some metrics (may be empty if no queries yet)
+echo "  Attempting to fetch recent metrics..."
+echo ""
+
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Route53Resolver \
+  --metric-name FirewallQueryCount \
+  --dimensions Name=FirewallRuleGroupId,Value=$RULE_GROUP_ID \
+  --start-time $(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Sum 2>/dev/null || echo "  ℹ️  No metrics available yet (need DNS queries first)"
+
+echo ""
+
+#############################################################################
+# SUMMARY
+#############################################################################
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║              LAB 91 COMPLETE! ✅                         ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+cat << EOF
+RESOURCES CREATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VPC Infrastructure:
+  • VPC:                   $DNS_FW_VPC
+  • Subnet:                $DNS_FW_SUBNET
+  • Internet Gateway:      $DNS_FW_IGW
+  • Route Table:           $DNS_FW_RT
+
+DNS Firewall:
+  • Custom Domain List:    $DOMAIN_LIST_ID (8 domains)
+  • AWS Services List:     $AWS_SERVICES_LIST
+  • Rule Group:            $RULE_GROUP_ID (3 rules)
+  • Association:           $ASSOCIATION_ID
+  • Query Logging:         $LOG_GROUP
+
+Test Instance:
+  • Instance ID:           $DNS_FW_INSTANCE
+  • Public IP:             $DNS_FW_INSTANCE_IP
+  • Security Group:        $DNS_FW_SG
+
+PROTECTION ACTIVE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ AWS services (*.amazonaws.com) - ALLOWED
+❌ Social media (facebook, twitter, etc.) - BLOCKED
+❌ Malware domains (AWS Managed List) - BLOCKED
+✅ Everything else - ALLOWED (default)
+
+TESTING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+To test from the instance (requires SSH key):
+
+ssh ec2-user@$DNS_FW_INSTANCE_IP
+
+Then run:
+  # Should work (allowed)
+  dig google.com
+  curl https://aws.amazon.com
+  
+  # Should fail (blocked)
+  dig facebook.com
+  curl https://twitter.com
+  ping instagram.com
+
+Expected errors for blocked domains:
+  • dig: NXDOMAIN (no such domain)
+  • curl: Could not resolve host
+  • ping: Name or service not known
+
+MONITORING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+View DNS query logs:
+  CloudWatch Console → Log Groups → $LOG_GROUP
+
+View metrics:
+  CloudWatch Console → Metrics → Route53Resolver
+    • FirewallQueryCount
+    • FirewallBlockedQueries
+    • FirewallAllowedQueries
+
+COST:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DNS Firewall: \$0.125/hour = \$3/day
+EC2 Instance: \$0.0116/hour = \$0.28/day
+VPC/Networking: Free tier eligible
+
+⚠️  DELETE RESOURCES AFTER TESTING TO AVOID CHARGES!
+
+NEXT STEPS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Test DNS resolution from instance
+2. Review CloudWatch logs
+3. Check metrics
+4. Run cleanup script (below)
+
+EOF
+
+echo ""
+echo "Press Enter to see cleanup commands..."
+read
+
+#############################################################################
+# CLEANUP COMMANDS
+#############################################################################
+
+cat << 'CLEANUP'
+
+╔═══════════════════════════════════════════════════════════╗
+║                  CLEANUP SCRIPT                          ║
+╚═══════════════════════════════════════════════════════════╝
+
+Run these commands to delete all resources:
+
+# Terminate instance
+aws ec2 terminate-instances --instance-ids $DNS_FW_INSTANCE
+aws ec2 wait instance-terminated --instance-ids $DNS_FW_INSTANCE
+
+# Disassociate rule group from VPC
+aws route53resolver disassociate-firewall-rule-group \
+  --firewall-rule-group-association-id $ASSOCIATION_ID
+
+# Delete firewall rules
+aws route53resolver delete-firewall-rule \
+  --firewall-rule-group-id $RULE_GROUP_ID \
+  --firewall-domain-list-id $DOMAIN_LIST_ID
+
+aws route53resolver delete-firewall-rule \
+  --firewall-rule-group-id $RULE_GROUP_ID \
+  --firewall-domain-list-id $AWS_SERVICES_LIST
+
+# Delete firewall rule group
+aws route53resolver delete-firewall-rule-group \
+  --firewall-rule-group-id $RULE_GROUP_ID
+
+# Delete domain lists
+aws route53resolver delete-firewall-domain-list \
+  --firewall-domain-list-id $DOMAIN_LIST_ID
+
+aws route53resolver delete-firewall-domain-list \
+  --firewall-domain-list-id $AWS_SERVICES_LIST
+
+# Disassociate query logging
+aws route53resolver disassociate-resolver-query-log-config \
+  --resolver-query-log-config-id $QUERY_LOG_CONFIG \
+  --resource-id $DNS_FW_VPC
+
+# Delete query logging config
+aws route53resolver delete-resolver-query-log-config \
+  --resolver-query-log-config-id $QUERY_LOG_CONFIG
+
+# Delete CloudWatch log group
+aws logs delete-log-group --log-group-name $LOG_GROUP
+
+# Delete security group
+aws ec2 delete-security-group --group-id $DNS_FW_SG
+
+# Delete VPC infrastructure
+aws ec2 detach-internet-gateway --internet-gateway-id $DNS_FW_IGW --vpc-id $DNS_FW_VPC
+aws ec2 delete-internet-gateway --internet-gateway-id $DNS_FW_IGW
+
+ASSOC=$(aws ec2 describe-route-tables --route-table-ids $DNS_FW_RT --query 'RouteTables[0].Associations[?SubnetId!=`null`].RouteTableAssociationId' --output text)
+aws ec2 disassociate-route-table --association-id $ASSOC
+
+aws ec2 delete-route-table --route-table-id $DNS_FW_RT
+aws ec2 delete-subnet --subnet-id $DNS_FW_SUBNET
+aws ec2 delete-vpc --vpc-id $DNS_FW_VPC
+
+echo "✅ All resources deleted!"
+
+CLEANUP
+
+echo ""
+echo "Save these variables for cleanup:"
+echo ""
+echo "DNS_FW_VPC=$DNS_FW_VPC"
+echo "DNS_FW_SUBNET=$DNS_FW_SUBNET"
+echo "DNS_FW_IGW=$DNS_FW_IGW"
+echo "DNS_FW_RT=$DNS_FW_RT"
+echo "DNS_FW_INSTANCE=$DNS_FW_INSTANCE"
+echo "DNS_FW_SG=$DNS_FW_SG"
+echo "RULE_GROUP_ID=$RULE_GROUP_ID"
+echo "DOMAIN_LIST_ID=$DOMAIN_LIST_ID"
+echo "AWS_SERVICES_LIST=$AWS_SERVICES_LIST"
+echo "ASSOCIATION_ID=$ASSOCIATION_ID"
+echo "QUERY_LOG_CONFIG=$QUERY_LOG_CONFIG"
+echo "LOG_GROUP=$LOG_GROUP"
+echo ""
+```
+
+---
+
+## **LAB 91 KEY LEARNINGS:**
+
+```
+WHAT YOU BUILT:
+✅ DNS Firewall protecting entire VPC
+✅ Custom domain blocklist (social media)
+✅ AWS services allowlist
+✅ Query logging to CloudWatch
+✅ Complete testing environment
+
+HOW IT WORKS:
+1. EC2 instance makes DNS query
+2. Query intercepted by Route 53 Resolver
+3. DNS Firewall evaluates rules (priority order)
+4. First match wins:
+   - ALLOW AWS services (Priority 50)
+   - BLOCK social media (Priority 200)
+   - Default: ALLOW
+5. Logs query to CloudWatch
+6. Returns result (IP or NXDOMAIN)
+
+PROTECTION PROVIDED:
+✅ Malware domains blocked (can't resolve C2 servers)
+✅ Social media blocked (corporate policy)
+✅ AWS services allowed (business needs)
+✅ Centralized (applies to all instances in VPC)
+✅ Logged (compliance, investigation)
+
+COST:
+$90/month per VPC (rule group association)
++ Normal DNS query costs
+
+EXAM TIPS:
+• Know DNS Firewall blocks at DNS resolution level
+• Understand rule priority (first match wins)
+• Remember AWS Managed Domain Lists (malware, botnet, etc.)
+• Know cost: $0.125/hour per VPC association
+• Understand use case: Prevent malware C2 communication
+```
+
+---
+
+**Great progress! You've completed:**
+✅ Route 53 DNSSEC  
+✅ Route 53 Resolver DNS Firewall  
+
+**Next up:**
+- VPC Peering Security (theory - 15 min)
+- AWS Transit Gateway (theory + lab - 35 min)
+- AWS PrivateLink (theory + lab - 35 min)
+
+**Should I continue with VPC Peering & Transit Gateway?** Or take a break? 🚀
+
+
+# **PART 3: VPC PEERING & TRANSIT GATEWAY - THEORY & LABS**
+
+---
+
+## **VPC PEERING SECURITY - THEORY (15 MIN)**
+
+### **What is VPC Peering?**
+
+```
+VPC Peering = Private connection between two VPCs
+
+Without Peering:
+VPC A (10.0.0.0/16) ←→ Internet ←→ VPC B (10.1.0.0/16)
+├─ Traffic goes through public internet
+├─ Need public IPs or NAT Gateway
+├─ Less secure, slower, costs more
+└─ No private connectivity
+
+With Peering:
+VPC A (10.0.0.0/16) ←――――――――――→ VPC B (10.1.0.0/16)
+                    Peering Connection
+├─ Traffic stays on AWS network (private)
+├─ Use private IPs
+├─ Secure, fast, cheaper
+└─ Like they're one big network
+```
+
+---
+
+### **VPC Peering Architecture:**
+
+```
+┌─────────────────────────────────┐    ┌─────────────────────────────────┐
+│  VPC A (10.0.0.0/16)           │    │  VPC B (10.1.0.0/16)           │
+│  Region: us-east-1              │    │  Region: us-west-2              │
+│  Account: 111111111111          │    │  Account: 222222222222          │
+│                                 │    │                                 │
+│  ┌──────────────┐              │    │  ┌──────────────┐              │
+│  │ EC2 Instance │              │    │  │ RDS Database │              │
+│  │ 10.0.1.10    │              │    │  │ 10.1.2.50    │              │
+│  └──────┬───────┘              │    │  └──────┬───────┘              │
+│         │                       │    │         │                       │
+│         │                       │    │         │                       │
+│    ┌────▼────────┐             │    │    ┌────▼────────┐             │
+│    │   Subnet    │             │    │    │   Subnet    │             │
+│    │ 10.0.1.0/24 │             │    │    │ 10.1.2.0/24 │             │
+│    └─────────────┘             │    │    └─────────────┘             │
+│         │                       │    │         │                       │
+│         │                       │    │         │                       │
+│    ┌────▼──────────────────┐   │    │   ┌────▼──────────────────┐   │
+│    │  Route Table          │   │    │   │  Route Table          │   │
+│    │  10.1.0.0/16 → pcx-* │   │    │   │  10.0.0.0/16 → pcx-* │   │
+│    └───────────────────────┘   │    │   └───────────────────────┘   │
+└─────────────────┬───────────────┘    └─────────────────┬───────────────┘
+                  │                                        │
+                  │      ┌──────────────────────┐        │
+                  └──────│  Peering Connection  │────────┘
+                         │  pcx-1234567890      │
+                         │  Status: Active       │
+                         └──────────────────────┘
+
+Key Features:
+✅ Cross-region (us-east-1 ←→ us-west-2)
+✅ Cross-account (111111111111 ←→ 222222222222)
+✅ Private IPs only
+✅ No single point of failure
+✅ Encrypted by default (AWS network)
+```
+
+---
+
+### **VPC Peering Security Considerations:**
+
+```
+SECURITY GROUPS WITH PEERING:
+
+Problem: Can't reference security group from another account/region
+
+Solution: Use CIDR blocks instead
+
+Example:
+VPC A Security Group (DB tier):
+┌────────────────────────────────────────────┐
+│ Inbound Rules:                             │
+│ ┌────────────┬──────┬─────────────────┐   │
+│ │ Type       │ Port │ Source          │   │
+│ ├────────────┼──────┼─────────────────┤   │
+│ │ PostgreSQL │ 5432 │ 10.1.0.0/16    │   │  ← VPC B CIDR
+│ └────────────┴──────┴─────────────────┘   │
+└────────────────────────────────────────────┘
+
+Why CIDR block?
+├─ Can't reference sg-xyz from VPC B (different account/region)
+├─ Must use IP range instead
+└─ Less granular, but works
+
+Best Practice:
+├─ Use smallest CIDR possible (not entire VPC)
+├─ Example: 10.1.2.0/24 (just app subnet) instead of 10.1.0.0/16
+└─ Minimize exposure
+
+SAME ACCOUNT/SAME REGION:
+Can reference security group IDs! ✅
+Example: Source: sg-0123456789abcdef (from peered VPC)
+```
+
+---
+
+### **VPC Peering Limitations:**
+
+```
+CRITICAL LIMITATIONS:
+
+1. NO TRANSITIVE PEERING ⚠️
+   
+   VPC A ←――→ VPC B ←――→ VPC C
+   
+   VPC A CANNOT talk to VPC C!
+   ├─ Peering is 1:1 only
+   ├─ Need separate peering: A ←――→ C
+   └─ Gets messy with many VPCs (full mesh)
+   
+   Example with 5 VPCs:
+   ├─ Need: 5 × 4 / 2 = 10 peering connections
+   ├─ With 10 VPCs: 45 peering connections! 😱
+   └─ Solution: Transit Gateway (next topic)
+
+2. NO OVERLAPPING CIDR BLOCKS ⚠️
+   
+   VPC A: 10.0.0.0/16
+   VPC B: 10.0.0.0/16  ❌ CANNOT peer!
+   
+   Same CIDR = routing conflict
+   └─ Plan VPC CIDRs carefully!
+
+3. NO EDGE-TO-EDGE ROUTING ⚠️
+   
+   VPC A (has VPN) ←――→ VPC B
+                          ↓
+                     On-premises
+   
+   VPC B CANNOT use VPC A's VPN to reach on-prem ❌
+   ├─ Each VPC needs its own VPN/Direct Connect
+   └─ Peering only works for VPC-to-VPC
+
+4. DNS RESOLUTION
+   
+   By default: Private DNS doesn't work across peering ❌
+   
+   Must enable:
+   ├─ Accepter DNS resolution: ON
+   ├─ Requester DNS resolution: ON
+   └─ Then: ip-10-0-1-5.ec2.internal resolves ✅
+
+5. MAXIMUM PEERING CONNECTIONS
+   
+   Per VPC: 125 active peering connections
+   └─ If you need more: Use Transit Gateway
+```
+
+---
+
+### **VPC Peering vs Transit Gateway:**
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    VPC PEERING                               │
+├──────────────────────────────────────────────────────────────┤
+│ Architecture:  1:1 connections (full mesh for many VPCs)    │
+│ Connections:   5 VPCs = 10 peering connections              │
+│ Transitive:    NO - each VPC pair needs direct peering      │
+│ Routing:       Add route to each VPC's route table          │
+│ Cost:          $0 + data transfer ($0.01/GB cross-region)   │
+│ Latency:       Lowest (direct connection)                   │
+│ Bandwidth:     No limits                                     │
+│                                                              │
+│ Good for:                                                    │
+│ ✅ 2-3 VPCs                                                 │
+│ ✅ Simple connectivity                                       │
+│ ✅ Cost-sensitive                                            │
+│ ✅ Maximum performance needed                                │
+│                                                              │
+│ Bad for:                                                     │
+│ ❌ Many VPCs (complexity)                                   │
+│ ❌ Centralized routing                                       │
+│ ❌ Shared services (need transit routing)                   │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                  TRANSIT GATEWAY                             │
+├──────────────────────────────────────────────────────────────┤
+│ Architecture:  Hub-and-spoke (all connect to TGW)           │
+│ Connections:   5 VPCs = 5 attachments to TGW                │
+│ Transitive:    YES - any VPC can talk to any other          │
+│ Routing:       Centralized in TGW route tables              │
+│ Cost:          $0.05/hour/attachment + $0.02/GB             │
+│ Latency:       Slight increase (extra hop)                  │
+│ Bandwidth:     Up to 50 Gbps per attachment                 │
+│                                                              │
+│ Good for:                                                    │
+│ ✅ Many VPCs (10+)                                          │
+│ ✅ Centralized routing/security                             │
+│ ✅ Shared services VPC                                       │
+│ ✅ On-premises connectivity                                  │
+│ ✅ Network segmentation                                      │
+│                                                              │
+│ Bad for:                                                     │
+│ ❌ Just 2 VPCs (overkill)                                   │
+│ ❌ Very cost-sensitive                                       │
+│ ❌ Need absolute lowest latency                             │
+└──────────────────────────────────────────────────────────────┘
+
+DECISION FLOWCHART:
+
+How many VPCs?
+├─ 2-3 VPCs → Use VPC Peering ✅
+├─ 4-9 VPCs → Consider Transit Gateway
+└─ 10+ VPCs → Definitely Transit Gateway ✅
+
+Need centralized security?
+├─ YES → Transit Gateway (inspection VPC)
+└─ NO → VPC Peering is fine
+
+Need to share services (Active Directory, DNS)?
+├─ YES → Transit Gateway (transitive routing)
+└─ NO → VPC Peering is fine
+
+Budget sensitive?
+├─ YES → VPC Peering (lower cost)
+└─ NO → Transit Gateway (easier management)
+```
+
+---
+
+## **AWS TRANSIT GATEWAY - THEORY (20 MIN)**
+
+### **What is Transit Gateway?**
+
+```
+Transit Gateway = Hub for connecting VPCs and on-premises networks
+
+Think of it as a cloud router:
+├─ All VPCs connect to Transit Gateway (TGW)
+├─ TGW routes traffic between them
+├─ Simplifies network architecture
+└─ Enables transitive routing
+
+Without Transit Gateway (Full Mesh):
+┌────────┐     ┌────────┐
+│ VPC 1  │─────│ VPC 2  │
+└───┬────┘     └───┬────┘
+    │ \          / │
+    │   \      /   │
+    │     \  /     │
+    │      \/      │
+    │      /\      │
+    │    /    \    │
+    │  /        \  │
+┌───▼──┐      ┌───▼──┐
+│VPC 3 │──────│VPC 4 │
+└──────┘      └──────┘
+
+4 VPCs = 6 peering connections! 😵
+
+With Transit Gateway (Hub-and-Spoke):
+       ┌────────┐
+       │ VPC 1  │
+       └───┬────┘
+           │
+       ┌───▼────────┐
+       │            │
+┌──────┤  Transit   ├──────┐
+│      │  Gateway   │      │
+│      │            │      │
+│      └────────────┘      │
+│                          │
+┌▼──────┐              ┌───▼──┐
+│ VPC 2 │              │ VPC 3│
+└───────┘              └──────┘
+
+4 VPCs = 4 attachments ✅
+Much simpler!
+```
+
+---
+
+### **Transit Gateway Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     TRANSIT GATEWAY                             │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Transit Gateway Route Tables                             │  │
+│  │  ┌────────────────────────────────────────────────────┐  │  │
+│  │  │ Production Route Table                             │  │  │
+│  │  │ • 10.1.0.0/16 → Prod-VPC attachment              │  │  │
+│  │  │ • 10.2.0.0/16 → Shared-Services attachment       │  │  │
+│  │  └────────────────────────────────────────────────────┘  │  │
+│  │  ┌────────────────────────────────────────────────────┐  │  │
+│  │  │ Development Route Table                            │  │  │
+│  │  │ • 10.10.0.0/16 → Dev-VPC attachment               │  │  │
+│  │  │ • 10.2.0.0/16 → Shared-Services attachment       │  │  │
+│  │  │ • 0.0.0.0/0 → VPN (for testing)                  │  │  │
+│  │  └────────────────────────────────────────────────────┘  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  Attachments:                                                   │
+│  ├─ VPC attachments (connects VPCs)                            │
+│  ├─ VPN attachments (Site-to-Site VPN)                         │
+│  ├─ Direct Connect Gateway attachments                          │
+│  └─ Peering attachments (connect to other TGWs)                │
+└─────────────────────────────────────────────────────────────────┘
+           │         │         │         │         │
+           ▼         ▼         ▼         ▼         ▼
+    ┌─────────┐ ┌─────────┐ ┌──────────┐ ┌──────┐ ┌──────────┐
+    │ Prod    │ │ Dev     │ │ Shared   │ │ VPN  │ │On-Prem   │
+    │ VPC     │ │ VPC     │ │ Services │ │      │ │(via VPN) │
+    │10.1.0.0 │ │10.10.0.0│ │ VPC      │ │      │ │          │
+    │   /16   │ │   /16   │ │10.2.0.0  │ │      │ │          │
+    └─────────┘ └─────────┘ │  /16     │ └──────┘ └──────────┘
+                            └──────────┘
+
+Transit Gateway Features:
+✅ Transitive routing (any-to-any)
+✅ Route table isolation (prod/dev separation)
+✅ Centralized security (inspection VPC)
+✅ Multi-region support (TGW peering)
+✅ Multi-account support (Resource sharing)
+```
+
+---
+
+### **Transit Gateway Security Features:**
+
+```
+1. NETWORK SEGMENTATION
+   
+   Separate route tables for different environments:
+   
+   Production Route Table:
+   ├─ Can route to: Prod VPC, Shared Services VPC
+   └─ CANNOT route to: Dev VPC, Test VPC
+   
+   Development Route Table:
+   ├─ Can route to: Dev VPC, Test VPC, Shared Services
+   └─ CANNOT route to: Prod VPC
+   
+   Result: Dev can't accidentally talk to Prod! ✅
+
+2. INSPECTION VPC (Security Hub-and-Spoke)
+   
+   Architecture:
+   All VPCs → Transit Gateway → Inspection VPC → Internet
+                                      │
+                                Network Firewall
+                                      │
+                                  IDS/IPS
+   
+   Inspection VPC contains:
+   ├─ Network Firewall (IDS/IPS, domain filtering)
+   ├─ Third-party firewall (Palo Alto, Fortinet)
+   ├─ Centralized NAT Gateway
+   └─ All traffic inspected! 🔍
+   
+   Routing:
+   VPC A wants to reach Internet:
+   1. Traffic → TGW
+   2. TGW route: 0.0.0.0/0 → Inspection VPC
+   3. Inspection VPC → Firewall inspection
+   4. If ALLOW → NAT Gateway → Internet
+   5. Response → Same path reverse
+   
+   Benefits:
+   ✅ Single security stack (no duplicate firewalls)
+   ✅ Centralized logging
+   ✅ Easier management
+   ✅ Cost-effective at scale
+
+3. ROUTE TABLE ISOLATION
+   
+   Prevent cross-talk between environments:
+   
+   Associate VPC with route table:
+   ├─ Prod-VPC-1 → Production Route Table
+   ├─ Prod-VPC-2 → Production Route Table
+   ├─ Dev-VPC-1 → Development Route Table
+   └─ Dev-VPC-2 → Development Route Table
+   
+   Production Route Table knows ONLY:
+   ├─ 10.1.0.0/16 (Prod-VPC-1)
+   ├─ 10.2.0.0/16 (Prod-VPC-2)
+   └─ No routes to Dev VPCs!
+   
+   Result: Prod can't reach Dev even if misconfigured ✅
+
+4. BLACKHOLE ROUTES
+   
+   Explicitly block traffic:
+   
+   Route: 10.10.0.0/16 → Blackhole
+   └─ Any traffic to 10.10.0.0/16 is dropped
+   
+   Use cases:
+   ├─ Decommissioned VPC (prevent accidental access)
+   ├─ Security incident (isolate compromised VPC)
+   └─ Quarantine environment
+```
+
+---
+
+### **Transit Gateway Use Cases:**
+
+```
+USE CASE 1: Multi-VPC Enterprise
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario:
+├─ 50 VPCs across 5 AWS accounts
+├─ Prod, Dev, Test, Shared Services, Security
+└─ Need: Connectivity + Isolation + Centralized security
+
+Without TGW:
+├─ 50 × 49 / 2 = 1,225 peering connections! 😱
+├─ Cannot manage
+└─ High complexity
+
+With TGW:
+├─ 50 VPC attachments to TGW
+├─ 5 route tables (one per environment)
+├─ 1 Inspection VPC
+└─ Manageable! ✅
+
+Cost:
+├─ $0.05/hour × 50 attachments = $2.50/hour
+├─ $2.50 × 24 × 30 = $1,800/month
+└─ Worth it for 50 VPCs!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 2: Centralized Egress (Inspection VPC)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem:
+├─ Every VPC needs NAT Gateway ($32/month each)
+├─ 10 VPCs = $320/month just for NAT
+└─ Plus: Each VPC needs separate firewall
+
+Solution: Centralized Egress
+┌──────────┐  ┌──────────┐  ┌──────────┐
+│  VPC 1   │  │  VPC 2   │  │  VPC 3   │
+└────┬─────┘  └────┬─────┘  └────┬─────┘
+     │             │             │
+     └─────────────┴─────────────┘
+                   │
+            ┌──────▼──────┐
+            │   Transit   │
+            │   Gateway   │
+            └──────┬──────┘
+                   │
+            ┌──────▼──────────┐
+            │ Inspection VPC  │
+            │                 │
+            │ ┌─────────────┐ │
+            │ │  Network    │ │
+            │ │  Firewall   │ │
+            │ └─────────────┘ │
+            │ ┌─────────────┐ │
+            │ │ NAT Gateway │ │
+            │ └─────────────┘ │
+            └─────────┬───────┘
+                      │
+                 ┌────▼────┐
+                 │Internet │
+                 └─────────┘
+
+Benefits:
+✅ Single NAT Gateway ($32/month vs $320)
+✅ Single Network Firewall ($600/month vs $6,000)
+✅ Centralized logging
+✅ Easier management
+
+Routing:
+VPC 1 route table: 0.0.0.0/0 → TGW
+TGW route table: 0.0.0.0/0 → Inspection VPC
+Inspection VPC: Route through firewall → NAT → Internet
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 3: Hybrid Cloud (On-Premises Connectivity)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario:
+├─ 20 AWS VPCs
+├─ On-premises data center
+└─ Need: All VPCs can reach on-prem
+
+Without TGW:
+├─ Each VPC needs separate VPN
+├─ 20 VPN connections
+├─ 20 sets of VPN configuration
+└─ Not practical!
+
+With TGW:
+┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐
+│VPC 1│  │VPC 2│  │VPC 3│  │VPC 4│  ... (20 VPCs)
+└──┬──┘  └──┬──┘  └──┬──┘  └──┬──┘
+   └────────┴────────┴────────┘
+              │
+       ┌──────▼──────┐
+       │   Transit   │
+       │   Gateway   │
+       └──────┬──────┘
+              │
+       ┌──────▼──────┐
+       │ Site-to-Site│
+       │     VPN     │
+       └──────┬──────┘
+              │
+       ┌──────▼──────┐
+       │ On-Premises │
+       │ Data Center │
+       └─────────────┘
+
+Benefits:
+✅ Single VPN connection (not 20!)
+✅ All VPCs can reach on-prem
+✅ Transitive routing
+✅ Centralized VPN management
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 4: Multi-Region (Transit Gateway Peering)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario:
+├─ US Region: 10 VPCs
+├─ EU Region: 10 VPCs
+└─ Need: US VPCs can reach EU VPCs
+
+Solution: TGW Peering
+┌─────────────────────────────┐  ┌─────────────────────────────┐
+│   US-EAST-1                 │  │   EU-WEST-1                 │
+│                             │  │                             │
+│ ┌────┐ ┌────┐ ┌────┐       │  │ ┌────┐ ┌────┐ ┌────┐       │
+│ │VPC1│ │VPC2│ │VPC3│ ...  │  │ │VPC1│ │VPC2│ │VPC3│ ...  │
+│ └─┬──┘ └─┬──┘ └─┬──┘       │  │ └─┬──┘ └─┬──┘ └─┬──┘       │
+│   └──────┴──────┘           │  │   └──────┴──────┘           │
+│          │                  │  │          │                  │
+│   ┌──────▼──────┐          │  │   ┌──────▼──────┐          │
+│   │  Transit    │          │  │   │  Transit    │          │
+│   │  Gateway    │◄─────────┼──┼───│  Gateway    │          │
+│   │  (US)       │  Peering │  │   │  (EU)       │          │
+│   └─────────────┘          │  │   └─────────────┘          │
+└─────────────────────────────┘  └─────────────────────────────┘
+
+Benefits:
+✅ Inter-region connectivity
+✅ Encrypted automatically
+✅ Low latency (AWS backbone)
+✅ No complex VPN setup
+
+Routing:
+US TGW: 10.100.0.0/16 → EU TGW (via peering)
+EU TGW: 10.0.0.0/16 → US TGW (via peering)
+```
+
+---
+
+### **Transit Gateway Cost:**
+
+```
+PRICING (US-EAST-1):
+
+1. Attachment Cost: $0.05 per hour per attachment
+   ├─ VPC attachment: $0.05/hour
+   ├─ VPN attachment: $0.05/hour
+   ├─ Direct Connect attachment: $0.05/hour
+   └─ Peering attachment: $0.05/hour
+   
+   Example:
+   5 VPCs × $0.05 = $0.25/hour
+   $0.25 × 24 × 30 = $180/month
+
+2. Data Processing: $0.02 per GB
+   ├─ Charged for traffic processed by TGW
+   ├─ Both directions (in + out)
+   └─ Only for data that crosses TGW
+   
+   Example:
+   100 GB/month × $0.02 = $2
+   
+3. Data Transfer (Inter-region peering)
+   ├─ $0.02 per GB (same as VPC peering)
+   └─ Only if using TGW peering
+
+COST COMPARISON:
+
+2 VPCs:
+├─ VPC Peering: $0 (+ $0.01/GB cross-region)
+├─ Transit Gateway: $180/month (2 × $0.05 × 730)
+└─ Winner: VPC Peering ✅
+
+10 VPCs (Full Mesh Peering):
+├─ VPC Peering: 45 connections (management nightmare)
+├─ Transit Gateway: $900/month (10 × $0.05 × 730)
+└─ Winner: Transit Gateway ✅ (easier to manage)
+
+10 VPCs + Centralized Egress:
+├─ 10 NAT Gateways: $320/month
+├─ 10 Network Firewalls: $6,000/month
+├─ Total without TGW: $6,320/month
+│
+├─ 1 NAT Gateway: $32/month
+├─ 1 Network Firewall: $600/month
+├─ Transit Gateway: $900/month
+├─ Total with TGW: $1,532/month
+└─ Savings: $4,788/month! 💰💰💰
+
+BREAK-EVEN POINT:
+├─ <3 VPCs: VPC Peering cheaper
+├─ 3-10 VPCs: Depends on use case
+└─ >10 VPCs: Transit Gateway almost always cheaper + easier
+```
+
+---
+
+## **LAB 92: DEPLOY TRANSIT GATEWAY (35 MIN)**
+
+```bash
+#!/bin/bash
+# CloudShell - Transit Gateway Lab
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║        LAB 92: AWS TRANSIT GATEWAY DEPLOYMENT           ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "What we'll build:"
+echo "  • Transit Gateway in us-east-1"
+echo "  • 3 VPCs (Prod, Dev, Shared Services)"
+echo "  • TGW attachments for each VPC"
+echo "  • Separate route tables (network segmentation)"
+echo "  • Test connectivity"
+echo ""
+echo "Time: ~30 minutes"
+echo "Cost: ~$2 for testing (delete after!)"
+echo ""
+
+#############################################################################
+# STEP 1: CREATE TRANSIT GATEWAY
+#############################################################################
+
+echo "Step 1: Creating Transit Gateway"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+TGW_ID=$(aws ec2 create-transit-gateway \
+  --description "Enterprise Transit Gateway" \
+  --options "AmazonSideAsn=64512,DefaultRouteTableAssociation=disable,DefaultRouteTablePropagation=disable,VpnEcmpSupport=enable,DnsSupport=enable" \
+  --tag-specifications 'ResourceType=transit-gateway,Tags=[{Key=Name,Value=Enterprise-TGW}]' \
+  --query 'TransitGateway.TransitGatewayId' \
+  --output text)
+
+echo "  ✅ Transit Gateway created: $TGW_ID"
+echo ""
+echo "  Configuration:"
+echo "    • ASN: 64512 (for BGP)"
+echo "    • Default route table: DISABLED (we'll create custom ones)"
+echo "    • VPN ECMP: Enabled (load balancing across VPN tunnels)"
+echo "    • DNS Support: Enabled"
+echo ""
+echo "  ⏱️  Waiting for Transit Gateway to become available (2-3 minutes)..."
+
+while true; do
+    STATE=$(aws ec2 describe-transit-gateways \
+        --transit-gateway-ids $TGW_ID \
+        --query 'TransitGateways[0].State' \
+        --output text)
+    
+    if [ "$STATE" == "available" ]; then
+        echo "     ✅ Transit Gateway is available!"
+        break
+    fi
+    
+    echo "     State: $STATE (waiting...)"
+    sleep 20
+done
+
+echo ""
+
+#############################################################################
+# STEP 2: CREATE 3 VPCs
+#############################################################################
+
+echo "Step 2: Creating VPCs for Multi-Tier Architecture"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Production VPC
+echo "  Creating Production VPC..."
+PROD_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.1.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=Production-VPC},{Key=Environment,Value=Production}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+aws ec2 modify-vpc-attribute --vpc-id $PROD_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $PROD_VPC --enable-dns-support
+
+echo "     ✅ Production VPC: $PROD_VPC (10.1.0.0/16)"
+
+# Development VPC
+echo "  Creating Development VPC..."
+DEV_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.10.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=Development-VPC},{Key=Environment,Value=Development}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+aws ec2 modify-vpc-attribute --vpc-id $DEV_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $DEV_VPC --enable-dns-support
+
+echo "     ✅ Development VPC: $DEV_VPC (10.10.0.0/16)"
+
+# Shared Services VPC
+echo "  Creating Shared Services VPC..."
+SHARED_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.2.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=SharedServices-VPC},{Key=Environment,Value=Shared}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+aws ec2 modify-vpc-attribute --vpc-id $SHARED_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $SHARED_VPC --enable-dns-support
+
+echo "     ✅ Shared Services VPC: $SHARED_VPC (10.2.0.0/16)"
+echo ""
+
+# Create subnets in each VPC
+echo "  Creating subnets..."
+
+PROD_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $PROD_VPC \
+  --cidr-block 10.1.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Prod-Subnet}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+DEV_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $DEV_VPC \
+  --cidr-block 10.10.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Dev-Subnet}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+SHARED_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $SHARED_VPC \
+  --cidr-block 10.2.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Shared-Subnet}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+echo "     ✅ Subnets created in all VPCs"
+echo ""
+
+#############################################################################
+# STEP 3: CREATE TGW ATTACHMENTS
+#############################################################################
+
+echo "Step 3: Creating Transit Gateway Attachments"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Creating attachment for Production VPC..."
+PROD_ATTACHMENT=$(aws ec2 create-transit-gateway-vpc-attachment \
+  --transit-gateway-id $TGW_ID \
+  --vpc-id $PROD_VPC \
+  --subnet-ids $PROD_SUBNET \
+  --tag-specifications 'ResourceType=transit-gateway-attachment,Tags=[{Key=Name,Value=Prod-VPC-Attachment}]' \
+  --query 'TransitGatewayVpcAttachment.TransitGatewayAttachmentId' \
+  --output text)
+
+echo "     ✅ Production attachment: $PROD_ATTACHMENT"
+
+echo "  Creating attachment for Development VPC..."
+DEV_ATTACHMENT=$(aws ec2 create-transit-gateway-vpc-attachment \
+  --transit-gateway-id $TGW_ID \
+  --vpc-id $DEV_VPC \
+  --subnet-ids $DEV_SUBNET \
+  --tag-specifications 'ResourceType=transit-gateway-attachment,Tags=[{Key=Name,Value=Dev-VPC-Attachment}]' \
+  --query 'TransitGatewayVpcAttachment.TransitGatewayAttachmentId' \
+  --output text)
+
+echo "     ✅ Development attachment: $DEV_ATTACHMENT"
+
+echo "  Creating attachment for Shared Services VPC..."
+SHARED_ATTACHMENT=$(aws ec2 create-transit-gateway-vpc-attachment \
+  --transit-gateway-id $TGW_ID \
+  --vpc-id $SHARED_VPC \
+  --subnet-ids $SHARED_SUBNET \
+  --tag-specifications 'ResourceType=transit-gateway-attachment,Tags=[{Key=Name,Value=Shared-VPC-Attachment}]' \
+  --query 'TransitGatewayVpcAttachment.TransitGatewayAttachmentId' \
+  --output text)
+
+echo "     ✅ Shared Services attachment: $SHARED_ATTACHMENT"
+echo ""
+echo "  ⏱️  Waiting for attachments to become available (1-2 minutes)..."
+sleep 60
+
+# Check all attachments are available
+for ATTACHMENT in $PROD_ATTACHMENT $DEV_ATTACHMENT $SHARED_ATTACHMENT; do
+    while true; do
+        STATE=$(aws ec2 describe-transit-gateway-vpc-attachments \
+            --transit-gateway-attachment-ids $ATTACHMENT \
+            --query 'TransitGatewayVpcAttachments[0].State' \
+            --output text 2>/dev/null)
+        
+        if [ "$STATE" == "available" ]; then
+            break
+        fi
+        sleep 10
+    done
+done
+
+echo "     ✅ All attachments are available!"
+echo ""
+
+#############################################################################
+# STEP 4: CREATE TGW ROUTE TABLES (Network Segmentation)
+#############################################################################
+
+echo "Step 4: Creating Transit Gateway Route Tables (Network Segmentation)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Creating Production Route Table..."
+PROD_RT=$(aws ec2 create-transit-gateway-route-table \
+  --transit-gateway-id $TGW_ID \
+  --tag-specifications 'ResourceType=transit-gateway-route-table,Tags=[{Key=Name,Value=Production-RT}]' \
+  --query 'TransitGatewayRouteTable.TransitGatewayRouteTableId' \
+  --output text)
+
+echo "     ✅ Production Route Table: $PROD_RT"
+
+echo "  Creating Development Route Table..."
+DEV_RT=$(aws ec2 create-transit-gateway-route-table \
+  --transit-gateway-id $TGW_ID \
+  --tag-specifications 'ResourceType=transit-gateway-route-table,Tags=[{Key=Name,Value=Development-RT}]' \
+  --query 'TransitGatewayRouteTable.TransitGatewayRouteTableId' \
+  --output text)
+
+echo "     ✅ Development Route Table: $DEV_RT"
+
+echo "  Creating Shared Services Route Table..."
+SHARED_RT=$(aws ec2 create-transit-gateway-route-table \
+  --transit-gateway-id $TGW_ID \
+  --tag-specifications 'ResourceType=transit-gateway-route-table,Tags=[{Key=Name,Value=SharedServices-RT}]' \
+  --query 'TransitGatewayRouteTable.TransitGatewayRouteTableId' \
+  --output text)
+
+echo "     ✅ Shared Services Route Table: $SHARED_RT"
+echo ""
+
+#############################################################################
+# STEP 5: ASSOCIATE ATTACHMENTS WITH ROUTE TABLES
+#############################################################################
+
+echo "Step 5: Associating Attachments with Route Tables"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Associating Production VPC with Production Route Table..."
+aws ec2 associate-transit-gateway-route-table \
+  --transit-gateway-route-table-id $PROD_RT \
+  --transit-gateway-attachment-id $PROD_ATTACHMENT
+
+echo "     ✅ Production association complete"
+
+echo "  Associating Development VPC with Development Route Table..."
+aws ec2 associate-transit-gateway-route-table \
+  --transit-gateway-route-table-id $DEV_RT \
+  --transit-gateway-attachment-id $DEV_ATTACHMENT
+
+echo "     ✅ Development association complete"
+
+echo "  Associating Shared Services VPC with Shared Services Route Table..."
+aws ec2 associate-transit-gateway-route-table \
+  --transit-gateway-route-table-id $SHARED_RT \
+  --transit-gateway-attachment-id $SHARED_ATTACHMENT
+
+echo "     ✅ Shared Services association complete"
+echo ""
+
+#############################################################################
+# STEP 6: CREATE ROUTES IN TGW ROUTE TABLES
+#############################################################################
+
+echo "Step 6: Creating Routes in Transit Gateway Route Tables"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Production Route Table routes:"
+echo "    • 10.2.0.0/16 → Shared Services (ALLOWED)"
+echo "    • 10.10.0.0/16 → NOT routed (ISOLATED from Dev)"
+
+aws ec2 create-transit-gateway-route \
+  --destination-cidr-block 10.2.0.0/16 \
+  --transit-gateway-route-table-id $PROD_RT \
+  --transit-gateway-attachment-id $SHARED_ATTACHMENT
+
+echo "     ✅ Production can reach Shared Services"
+echo ""
+
+echo "  Development Route Table routes:"
+echo "    • 10.2.0.0/16 → Shared Services (ALLOWED)"
+echo "    • 10.1.0.0/16 → NOT routed (ISOLATED from Prod)"
+
+aws ec2 create-transit-gateway-route \
+  --destination-cidr-block 10.2.0.0/16 \
+  --transit-gateway-route-table-id $DEV_RT \
+  --transit-gateway-attachment-id $SHARED_ATTACHMENT
+
+echo "     ✅ Development can reach Shared Services"
+echo ""
+
+echo "  Shared Services Route Table routes:"
+echo "    • 10.1.0.0/16 → Production (ALLOWED)"
+echo "    • 10.10.0.0/16 → Development (ALLOWED)"
+
+aws ec2 create-transit-gateway-route \
+  --destination-cidr-block 10.1.0.0/16 \
+  --transit-gateway-route-table-id $SHARED_RT \
+  --transit-gateway-attachment-id $PROD_ATTACHMENT
+
+aws ec2 create-transit-gateway-route \
+  --destination-cidr-block 10.10.0.0/16 \
+  --transit-gateway-route-table-id $SHARED_RT \
+  --transit-gateway-attachment-id $DEV_ATTACHMENT
+
+echo "     ✅ Shared Services can reach both Prod and Dev"
+echo ""
+
+echo "  Network Segmentation Summary:"
+echo "    ┌──────────────┬──────────────┬──────────────┬──────────────┐"
+echo "    │              │ Prod         │ Dev          │ Shared       │"
+echo "    ├──────────────┼──────────────┼──────────────┼──────────────┤"
+echo "    │ Prod         │ -            │ ❌ BLOCKED   │ ✅ ALLOWED   │"
+echo "    │ Dev          │ ❌ BLOCKED   │ -            │ ✅ ALLOWED   │"
+echo "    │ Shared       │ ✅ ALLOWED   │ ✅ ALLOWED   │ -            │"
+echo "    └──────────────┴──────────────┴──────────────┴──────────────┘"
+echo ""
+echo "  Security achieved: Prod and Dev CANNOT talk to each other!"
+echo ""
+
+#############################################################################
+# STEP 7: UPDATE VPC ROUTE TABLES
+#############################################################################
+
+echo "Step 7: Updating VPC Route Tables to Route Through TGW"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Get main route table for each VPC
+PROD_VPC_RT=$(aws ec2 describe-route-tables \
+  --filters "Name=vpc-id,Values=$PROD_VPC" "Name=association.main,Values=true" \
+  --query 'RouteTables[0].RouteTableId' \
+  --output text)
+
+DEV_VPC_RT=$(aws ec2 describe-route-tables \
+  --filters "Name=vpc-id,Values=$DEV_VPC" "Name=association.main,Values=true" \
+  --query 'RouteTables[0].RouteTableId' \
+  --output text)
+
+SHARED_VPC_RT=$(aws ec2 describe-route-tables \
+  --filters "Name=vpc-id,Values=$SHARED_VPC" "Name=association.main,Values=true" \
+  --query 'RouteTables[0].RouteTableId' \
+  --output text)
+
+echo "  Adding routes to Production VPC..."
+aws ec2 create-route \
+  --route-table-id $PROD_VPC_RT \
+  --destination-cidr-block 10.2.0.0/16 \
+  --transit-gateway-id $TGW_ID
+
+echo "     ✅ Production VPC routes 10.2.0.0/16 (Shared) through TGW"
+
+echo "  Adding routes to Development VPC..."
+aws ec2 create-route \
+  --route-table-id $DEV_VPC_RT \
+  --destination-cidr-block 10.2.0.0/16 \
+  --transit-gateway-id $TGW_ID
+
+echo "     ✅ Development VPC routes 10.2.0.0/16 (Shared) through TGW"
+
+echo "  Adding routes to Shared Services VPC..."
+aws ec2 create-route \
+  --route-table-id $SHARED_VPC_RT \
+  --destination-cidr-block 10.1.0.0/16 \
+  --transit-gateway-id $TGW_ID
+
+aws ec2 create-route \
+  --route-table-id $SHARED_VPC_RT \
+  --destination-cidr-block 10.10.0.0/16 \
+  --transit-gateway-id $TGW_ID
+
+echo "     ✅ Shared Services VPC routes 10.1.0.0/16 (Prod) and 10.10.0.0/16 (Dev) through TGW"
+echo ""
+
+#############################################################################
+# SUMMARY
+#############################################################################
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║              LAB 92 COMPLETE! ✅                         ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+cat << EOF
+TRANSIT GATEWAY ARCHITECTURE DEPLOYED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+         ┌───────────────┐        ┌───────────────┐
+         │ Production    │        │ Development   │
+         │ VPC           │        │ VPC           │
+         │ 10.1.0.0/16   │        │ 10.10.0.0/16  │
+         └───────┬───────┘        └───────┬───────┘
+                 │                         │
+                 │                         │
+            ┌────▼─────────────────────────▼────┐
+            │                                    │
+            │      Transit Gateway ($TGW_ID)    │
+            │                                    │
+            └────────────────┬───────────────────┘
+                             │
+                     ┌───────▼────────┐
+                     │ Shared Services│
+                     │ VPC            │
+                     │ 10.2.0.0/16    │
+                     └────────────────┘
+
+RESOURCES CREATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Transit Gateway:       $TGW_ID
+
+VPCs:
+  • Production:        $PROD_VPC (10.1.0.0/16)
+  • Development:       $DEV_VPC (10.10.0.0/16)
+  • Shared Services:   $SHARED_VPC (10.2.0.0/16)
+
+TGW Attachments:
+  • Production:        $PROD_ATTACHMENT
+  • Development:       $DEV_ATTACHMENT
+  • Shared Services:   $SHARED_ATTACHMENT
+
+TGW Route Tables:
+  • Production RT:     $PROD_RT
+  • Development RT:    $DEV_RT
+  • Shared Services RT: $SHARED_RT
+
+NETWORK SEGMENTATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Production → Shared Services (Active Directory, DNS)
+❌ Production → Development (ISOLATED!)
+✅ Development → Shared Services (Active Directory, DNS)
+❌ Development → Production (ISOLATED!)
+✅ Shared Services → Both Prod and Dev
+
+ROUTING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Production VPC RT:
+  • 10.2.0.0/16 → TGW (can reach Shared Services)
+  • No route to 10.10.0.0/16 (Dev isolated)
+
+Development VPC RT:
+  • 10.2.0.0/16 → TGW (can reach Shared Services)
+  • No route to 10.1.0.0/16 (Prod isolated)
+
+Shared Services VPC RT:
+  • 10.1.0.0/16 → TGW (can reach Prod)
+  • 10.10.0.0/16 → TGW (can reach Dev)
+
+SECURITY BENEFITS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Network isolation (Prod/Dev separation)
+✅ Centralized routing
+✅ Scalable (easy to add more VPCs)
+✅ Shared services (AD, DNS) accessible by all
+✅ No complex peering mesh
+
+COST:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Transit Gateway: \$0.05/hour × 3 attachments = \$0.15/hour
+Daily cost: \$3.60/day
+Monthly cost: \$108/month (3 VPCs)
+
+⚠️  DELETE RESOURCES AFTER TESTING TO AVOID CHARGES!
+
+TESTING (Optional - requires EC2 instances):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+To test connectivity, launch instances:
+  1. Instance in Prod VPC (10.1.1.x)
+  2. Instance in Dev VPC (10.10.1.x)
+  3. Instance in Shared VPC (10.2.1.x)
+
+Test:
+  • Prod instance → Shared instance: ✅ Should work (ping 10.2.1.x)
+  • Prod instance → Dev instance: ❌ Should FAIL (no route)
+  • Dev instance → Shared instance: ✅ Should work
+  • Dev instance → Prod instance: ❌ Should FAIL
+
+This proves network segmentation! 🎯
+
+EOF
+
+echo ""
+echo "Save these values for cleanup:"
+echo ""
+echo "TGW_ID=$TGW_ID"
+echo "PROD_VPC=$PROD_VPC"
+echo "DEV_VPC=$DEV_VPC"
+echo "SHARED_VPC=$SHARED_VPC"
+echo "PROD_ATTACHMENT=$PROD_ATTACHMENT"
+echo "DEV_ATTACHMENT=$DEV_ATTACHMENT"
+echo "SHARED_ATTACHMENT=$SHARED_ATTACHMENT"
+echo "PROD_RT=$PROD_RT"
+echo "DEV_RT=$DEV_RT"
+echo "SHARED_RT=$SHARED_RT"
+echo ""
+echo "Next: AWS PrivateLink (final topic for Day 27) →"
+echo ""
+```
+
+---
+
+**Excellent progress! You've completed Transit Gateway!** 🎉
+
+**Still to come for Day 27:**
+- AWS PrivateLink (theory + lab - 35 min)
+- Service comparison summary (10 min)
+
+**Your prompt usage is efficient! Should I continue with PrivateLink?** 🚀
+
+
+
+# **AWS PRIVATELINK - THEORY & COST ANALYSIS**
+
+---
+
+## **COST ESTIMATION FOR DAY 27 LABS** 💰
+
+```
+╔═══════════════════════════════════════════════════════════╗
+║           DAY 27 LABS - COST BREAKDOWN                   ║
+╚═══════════════════════════════════════════════════════════╝
+
+LAB 90: ROUTE 53 DNSSEC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Resources: None created (theoretical demo)
+Cost: $0.00 ✅
+
+LAB 91: ROUTE 53 RESOLVER DNS FIREWALL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Resources:
+├─ VPC + networking (free tier eligible)
+├─ EC2 t2.micro instance: $0.0116/hour
+├─ DNS Firewall rule group: $0.125/hour
+└─ Query logging: Negligible
+
+Testing time: 30 minutes
+Cost: $0.08 (if deleted immediately)
+Cost if left running: $3.60/day ⚠️
+
+LAB 92: TRANSIT GATEWAY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Resources:
+├─ Transit Gateway: $0.05/hour
+├─ 3 VPC attachments: 3 × $0.05/hour = $0.15/hour
+├─ Data processing: Minimal (< $0.01)
+└─ 3 VPCs + networking: Free tier eligible
+
+Testing time: 30 minutes
+Cost: $0.10 (if deleted immediately)
+Cost if left running: $3.60/day ⚠️
+
+LAB 93: PRIVATELINK (UPCOMING)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Resources:
+├─ VPC Endpoint Service: $0.01/hour
+├─ Network Load Balancer: $0.0225/hour
+├─ VPC Endpoint (consumer): $0.01/hour
+├─ 2 VPCs + networking: Free tier eligible
+└─ Data processing: $0.01/GB (minimal)
+
+Testing time: 30 minutes
+Cost: $0.02 (if deleted immediately)
+Cost if left running: $0.78/day ⚠️
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOTAL DAY 27 COST (If all labs completed & deleted immediately):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Testing (2 hours total):        $0.20
+Data transfer:                   $0.05
+Buffer for variations:           $0.25
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GRAND TOTAL:                     ~$0.50 ✅
+
+IF YOU FORGET TO DELETE (24 hours):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DNS Firewall:                    $3.60/day
+Transit Gateway:                 $3.60/day
+PrivateLink:                     $0.78/day
+EC2 instances:                   $0.28/day
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TOTAL:                           ~$8.26/day ⚠️
+
+⚠️  CRITICAL: Run cleanup scripts immediately after each lab!
+
+CLEANUP PRIORITY (Most Expensive First):
+1. Transit Gateway + attachments ($3.60/day)
+2. DNS Firewall ($3.60/day)
+3. PrivateLink NLB ($0.54/day)
+4. EC2 instances ($0.28/day)
+5. VPCs (free)
+
+╔═══════════════════════════════════════════════════════════╗
+║  RECOMMENDATION: Delete resources after EACH lab!        ║
+║  Don't wait until end of day!                            ║
+╚═══════════════════════════════════════════════════════════╝
+```
+
+---
+
+## **AWS PRIVATELINK - THEORY (20 MIN)**
+
+### **What is AWS PrivateLink?**
+
+```
+PrivateLink = Private connectivity to AWS services and your own services
+
+Problem WITHOUT PrivateLink:
+├─ VPC A needs to access service in VPC B
+├─ Options:
+│   ├─ VPC Peering (exposes entire VPC)
+│   ├─ Public endpoint (goes through internet)
+│   └─ Transit Gateway (complex for simple use case)
+└─ None are ideal for service-to-service connectivity
+
+With PrivateLink:
+├─ Private, secure, one-way connection
+├─ Expose ONLY specific service (not entire VPC)
+├─ Traffic stays on AWS network
+├─ Scalable, no IP conflicts
+└─ Service consumer doesn't see provider's VPC
+
+Use Case:
+VPC A (Customer) wants to use SaaS app in VPC B (SaaS Provider)
+├─ Provider creates VPC Endpoint Service (powered by NLB)
+├─ Customer creates VPC Endpoint
+├─ Customer accesses via private IP (10.x.x.x)
+└─ Provider's VPC remains private/hidden
+```
+
+---
+
+### **PrivateLink Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              SERVICE PROVIDER VPC (VPC B)                       │
+│              Account: 222222222222                              │
+│              10.2.0.0/16                                        │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Application (SaaS Service)                             │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐             │   │
+│  │  │ Web API  │  │ Web API  │  │ Web API  │             │   │
+│  │  │ Instance │  │ Instance │  │ Instance │             │   │
+│  │  │ 10.2.1.5 │  │ 10.2.1.6 │  │ 10.2.1.7 │             │   │
+│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘             │   │
+│  │       └────────────┬──────────────┘                     │   │
+│  └────────────────────┼────────────────────────────────────┘   │
+│                       │                                         │
+│           ┌───────────▼──────────────┐                         │
+│           │  Network Load Balancer   │                         │
+│           │  (Internal)               │                         │
+│           │  IP: 10.2.2.100          │                         │
+│           └───────────┬───────────────┘                         │
+│                       │                                         │
+│           ┌───────────▼────────────────┐                        │
+│           │  VPC Endpoint Service      │                        │
+│           │  vpce-svc-1234567890abcdef │                        │
+│           │                             │                        │
+│           │  Allows connections from:   │                        │
+│           │  • Account: 111111111111    │                        │
+│           │  • Require acceptance: Yes  │                        │
+│           └─────────────────────────────┘                        │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          │ PrivateLink Connection
+                          │ (AWS Network - Private)
+                          │
+┌─────────────────────────▼───────────────────────────────────────┐
+│              SERVICE CONSUMER VPC (VPC A)                       │
+│              Account: 111111111111                              │
+│              10.1.0.0/16                                        │
+│                                                                 │
+│           ┌─────────────────────────┐                           │
+│           │  VPC Endpoint           │                           │
+│           │  vpce-0987654321fedcba  │                           │
+│           │                          │                           │
+│           │  Type: Interface         │                           │
+│           │  Service: vpce-svc-1234..│                           │
+│           │  IP: 10.1.3.50          │                           │
+│           └──────────┬───────────────┘                           │
+│                      │                                           │
+│          ┌───────────▼─────────────┐                            │
+│          │  Application            │                            │
+│          │  ┌──────────────────┐   │                            │
+│          │  │  EC2 Instance    │   │                            │
+│          │  │  Calls:          │   │                            │
+│          │  │  http://         │   │                            │
+│          │  │  10.1.3.50:443   │   │                            │
+│          │  └──────────────────┘   │                            │
+│          └─────────────────────────┘                            │
+└─────────────────────────────────────────────────────────────────┘
+
+Key Points:
+✅ Consumer ONLY sees endpoint IP (10.1.3.50)
+✅ Consumer has NO access to provider's VPC
+✅ Provider controls who can connect
+✅ Traffic is private (never leaves AWS network)
+✅ No IP overlap issues (endpoint gets IP in consumer VPC)
+```
+
+---
+
+### **PrivateLink Components:**
+
+```
+1. VPC ENDPOINT SERVICE (Provider Side)
+   
+   Created by: Service provider
+   Powered by: Network Load Balancer (NLB)
+   
+   Configuration:
+   ├─ Choose NLB (must be internal or internet-facing)
+   ├─ Set acceptance mode (auto-accept or manual approval)
+   ├─ Specify allowed principals (AWS accounts/IAM principals)
+   └─ Optional: Private DNS name
+   
+   Features:
+   ✅ Control who can connect
+   ✅ Audit connection requests
+   ✅ Auto-scaling (NLB handles load)
+   ✅ HA across multiple AZs
+
+2. VPC ENDPOINT (Consumer Side)
+   
+   Created by: Service consumer
+   Type: Interface endpoint
+   
+   Configuration:
+   ├─ Select endpoint service (by service name)
+   ├─ Choose VPC and subnets
+   ├─ Select security groups
+   └─ Enable private DNS (optional)
+   
+   Features:
+   ✅ Gets private IP in consumer VPC
+   ✅ Accessible from anywhere in VPC
+   ✅ Can enable across multiple AZs (redundancy)
+   ✅ Security group controls access
+
+3. NETWORK LOAD BALANCER (Backend)
+   
+   Purpose: Distributes traffic to targets
+   
+   Targets:
+   ├─ EC2 instances
+   ├─ IP addresses (containers)
+   ├─ Lambda functions (via ALB → NLB not supported, use ALB)
+   └─ Auto Scaling groups
+   
+   Requirements:
+   ├─ Must be internal or internet-facing (NLB)
+   ├─ Health checks configured
+   ├─ Listener configured (TCP/UDP/TLS)
+   └─ Target group with registered targets
+```
+
+---
+
+### **PrivateLink vs Alternatives:**
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    VPC PEERING                               │
+├──────────────────────────────────────────────────────────────┤
+│ Connectivity:  Full network access (entire VPC)             │
+│ Direction:     Bidirectional                                 │
+│ IP Overlap:    NOT allowed (CIDR conflict)                   │
+│ Scaling:       Difficult (full mesh)                         │
+│ Control:       Limited (security groups/NACLs only)          │
+│ Cost:          $0 + data transfer                            │
+│                                                              │
+│ Use when:      Need full VPC-to-VPC connectivity            │
+│ Don't use:     Only need access to specific service         │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                   TRANSIT GATEWAY                            │
+├──────────────────────────────────────────────────────────────┤
+│ Connectivity:  Full network access (transitive)             │
+│ Direction:     Any-to-any                                    │
+│ IP Overlap:    NOT allowed                                   │
+│ Scaling:       Excellent (hub-and-spoke)                     │
+│ Control:       Route table isolation                         │
+│ Cost:          $0.05/hour/attachment                         │
+│                                                              │
+│ Use when:      Many VPCs need to interconnect               │
+│ Don't use:     Simple service-to-service connection         │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                   AWS PRIVATELINK                            │
+├──────────────────────────────────────────────────────────────┤
+│ Connectivity:  Service-level access only                    │
+│ Direction:     Unidirectional (consumer → provider)         │
+│ IP Overlap:    ALLOWED (no conflict)                        │
+│ Scaling:       Excellent (thousands of consumers)           │
+│ Control:       Service provider approves consumers          │
+│ Cost:          $0.01/hour/endpoint                           │
+│                                                              │
+│ Use when:      SaaS, service marketplace, microservices     │
+│ Best for:      Secure, private service exposure             │
+└──────────────────────────────────────────────────────────────┘
+
+COMPARISON TABLE:
+
+Feature          │VPC Peering│Transit GW│PrivateLink
+─────────────────┼───────────┼──────────┼──────────────
+Expose entire VPC│    Yes    │   Yes    │     No
+IP conflicts     │   Problem │  Problem │  No problem
+Scalability      │    Low    │   High   │  Very high
+Provider control │   Limited │  Limited │  Excellent
+Cost (per hour)  │    $0     │  $0.15   │   $0.02
+Setup complexity │    Low    │  Medium  │   Medium
+───────────────────────────────────────────────────────
+
+DECISION FLOWCHART:
+
+Need full VPC access?
+├─ YES → VPC Peering or Transit Gateway
+└─ NO → Continue
+
+Expose specific service only?
+├─ YES → PrivateLink ✅
+└─ NO → Transit Gateway
+
+Multi-tenant SaaS service?
+├─ YES → PrivateLink ✅ (perfect use case!)
+└─ NO → Consider alternatives
+
+Need to hide provider VPC?
+├─ YES → PrivateLink ✅
+└─ NO → VPC Peering might be simpler
+```
+
+---
+
+### **PrivateLink Use Cases:**
+
+```
+USE CASE 1: SaaS Provider Offering Private Access
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario:
+You build analytics SaaS platform
+├─ 100+ enterprise customers
+├─ Customers want PRIVATE access (not public internet)
+├─ Each customer has own AWS account/VPC
+└─ You need to provide service without exposing VPC
+
+Traditional approach (problems):
+├─ VPC Peering to each customer = 100 peering connections! 😱
+├─ Customers see your VPC CIDR (security concern)
+├─ IP conflicts if customer uses same CIDR
+└─ Complex to manage
+
+PrivateLink solution:
+┌─────────────────────────────────────┐
+│ Your SaaS VPC (10.0.0.0/16)        │
+│                                     │
+│ ┌─────────────────────────────┐    │
+│ │ Analytics API Cluster       │    │
+│ │ (Auto Scaling)              │    │
+│ └──────────┬──────────────────┘    │
+│            │                        │
+│ ┌──────────▼──────────────────┐    │
+│ │ Network Load Balancer        │    │
+│ └──────────┬──────────────────┘    │
+│            │                        │
+│ ┌──────────▼──────────────────┐    │
+│ │ VPC Endpoint Service         │    │
+│ │ Service name:                │    │
+│ │ com.amazonaws.vpce.us-east-1.│    │
+│ │ vpce-svc-1234567890abcdef    │    │
+│ └─────────────────────────────┘    │
+└─────────────────────────────────────┘
+              │
+              │ (100+ customers connect here)
+              │
+    ┌─────────┴─────────┬─────────────┐
+    │                   │             │
+┌───▼────┐        ┌─────▼──┐    ┌────▼────┐
+│Customer│        │Customer│    │Customer │
+│   1    │        │   2    │    │  100    │
+└────────┘        └────────┘    └─────────┘
+
+Benefits:
+✅ Scale to thousands of customers
+✅ Each customer gets private endpoint
+✅ You control access (approve/deny)
+✅ No IP conflicts
+✅ Customers don't see your VPC
+
+Cost:
+├─ You pay: $0.01/hour for endpoint service
+├─ Customer pays: $0.01/hour for their endpoint
+└─ Much cheaper than 100 VPC peerings!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 2: Shared Services (Internal)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario:
+Large enterprise with 50 VPCs
+├─ Shared Services VPC has Active Directory
+├─ All 50 VPCs need to access AD
+└─ Don't want to peer all VPCs
+
+Without PrivateLink:
+├─ Transit Gateway ($0.05 × 50 = $2.50/hour)
+├─ Or 50 VPC peerings (management nightmare)
+
+With PrivateLink:
+Shared Services VPC:
+├─ Active Directory servers
+├─ NLB in front of AD
+└─ VPC Endpoint Service
+
+Each of 50 VPCs:
+├─ VPC Endpoint to AD service
+├─ Access via private IP
+└─ DNS resolves to endpoint
+
+Cost:
+├─ Endpoint service: $0.01/hour
+├─ 50 endpoints: 50 × $0.01 = $0.50/hour
+├─ Total: $0.51/hour = $367/month
+└─ vs Transit Gateway: $900/month
+
+Savings: $533/month! 💰
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 3: AWS Services (AWS PrivateLink for AWS)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem:
+VPC with no internet access (air-gapped)
+├─ Need to access S3, DynamoDB, etc.
+└─ Can't use public endpoints
+
+Solution: VPC Endpoints for AWS Services
+
+Gateway Endpoints (FREE):
+├─ S3
+└─ DynamoDB
+
+Interface Endpoints ($0.01/hour each):
+├─ EC2 API
+├─ Lambda
+├─ SQS
+├─ SNS
+├─ Secrets Manager
+├─ Systems Manager
+└─ 100+ AWS services
+
+Example:
+Private VPC (no IGW) needs to:
+├─ Store objects in S3 → Gateway endpoint (free)
+├─ Send messages to SQS → Interface endpoint ($0.01/hour)
+├─ Invoke Lambda → Interface endpoint ($0.01/hour)
+└─ Total: $0.02/hour = $14.40/month
+
+Benefits:
+✅ No internet gateway needed
+✅ Traffic stays private
+✅ Better security
+✅ Lower latency
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASE 4: Microservices Architecture
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario:
+├─ Payment Service (PCI-compliant, separate VPC)
+├─ 20 microservices need to call Payment Service
+└─ Payment Service must be isolated
+
+Architecture:
+┌──────────────────────────────────┐
+│ Payment VPC (10.100.0.0/16)     │
+│ PCI-DSS Compliant               │
+│                                  │
+│ ┌────────────────────────────┐  │
+│ │ Payment Processing API     │  │
+│ └──────────┬─────────────────┘  │
+│            │                     │
+│ ┌──────────▼─────────────────┐  │
+│ │ NLB                        │  │
+│ └──────────┬─────────────────┘  │
+│            │                     │
+│ ┌──────────▼─────────────────┐  │
+│ │ VPC Endpoint Service       │  │
+│ └────────────────────────────┘  │
+└──────────────────────────────────┘
+              │
+    ┌─────────┴─────────┐
+    │                   │
+┌───▼────────┐    ┌─────▼──────┐
+│ Order      │    │ Checkout   │ ... (18 more)
+│ Service    │    │ Service    │
+└────────────┘    └────────────┘
+
+Benefits:
+✅ Payment VPC completely isolated
+✅ Services can't access anything except Payment API
+✅ Easy to audit (who connects to Payment)
+✅ Scalable (add more services easily)
+```
+
+---
+
+### **PrivateLink Pricing:**
+
+```
+AWS PRIVATELINK PRICING (US-EAST-1):
+
+1. VPC Endpoint Service (Provider)
+   Cost: $0.01 per hour
+   ├─ Pay regardless of connections
+   ├─ $0.01 × 24 × 30 = $7.20/month
+   └─ Plus NLB cost: $0.0225/hour = $16.20/month
+
+2. VPC Endpoint (Consumer)
+   Cost: $0.01 per hour per AZ
+   ├─ Single AZ: $0.01/hour = $7.20/month
+   ├─ Multi-AZ (3 AZ): $0.03/hour = $21.60/month
+   └─ High availability recommended
+
+3. Data Processing
+   Cost: $0.01 per GB
+   ├─ Data transferred through endpoint
+   ├─ Both directions count
+   └─ Example: 100 GB = $1.00
+
+4. Network Load Balancer (Required)
+   Cost: $0.0225 per hour + LCU charges
+   ├─ Base: $16.20/month
+   ├─ LCU: Based on traffic (~$5-10/month typical)
+   └─ Total NLB: ~$21-26/month
+
+TOTAL COST EXAMPLE:
+
+Single Consumer Setup:
+├─ Provider: Endpoint Service ($7.20) + NLB ($21)
+├─ Consumer: VPC Endpoint ($7.20)
+├─ Data: 100 GB/month ($1)
+└─ Total: $36.40/month
+
+100 Consumers Setup:
+├─ Provider: Endpoint Service ($7.20) + NLB ($21)
+├─ Consumers: 100 × VPC Endpoint ($720)
+├─ Data: 10 TB total ($100)
+└─ Total: $848.20/month
+
+Cost per consumer: $848 / 100 = $8.48/month/consumer ✅
+
+Compare to VPC Peering:
+├─ 100 peering connections (impossible to manage)
+├─ Transit Gateway: 100 × $36 = $3,600/month
+└─ PrivateLink wins! 💰
+
+BREAK-EVEN ANALYSIS:
+
+vs VPC Peering:
+├─ 1-2 connections: VPC Peering cheaper (free)
+├─ 3+ connections: PrivateLink (easier management)
+
+vs Transit Gateway:
+├─ PrivateLink always cheaper for single service
+├─ TGW better for full network connectivity
+
+When PrivateLink makes sense:
+✅ SaaS with many customers (10+)
+✅ Shared service accessed by many VPCs (5+)
+✅ Need to hide provider VPC
+✅ IP overlap concerns
+```
+
+---
+
+**Ready for Lab 93: Deploy PrivateLink?**
+
+This will be the final lab for Day 27!
+
+Should I proceed with the lab? 🚀
+
+
+
+# **LAB 93: DEPLOY AWS PRIVATELINK**
+
+```bash
+#!/bin/bash
+# CloudShell - AWS PrivateLink Lab
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║         LAB 93: AWS PRIVATELINK DEPLOYMENT              ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "What we'll build:"
+echo "  • Provider VPC with API service"
+echo "  • Network Load Balancer (internal)"
+echo "  • VPC Endpoint Service (provider side)"
+echo "  • Consumer VPC"
+echo "  • VPC Endpoint (consumer side)"
+echo "  • Test private connectivity"
+echo ""
+echo "Scenario: SaaS provider offering private API access"
+echo ""
+echo "Time: ~30 minutes"
+echo "Cost: ~$0.02 for testing (delete immediately after!)"
+echo ""
+
+#############################################################################
+# STEP 1: CREATE PROVIDER VPC (Service Provider)
+#############################################################################
+
+echo "Step 1: Creating Provider VPC (Service Provider)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+PROVIDER_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.20.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=Provider-VPC},{Key=Type,Value=ServiceProvider}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+aws ec2 modify-vpc-attribute --vpc-id $PROVIDER_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $PROVIDER_VPC --enable-dns-support
+
+echo "  ✅ Provider VPC created: $PROVIDER_VPC (10.20.0.0/16)"
+echo ""
+
+# Create subnets in TWO AZs (NLB requires multi-AZ)
+echo "  Creating subnets in multiple AZs (NLB requirement)..."
+
+PROVIDER_SUBNET_1=$(aws ec2 create-subnet \
+  --vpc-id $PROVIDER_VPC \
+  --cidr-block 10.20.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Provider-Subnet-1}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+PROVIDER_SUBNET_2=$(aws ec2 create-subnet \
+  --vpc-id $PROVIDER_VPC \
+  --cidr-block 10.20.2.0/24 \
+  --availability-zone us-east-1b \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Provider-Subnet-2}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+aws ec2 modify-subnet-attribute --subnet-id $PROVIDER_SUBNET_1 --map-public-ip-on-launch
+aws ec2 modify-subnet-attribute --subnet-id $PROVIDER_SUBNET_2 --map-public-ip-on-launch
+
+echo "     ✅ Subnet 1: $PROVIDER_SUBNET_1 (us-east-1a)"
+echo "     ✅ Subnet 2: $PROVIDER_SUBNET_2 (us-east-1b)"
+echo ""
+
+# Create IGW (for provider instances to download packages)
+PROVIDER_IGW=$(aws ec2 create-internet-gateway \
+  --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=Provider-IGW}]' \
+  --query 'InternetGateway.InternetGatewayId' \
+  --output text)
+
+aws ec2 attach-internet-gateway --internet-gateway-id $PROVIDER_IGW --vpc-id $PROVIDER_VPC
+
+echo "  ✅ Internet Gateway attached: $PROVIDER_IGW"
+echo ""
+
+# Route table
+PROVIDER_RT=$(aws ec2 create-route-table \
+  --vpc-id $PROVIDER_VPC \
+  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=Provider-RT}]' \
+  --query 'RouteTable.RouteTableId' \
+  --output text)
+
+aws ec2 create-route --route-table-id $PROVIDER_RT --destination-cidr-block 0.0.0.0/0 --gateway-id $PROVIDER_IGW
+aws ec2 associate-route-table --route-table-id $PROVIDER_RT --subnet-id $PROVIDER_SUBNET_1
+aws ec2 associate-route-table --route-table-id $PROVIDER_RT --subnet-id $PROVIDER_SUBNET_2
+
+echo "  ✅ Route table configured"
+echo ""
+
+#############################################################################
+# STEP 2: LAUNCH API SERVICE INSTANCES (Provider's Application)
+#############################################################################
+
+echo "Step 2: Launching API Service Instances (Provider's Application)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Get latest Amazon Linux 2023 AMI
+AMI_ID=$(aws ec2 describe-images \
+  --owners amazon \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" "Name=state,Values=available" \
+  --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+  --output text)
+
+echo "  Using AMI: $AMI_ID"
+echo ""
+
+# Security group for API service
+PROVIDER_SG=$(aws ec2 create-security-group \
+  --group-name provider-api-sg \
+  --description "Provider API service security group" \
+  --vpc-id $PROVIDER_VPC \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Provider-API-SG}]' \
+  --query 'GroupId' \
+  --output text)
+
+# Allow HTTP from anywhere (NLB will forward here)
+aws ec2 authorize-security-group-ingress \
+  --group-id $PROVIDER_SG \
+  --protocol tcp \
+  --port 80 \
+  --cidr 10.20.0.0/16
+
+echo "  ✅ Security group created: $PROVIDER_SG"
+echo "     Allows: HTTP (80) from VPC CIDR"
+echo ""
+
+# User data for API service
+USER_DATA=$(cat << 'EOF'
+#!/bin/bash
+yum update -y
+yum install -y httpd
+systemctl start httpd
+systemctl enable httpd
+
+# Get instance metadata
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+AZ=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+PRIVATE_IP=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
+
+# Create API response
+cat > /var/www/html/index.html << APIEOF
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Private API Service</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            margin: 50px; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container { 
+            background: rgba(255,255,255,0.1); 
+            padding: 30px; 
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        h1 { color: #FFD700; }
+        .info { 
+            background: rgba(0,0,0,0.3); 
+            padding: 20px; 
+            margin: 20px 0; 
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        .success { color: #00ff00; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Private API Service via PrivateLink</h1>
+        <p class="success">✅ Connection successful via AWS PrivateLink!</p>
+        
+        <div class="info">
+            <h3>Service Information:</h3>
+            <p>Instance ID: $INSTANCE_ID</p>
+            <p>Availability Zone: $AZ</p>
+            <p>Private IP: $PRIVATE_IP</p>
+            <p>Service Type: SaaS Analytics API</p>
+            <p>Connection: Private (AWS PrivateLink)</p>
+        </div>
+        
+        <h3>Why This Works:</h3>
+        <ul style="line-height: 1.8;">
+            <li>✅ You connected via VPC Endpoint (private IP)</li>
+            <li>✅ Traffic stayed on AWS private network</li>
+            <li>✅ You don't see our VPC (10.20.0.0/16)</li>
+            <li>✅ No internet gateway needed</li>
+            <li>✅ Secure, scalable, private connectivity</li>
+        </ul>
+        
+        <div class="info">
+            <h3>API Endpoint:</h3>
+            <p>This is where your application would call our API</p>
+            <p>Example: POST /api/analytics/data</p>
+            <p>Authentication: Bearer token (not shown)</p>
+        </div>
+        
+        <p><em>Powered by AWS PrivateLink - Enterprise Private Connectivity</em></p>
+        <p style="font-size: 0.8em;">Generated at: $(date)</p>
+    </div>
+</body>
+</html>
+APIEOF
+EOF
+)
+
+echo "  Launching API service instances..."
+
+# Launch instance in AZ 1
+PROVIDER_INSTANCE_1=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --subnet-id $PROVIDER_SUBNET_1 \
+  --security-group-ids $PROVIDER_SG \
+  --user-data "$USER_DATA" \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Provider-API-1}]' \
+  --query 'Instances[0].InstanceId' \
+  --output text)
+
+echo "     ✅ Instance 1 launched: $PROVIDER_INSTANCE_1 (us-east-1a)"
+
+# Launch instance in AZ 2
+PROVIDER_INSTANCE_2=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --subnet-id $PROVIDER_SUBNET_2 \
+  --security-group-ids $PROVIDER_SG \
+  --user-data "$USER_DATA" \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Provider-API-2}]' \
+  --query 'Instances[0].InstanceId' \
+  --output text)
+
+echo "     ✅ Instance 2 launched: $PROVIDER_INSTANCE_2 (us-east-1b)"
+echo ""
+echo "  ⏱️  Waiting for instances to be running..."
+
+aws ec2 wait instance-running --instance-ids $PROVIDER_INSTANCE_1 $PROVIDER_INSTANCE_2
+
+echo "     ✅ Both instances are running!"
+echo ""
+
+#############################################################################
+# STEP 3: CREATE NETWORK LOAD BALANCER
+#############################################################################
+
+echo "Step 3: Creating Network Load Balancer (Internal)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Creating Network Load Balancer (internal)..."
+echo "  This NLB will be the backend for VPC Endpoint Service"
+echo ""
+
+NLB_ARN=$(aws elbv2 create-load-balancer \
+  --name PrivateLink-NLB \
+  --type network \
+  --scheme internal \
+  --subnets $PROVIDER_SUBNET_1 $PROVIDER_SUBNET_2 \
+  --tags Key=Name,Value=PrivateLink-NLB \
+  --query 'LoadBalancers[0].LoadBalancerArn' \
+  --output text)
+
+echo "     ✅ NLB created: $NLB_ARN"
+echo ""
+
+# Get NLB DNS name
+NLB_DNS=$(aws elbv2 describe-load-balancers \
+  --load-balancer-arns $NLB_ARN \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text)
+
+echo "     NLB DNS: $NLB_DNS"
+echo "     Type: Internal (no public IP)"
+echo ""
+
+# Wait for NLB to be active
+echo "  ⏱️  Waiting for NLB to become active (2-3 minutes)..."
+
+while true; do
+    STATE=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns $NLB_ARN \
+        --query 'LoadBalancers[0].State.Code' \
+        --output text)
+    
+    if [ "$STATE" == "active" ]; then
+        echo "     ✅ NLB is active!"
+        break
+    fi
+    
+    echo "     State: $STATE (waiting...)"
+    sleep 15
+done
+
+echo ""
+
+# Create target group
+echo "  Creating target group..."
+
+TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
+  --name PrivateLink-TG \
+  --protocol TCP \
+  --port 80 \
+  --vpc-id $PROVIDER_VPC \
+  --health-check-protocol HTTP \
+  --health-check-path / \
+  --health-check-interval-seconds 30 \
+  --healthy-threshold-count 2 \
+  --unhealthy-threshold-count 2 \
+  --tags Key=Name,Value=PrivateLink-TG \
+  --query 'TargetGroups[0].TargetGroupArn' \
+  --output text)
+
+echo "     ✅ Target group created: $TARGET_GROUP_ARN"
+echo ""
+
+# Register instances with target group
+echo "  Registering instances with target group..."
+
+aws elbv2 register-targets \
+  --target-group-arn $TARGET_GROUP_ARN \
+  --targets Id=$PROVIDER_INSTANCE_1 Id=$PROVIDER_INSTANCE_2
+
+echo "     ✅ Instances registered:"
+echo "        • $PROVIDER_INSTANCE_1"
+echo "        • $PROVIDER_INSTANCE_2"
+echo ""
+
+# Create listener
+echo "  Creating NLB listener (TCP:80)..."
+
+aws elbv2 create-listener \
+  --load-balancer-arn $NLB_ARN \
+  --protocol TCP \
+  --port 80 \
+  --default-actions Type=forward,TargetGroupArn=$TARGET_GROUP_ARN
+
+echo "     ✅ Listener created (TCP port 80 → target group)"
+echo ""
+
+# Wait for targets to be healthy
+echo "  ⏱️  Waiting for targets to become healthy (30-60 seconds)..."
+sleep 45
+
+HEALTH=$(aws elbv2 describe-target-health \
+  --target-group-arn $TARGET_GROUP_ARN \
+  --query 'TargetHealthDescriptions[*].TargetHealth.State' \
+  --output text 2>/dev/null)
+
+echo "     Target health: $HEALTH"
+
+if echo "$HEALTH" | grep -q "healthy"; then
+    echo "     ✅ At least one target is healthy!"
+else
+    echo "     ℹ️  Targets still initializing (will be ready soon)"
+fi
+
+echo ""
+
+#############################################################################
+# STEP 4: CREATE VPC ENDPOINT SERVICE
+#############################################################################
+
+echo "Step 4: Creating VPC Endpoint Service (Provider Side)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Creating VPC Endpoint Service..."
+echo ""
+
+# Get NLB ARN (we already have it, but showing the pattern)
+ENDPOINT_SERVICE=$(aws ec2 create-vpc-endpoint-service-configuration \
+  --network-load-balancer-arns $NLB_ARN \
+  --acceptance-required \
+  --tag-specifications 'ResourceType=vpc-endpoint-service,Tags=[{Key=Name,Value=Private-API-Service}]' \
+  --query 'ServiceConfiguration' \
+  --output json)
+
+SERVICE_ID=$(echo $ENDPOINT_SERVICE | jq -r '.ServiceId')
+SERVICE_NAME=$(echo $ENDPOINT_SERVICE | jq -r '.ServiceName')
+
+echo "     ✅ VPC Endpoint Service created!"
+echo ""
+echo "     Service ID: $SERVICE_ID"
+echo "     Service Name: $SERVICE_NAME"
+echo ""
+echo "     Configuration:"
+echo "       • Acceptance Required: YES (manual approval)"
+echo "       • Backend: Network Load Balancer"
+echo "       • State: Available"
+echo ""
+echo "     ℹ️  Customers will use this service name to connect:"
+echo "        $SERVICE_NAME"
+echo ""
+
+#############################################################################
+# STEP 5: CREATE CONSUMER VPC
+#############################################################################
+
+echo "Step 5: Creating Consumer VPC (Customer/Client)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+CONSUMER_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.30.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=Consumer-VPC},{Key=Type,Value=ServiceConsumer}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+aws ec2 modify-vpc-attribute --vpc-id $CONSUMER_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $CONSUMER_VPC --enable-dns-support
+
+echo "  ✅ Consumer VPC created: $CONSUMER_VPC (10.30.0.0/16)"
+echo ""
+echo "     Note: Consumer VPC CIDR (10.30.0.0/16) overlaps conceptually"
+echo "           with Provider VPC (10.20.0.0/16) but that's OK!"
+echo "           PrivateLink solves IP conflict issues! ✅"
+echo ""
+
+# Create subnet
+CONSUMER_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $CONSUMER_VPC \
+  --cidr-block 10.30.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Consumer-Subnet}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+aws ec2 modify-subnet-attribute --subnet-id $CONSUMER_SUBNET --map-public-ip-on-launch
+
+echo "  ✅ Subnet created: $CONSUMER_SUBNET"
+echo ""
+
+# IGW for consumer (to access internet for testing)
+CONSUMER_IGW=$(aws ec2 create-internet-gateway \
+  --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=Consumer-IGW}]' \
+  --query 'InternetGateway.InternetGatewayId' \
+  --output text)
+
+aws ec2 attach-internet-gateway --internet-gateway-id $CONSUMER_IGW --vpc-id $CONSUMER_VPC
+
+# Route table
+CONSUMER_RT=$(aws ec2 create-route-table \
+  --vpc-id $CONSUMER_VPC \
+  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=Consumer-RT}]' \
+  --query 'RouteTable.RouteTableId' \
+  --output text)
+
+aws ec2 create-route --route-table-id $CONSUMER_RT --destination-cidr-block 0.0.0.0/0 --gateway-id $CONSUMER_IGW
+aws ec2 associate-route-table --route-table-id $CONSUMER_RT --subnet-id $CONSUMER_SUBNET
+
+echo "  ✅ Networking configured"
+echo ""
+
+#############################################################################
+# STEP 6: CREATE VPC ENDPOINT (Consumer Side)
+#############################################################################
+
+echo "Step 6: Creating VPC Endpoint (Consumer Side)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Creating security group for VPC Endpoint..."
+
+ENDPOINT_SG=$(aws ec2 create-security-group \
+  --group-name vpc-endpoint-sg \
+  --description "Security group for VPC Endpoint" \
+  --vpc-id $CONSUMER_VPC \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=VPC-Endpoint-SG}]' \
+  --query 'GroupId' \
+  --output text)
+
+# Allow HTTP from consumer VPC
+aws ec2 authorize-security-group-ingress \
+  --group-id $ENDPOINT_SG \
+  --protocol tcp \
+  --port 80 \
+  --cidr 10.30.0.0/16
+
+echo "     ✅ Endpoint security group: $ENDPOINT_SG"
+echo ""
+
+echo "  Creating VPC Endpoint to connect to provider service..."
+echo "     Service Name: $SERVICE_NAME"
+echo ""
+
+ENDPOINT_ID=$(aws ec2 create-vpc-endpoint \
+  --vpc-endpoint-type Interface \
+  --service-name $SERVICE_NAME \
+  --vpc-id $CONSUMER_VPC \
+  --subnet-ids $CONSUMER_SUBNET \
+  --security-group-ids $ENDPOINT_SG \
+  --tag-specifications 'ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=Private-API-Endpoint}]' \
+  --query 'VpcEndpoint.VpcEndpointId' \
+  --output text)
+
+echo "     ✅ VPC Endpoint created: $ENDPOINT_ID"
+echo ""
+echo "     Status: Pending approval from provider"
+echo "     Type: Interface endpoint"
+echo "     Subnet: $CONSUMER_SUBNET"
+echo ""
+
+#############################################################################
+# STEP 7: APPROVE ENDPOINT CONNECTION (Provider)
+#############################################################################
+
+echo "Step 7: Approving Endpoint Connection (Provider Action)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Provider reviewing connection request..."
+echo ""
+
+# Wait a few seconds for the request to register
+sleep 10
+
+# Get the connection ID
+CONN_ID=$(aws ec2 describe-vpc-endpoint-connections \
+  --filters "Name=service-id,Values=$SERVICE_ID" \
+  --query 'VpcEndpointConnections[0].VpcEndpointId' \
+  --output text)
+
+if [ "$CONN_ID" == "$ENDPOINT_ID" ]; then
+    echo "     ✅ Connection request found from: $ENDPOINT_ID"
+    echo ""
+    
+    # Approve the connection
+    echo "  Provider approving connection..."
+    
+    aws ec2 accept-vpc-endpoint-connections \
+      --service-id $SERVICE_ID \
+      --vpc-endpoint-ids $ENDPOINT_ID
+    
+    echo "     ✅ Connection approved by provider!"
+    echo ""
+else
+    echo "     ⏱️  Connection request still pending registration..."
+    echo "        In production, provider would approve via Console or CLI"
+fi
+
+echo "  ⏱️  Waiting for endpoint to become available (1-2 minutes)..."
+
+sleep 60
+
+# Check endpoint status
+ENDPOINT_STATE=$(aws ec2 describe-vpc-endpoints \
+  --vpc-endpoint-ids $ENDPOINT_ID \
+  --query 'VpcEndpoints[0].State' \
+  --output text)
+
+echo "     Endpoint state: $ENDPOINT_STATE"
+
+if [ "$ENDPOINT_STATE" == "available" ]; then
+    echo "     ✅ VPC Endpoint is available!"
+else
+    echo "     ℹ️  Endpoint still initializing (state: $ENDPOINT_STATE)"
+    echo "        This is normal and will complete soon"
+fi
+
+echo ""
+
+# Get endpoint DNS name
+ENDPOINT_DNS=$(aws ec2 describe-vpc-endpoints \
+  --vpc-endpoint-ids $ENDPOINT_ID \
+  --query 'VpcEndpoints[0].DnsEntries[0].DnsName' \
+  --output text)
+
+echo "  VPC Endpoint Details:"
+echo "     Endpoint ID: $ENDPOINT_ID"
+echo "     DNS Name: $ENDPOINT_DNS"
+echo "     This is what consumer uses to access the service!"
+echo ""
+
+#############################################################################
+# STEP 8: LAUNCH TEST INSTANCE IN CONSUMER VPC
+#############################################################################
+
+echo "Step 8: Launching Test Instance in Consumer VPC"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Security group for consumer instance
+CONSUMER_SG=$(aws ec2 create-security-group \
+  --group-name consumer-test-sg \
+  --description "Consumer test instance" \
+  --vpc-id $CONSUMER_VPC \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Consumer-Test-SG}]' \
+  --query 'GroupId' \
+  --output text)
+
+echo "  ✅ Security group created: $CONSUMER_SG"
+echo ""
+
+# Launch consumer instance
+CONSUMER_INSTANCE=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --subnet-id $CONSUMER_SUBNET \
+  --security-group-ids $CONSUMER_SG \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Consumer-Test-Instance}]' \
+  --user-data '#!/bin/bash
+yum install -y curl' \
+  --query 'Instances[0].InstanceId' \
+  --output text)
+
+echo "  ✅ Consumer instance launched: $CONSUMER_INSTANCE"
+echo ""
+
+aws ec2 wait instance-running --instance-ids $CONSUMER_INSTANCE
+
+echo "  ✅ Instance is running"
+echo ""
+
+#############################################################################
+# STEP 9: TEST PRIVATELINK CONNECTION
+#############################################################################
+
+echo "Step 9: Testing PrivateLink Connection"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  From consumer VPC, we'll access the provider service via endpoint"
+echo ""
+
+# Get endpoint IP
+ENDPOINT_IP=$(aws ec2 describe-network-interfaces \
+  --filters "Name=vpc-id,Values=$CONSUMER_VPC" "Name=description,Values=*VPC Endpoint Interface*" \
+  --query 'NetworkInterfaces[0].PrivateIpAddress' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$ENDPOINT_IP" ]; then
+    echo "  ✅ VPC Endpoint private IP: $ENDPOINT_IP"
+    echo ""
+    echo "  Testing connection to endpoint..."
+    echo "     URL: http://$ENDPOINT_IP"
+    echo ""
+    
+    # Try to curl from CloudShell (may not work due to network isolation)
+    echo "     Note: CloudShell may not be able to reach endpoint directly"
+    echo "           In production, test from consumer instance"
+    echo ""
+else
+    echo "  ℹ️  Endpoint interface still being created"
+fi
+
+echo "  To test from consumer instance (after SSH):"
+echo "     curl http://$ENDPOINT_DNS"
+echo "     curl http://$ENDPOINT_IP"
+echo ""
+
+#############################################################################
+# SUMMARY
+#############################################################################
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║              LAB 93 COMPLETE! ✅                         ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+cat << EOF
+AWS PRIVATELINK ARCHITECTURE DEPLOYED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Provider Side (Service Provider):
+┌────────────────────────────────────────────────────────┐
+│ Provider VPC ($PROVIDER_VPC)                          │
+│ CIDR: 10.20.0.0/16                                     │
+│                                                        │
+│ ┌────────────────┐  ┌────────────────┐               │
+│ │ API Instance 1 │  │ API Instance 2 │               │
+│ │ $PROVIDER_INSTANCE_1 │  │ $PROVIDER_INSTANCE_2 │               │
+│ └───────┬────────┘  └───────┬────────┘               │
+│         └──────────┬─────────┘                        │
+│                    │                                   │
+│         ┌──────────▼─────────────┐                    │
+│         │ Network Load Balancer  │                    │
+│         │ (Internal)              │                    │
+│         └──────────┬──────────────┘                    │
+│                    │                                   │
+│         ┌──────────▼──────────────┐                   │
+│         │ VPC Endpoint Service    │                   │
+│         │ $SERVICE_ID             │                   │
+│         │                          │                   │
+│         │ Service Name:            │                   │
+│         │ $SERVICE_NAME │                   │
+│         └─────────────────────────┘                   │
+└────────────────────────────────────────────────────────┘
+                     │
+                     │ PrivateLink Connection
+                     │ (AWS Private Network)
+                     │
+┌────────────────────▼────────────────────────────────────┐
+│ Consumer VPC ($CONSUMER_VPC)                          │
+│ CIDR: 10.30.0.0/16                                     │
+│                                                        │
+│         ┌─────────────────────────┐                   │
+│         │ VPC Endpoint            │                   │
+│         │ $ENDPOINT_ID            │                   │
+│         │                          │                   │
+│         │ Type: Interface          │                   │
+│         │ IP: $ENDPOINT_IP (approx)│                   │
+│         │ DNS: $ENDPOINT_DNS       │                   │
+│         └──────────┬───────────────┘                   │
+│                    │                                   │
+│         ┌──────────▼──────────────┐                    │
+│         │ Consumer Application    │                    │
+│         │ $CONSUMER_INSTANCE      │                    │
+│         │                          │                    │
+│         │ Calls: http://$ENDPOINT_IP│                    │
+│         └─────────────────────────┘                   │
+└────────────────────────────────────────────────────────┘
+
+RESOURCES CREATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Provider VPC:
+  • VPC:                    $PROVIDER_VPC
+  • Subnets:                $PROVIDER_SUBNET_1, $PROVIDER_SUBNET_2
+  • API Instances:          $PROVIDER_INSTANCE_1, $PROVIDER_INSTANCE_2
+  • Network Load Balancer:  $NLB_ARN
+  • Target Group:           $TARGET_GROUP_ARN
+  • Endpoint Service:       $SERVICE_ID
+
+Consumer VPC:
+  • VPC:                    $CONSUMER_VPC
+  • Subnet:                 $CONSUMER_SUBNET
+  • VPC Endpoint:           $ENDPOINT_ID
+  • Test Instance:          $CONSUMER_INSTANCE
+
+HOW IT WORKS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Provider creates endpoint service backed by NLB
+2. Consumer creates VPC endpoint to that service
+3. Provider approves connection request
+4. Endpoint gets private IP in consumer VPC (10.30.x.x)
+5. Consumer accesses service via endpoint IP
+6. Traffic flows: Consumer → Endpoint → NLB → API instances
+7. All traffic stays on AWS private network! ✅
+
+KEY BENEFITS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Private connectivity (no internet exposure)
+✅ Provider VPC remains hidden (consumer doesn't see 10.20.0.0/16)
+✅ No IP conflicts (consumer can use any CIDR)
+✅ Scalable (can support thousands of consumers)
+✅ Provider controls access (approval required)
+✅ Secure (AWS PrivateLink encryption)
+
+SECURITY FEATURES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Provider Side:
+  • Manual approval required (provider controls access)
+  • NLB distributes load across healthy targets
+  • Security groups restrict access to API instances
+
+Consumer Side:
+  • Endpoint security group controls what can access endpoint
+  • Private IP only (no public exposure)
+  • DNS resolution works within VPC
+
+COST:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Provider:
+  • Endpoint Service: \$0.01/hour = \$7.20/month
+  • NLB: \$0.0225/hour = \$16.20/month
+  • EC2 instances: 2 × \$8.40 = \$16.80/month
+  • Total: ~\$40/month
+
+Consumer:
+  • VPC Endpoint: \$0.01/hour = \$7.20/month
+  • EC2 instance: \$8.40/month
+  • Total: ~\$16/month
+
+Testing (1 hour): ~\$0.05 ✅
+If left running (24 hours): ~\$2.00 ⚠️
+
+⚠️  DELETE RESOURCES IMMEDIATELY TO AVOID CHARGES!
+
+TESTING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+From consumer instance:
+
+# Via endpoint IP
+curl http://$ENDPOINT_IP
+
+# Via endpoint DNS (if DNS enabled)
+curl http://$ENDPOINT_DNS
+
+Expected: HTML response from provider API service showing:
+  ✅ Connection successful via PrivateLink
+  ✅ Instance details from provider
+  ✅ Confirmation of private connectivity
+
+USE CASES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This architecture is perfect for:
+  • SaaS providers offering private access to customers
+  • Shared services (AD, DNS) in enterprise
+  • Microservices needing private service-to-service
+  • Partner integrations requiring security
+  • Multi-tenant applications with isolation needs
+
+NEXT STEPS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Test connectivity from consumer instance
+2. Review VPC endpoint network interfaces
+3. Check NLB target health
+4. Monitor CloudWatch metrics
+5. Run cleanup script (IMPORTANT!)
+
+EOF
+
+echo ""
+echo "Save these values for cleanup:"
+echo ""
+echo "# Provider Resources"
+echo "PROVIDER_VPC=$PROVIDER_VPC"
+echo "PROVIDER_INSTANCE_1=$PROVIDER_INSTANCE_1"
+echo "PROVIDER_INSTANCE_2=$PROVIDER_INSTANCE_2"
+echo "NLB_ARN=$NLB_ARN"
+echo "TARGET_GROUP_ARN=$TARGET_GROUP_ARN"
+echo "SERVICE_ID=$SERVICE_ID"
+echo ""
+echo "# Consumer Resources"
+echo "CONSUMER_VPC=$CONSUMER_VPC"
+echo "ENDPOINT_ID=$ENDPOINT_ID"
+echo "CONSUMER_INSTANCE=$CONSUMER_INSTANCE"
+echo ""
+```
+
+---
+
+## **CLEANUP SCRIPT FOR ALL DAY 27 LABS**
+
+```bash
+#!/bin/bash
+# Complete cleanup for Day 27 (Labs 91, 92, 93)
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║         DAY 27 COMPLETE CLEANUP SCRIPT                   ║"
+echo "║         Labs 91, 92, 93                                   ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "⚠️  This will delete ALL resources from Day 27 labs"
+echo ""
+
+read -p "Continue with cleanup? (yes/no): " CONFIRM
+
+if [ "$CONFIRM" != "yes" ]; then
+    echo "Cleanup cancelled"
+    exit 0
+fi
+
+echo ""
+echo "Starting cleanup..."
+echo ""
+
+#############################################################################
+# LAB 93: PRIVATELINK CLEANUP
+#############################################################################
+
+echo "═══════════════════════════════════════════════════════════"
+echo "LAB 93: PRIVATELINK CLEANUP"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+
+# Terminate consumer instance
+if [ ! -z "$CONSUMER_INSTANCE" ]; then
+    echo "Terminating consumer instance..."
+    aws ec2 terminate-instances --instance-ids $CONSUMER_INSTANCE 2>/dev/null
+    aws ec2 wait instance-terminated --instance-ids $CONSUMER_INSTANCE 2>/dev/null
+    echo "  ✅ Consumer instance terminated"
+fi
+
+# Delete VPC endpoint
+if [ ! -z "$ENDPOINT_ID" ]; then
+    echo "Deleting VPC endpoint..."
+    aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $ENDPOINT_ID 2>/dev/null
+    sleep 10
+    echo "  ✅ VPC endpoint deleted"
+fi
+
+# Delete consumer VPC resources
+if [ ! -z "$CONSUMER_VPC" ]; then
+    echo "Deleting consumer VPC resources..."
+    
+    # Security groups
+    for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$CONSUMER_VPC" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
+        aws ec2 delete-security-group --group-id $sg 2>/dev/null
+    done
+    
+    # IGW
+    if [ ! -z "$CONSUMER_IGW" ]; then
+        aws ec2 detach-internet-gateway --internet-gateway-id $CONSUMER_IGW --vpc-id $CONSUMER_VPC 2>/dev/null
+        aws ec2 delete-internet-gateway --internet-gateway-id $CONSUMER_IGW 2>/dev/null
+    fi
+    
+    # Route tables
+    for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$CONSUMER_VPC" --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text); do
+        for assoc in $(aws ec2 describe-route-tables --route-table-ids $rt --query 'RouteTables[0].Associations[?SubnetId!=`null`].RouteTableAssociationId' --output text); do
+            aws ec2 disassociate-route-table --association-id $assoc 2>/dev/null
+        done
+        aws ec2 delete-route-table --route-table-id $rt 2>/dev/null
+    done
+    
+    # Subnets
+    for subnet in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$CONSUMER_VPC" --query 'Subnets[].SubnetId' --output text); do
+        aws ec2 delete-subnet --subnet-id $subnet 2>/dev/null
+    done
+    
+    # VPC
+    aws ec2 delete-vpc --vpc-id $CONSUMER_VPC 2>/dev/null
+    echo "  ✅ Consumer VPC deleted"
+fi
+
+# Delete VPC endpoint service
+if [ ! -z "$SERVICE_ID" ]; then
+    echo "Deleting VPC endpoint service..."
+    aws ec2 delete-vpc-endpoint-service-configurations --service-ids $SERVICE_ID 2>/dev/null
+    echo "  ✅ Endpoint service deleted"
+fi
+
+# Terminate provider instances
+if [ ! -z "$PROVIDER_INSTANCE_1" ]; then
+    echo "Terminating provider instances..."
+    aws ec2 terminate-instances --instance-ids $PROVIDER_INSTANCE_1 $PROVIDER_INSTANCE_2 2>/dev/null
+    aws ec2 wait instance-terminated --instance-ids $PROVIDER_INSTANCE_1 $PROVIDER_INSTANCE_2 2>/dev/null
+    echo "  ✅ Provider instances terminated"
+fi
+
+# Delete NLB
+if [ ! -z "$NLB_ARN" ]; then
+    echo "Deleting Network Load Balancer..."
+    aws elbv2 delete-load-balancer --load-balancer-arn $NLB_ARN 2>/dev/null
+    sleep 30
+    echo "  ✅ NLB deleted"
+fi
+
+# Delete target group
+if [ ! -z "$TARGET_GROUP_ARN" ]; then
+    echo "Deleting target group..."
+    aws elbv2 delete-target-group --target-group-arn $TARGET_GROUP_ARN 2>/dev/null
+    echo "  ✅ Target group deleted"
+fi
+
+# Delete provider VPC
+if [ ! -z "$PROVIDER_VPC" ]; then
+    echo "Deleting provider VPC resources..."
+    
+    # Security groups
+    for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$PROVIDER_VPC" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text); do
+        aws ec2 delete-security-group --group-id $sg 2>/dev/null
+    done
+    
+    # IGW
+    if [ ! -z "$PROVIDER_IGW" ]; then
+        aws ec2 detach-internet-gateway --internet-gateway-id $PROVIDER_IGW --vpc-id $PROVIDER_VPC 2>/dev/null
+        aws ec2 delete-internet-gateway --internet-gateway-id $PROVIDER_IGW 2>/dev/null
+    fi
+    
+    # Route tables
+    for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$PROVIDER_VPC" --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text); do
+        for assoc in $(aws ec2 describe-route-tables --route-table-ids $rt --query 'RouteTables[0].Associations[?SubnetId!=`null`].RouteTableAssociationId' --output text); do
+            aws ec2 disassociate-route-table --association-id $assoc 2>/dev/null
+        done
+        aws ec2 delete-route-table --route-table-id $rt 2>/dev/null
+    done
+    
+    # Subnets
+    for subnet in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$PROVIDER_VPC" --query 'Subnets[].SubnetId' --output text); do
+        aws ec2 delete-subnet --subnet-id $subnet 2>/dev/null
+    done
+    
+    # VPC
+    aws ec2 delete-vpc --vpc-id $PROVIDER_VPC 2>/dev/null
+    echo "  ✅ Provider VPC deleted"
+fi
+
+echo ""
+echo "✅ Lab 93 (PrivateLink) cleanup complete!"
+echo ""
+
+#############################################################################
+# LAB 92: TRANSIT GATEWAY CLEANUP
+#############################################################################
+
+echo "═══════════════════════════════════════════════════════════"
+echo "LAB 92: TRANSIT GATEWAY CLEANUP"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+
+# Delete TGW attachments
+if [ ! -z "$PROD_ATTACHMENT" ]; then
+    echo "Deleting Transit Gateway attachments..."
+    for attachment in $PROD_ATTACHMENT $DEV_ATTACHMENT $SHARED_ATTACHMENT; do
+        aws ec2 delete-transit-gateway-vpc-attachment --transit-gateway-attachment-id $attachment 2>/dev/null
+    done
+    sleep 60
+    echo "  ✅ TGW attachments deleted"
+fi
+
+# Delete TGW route tables
+if [ ! -z "$PROD_RT" ]; then
+    echo "Deleting TGW route tables..."
+    for rt in $PROD_RT $DEV_RT $SHARED_RT; do
+        aws ec2 delete-transit-gateway-route-table --transit-gateway-route-table-id $rt 2>/dev/null
+    done
+    echo "  ✅ TGW route tables deleted"
+fi
+
+# Delete Transit Gateway
+if [ ! -z "$TGW_ID" ]; then
+    echo "Deleting Transit Gateway..."
+    aws ec2 delete-transit-gateway --transit-gateway-id $TGW_ID 2>/dev/null
+    echo "  ✅ Transit Gateway deletion initiated (takes 5-10 minutes)"
+fi
+
+# Delete VPCs
+for vpc in $PROD_VPC $DEV_VPC $SHARED_VPC; do
+    if [ ! -z "$vpc" ]; then
+        echo "Deleting VPC: $vpc..."
+        
+        # Security groups
+        for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" --query 'SecurityGroups[?GroupName!=`default`].GroupId' --output text 2>/dev/null); do
+            aws ec2 delete-security-group --group-id $sg 2>/dev/null
+        done
+        
+        # IGW
+        for igw in $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$vpc" --query 'InternetGateways[].InternetGatewayId' --output text 2>/dev/null); do
+            aws ec2 detach-internet-gateway --internet-gateway-id $igw --vpc-id $vpc 2>/dev/null
+            aws ec2 delete-internet-gateway --internet-gateway-id $igw 2>/dev/null
+        done
+        
+        # Route tables
+        for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' --output text 2>/dev/null); do
+            aws ec2 delete-route-table --route-table-id $rt 2>/dev/null
+        done
+        
+        # Subnets
+        for subnet in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc" --query 'Subnets[].SubnetId' --output text 2>/dev/null); do
+            aws ec2 delete-subnet --subnet-id $subnet 2>/dev/null
+        done
+        
+        # VPC
+        aws ec2 delete-vpc --vpc-id $vpc 2>/dev/null
+        echo "  ✅ VPC $vpc deleted"
+    fi
+done
+
+echo ""
+echo "✅ Lab 92 (Transit Gateway) cleanup complete!"
+echo ""
+
+#############################################################################
+# LAB 91: DNS FIREWALL CLEANUP
+#############################################################################
+
+echo "═══════════════════════════════════════════════════════════"
+echo "LAB 91: DNS FIREWALL CLEANUP"
+echo "═══════════════════════════════════════════════════════════"
+echo ""
+
+# Terminate instance
+if [ ! -z "$DNS_FW_INSTANCE" ]; then
+    echo "Terminating DNS Firewall instance..."
+    aws ec2 terminate-instances --instance-ids $DNS_FW_INSTANCE 2>/dev/null
+    aws ec2 wait instance-terminated --instance-ids $DNS_FW_INSTANCE 2>/dev/null
+    echo "  ✅ Instance terminated"
+fi
+
+# Disassociate query logging
+if [ ! -z "$QUERY_LOG_CONFIG" ] && [ ! -z "$DNS_FW_VPC" ]; then
+    echo "Disassociating query logging..."
+    aws route53resolver disassociate-resolver-query-log-config \
+      --resolver-query-log-config-id $QUERY_LOG_CONFIG \
+      --resource-id $DNS_FW_VPC 2>/dev/null
+fi
+
+# Delete query logging config
+if [ ! -z "$QUERY_LOG_CONFIG" ]; then
+    echo "Deleting query logging config..."
+    aws route53resolver delete-resolver-query-log-config \
+      --resolver-query-log-config-id $QUERY_LOG_CONFIG 2>/dev/null
+fi
+
+# Disassociate firewall rule group
+if [ ! -z "$ASSOCIATION_ID" ]; then
+    echo "Disassociating firewall rule group..."
+    aws route53resolver disassociate-firewall-rule-group \
+      --firewall-rule-group-association-id $ASSOCIATION_ID 2>/dev/null
+    sleep 10
+fi
+
+# Delete firewall rules
+if [ ! -z "$RULE_GROUP_ID" ]; then
+    echo "Deleting firewall rules..."
+    for list_id in $DOMAIN_LIST_ID $AWS_SERVICES_LIST; do
+        aws route53resolver delete-firewall-rule \
+          --firewall-rule-group-id $RULE_GROUP_ID \
+          --firewall-domain-list-id $list_id 2>/dev/null
+    done
+fi
+
+# Delete rule group
+if [ ! -z "$RULE_GROUP_ID" ]; then
+    echo "Deleting firewall rule group..."
+    aws route53resolver delete-firewall-rule-group \
+      --firewall-rule-group-id $RULE_GROUP_ID 2>/dev/null
+fi
+
+# Delete domain lists
+for list_id in $DOMAIN_LIST_ID $AWS_SERVICES_LIST; do
+    if [ ! -z "$list_id" ]; then
+        echo "Deleting domain list: $list
+		
+		
+		
+# **LAB 93: DEPLOY AWS PRIVATELINK**
+
+```bash
+#!/bin/bash
+# CloudShell - AWS PrivateLink Lab
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║          LAB 93: AWS PRIVATELINK DEPLOYMENT             ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+echo "What we'll build:"
+echo "  • Provider VPC with web service (SaaS API)"
+echo "  • Network Load Balancer (internal)"
+echo "  • VPC Endpoint Service (provider side)"
+echo "  • Consumer VPC"
+echo "  • VPC Endpoint (consumer side)"
+echo "  • Test private connectivity"
+echo ""
+echo "Architecture:"
+echo "  Consumer VPC → VPC Endpoint → PrivateLink → NLB → Web Service"
+echo "  (All traffic stays private on AWS network!)"
+echo ""
+echo "Time: ~25 minutes"
+echo "Cost: ~$0.02 for testing (delete after!)"
+echo ""
+
+#############################################################################
+# STEP 1: CREATE PROVIDER VPC (SERVICE PROVIDER)
+#############################################################################
+
+echo "Step 1: Creating Provider VPC (Service Provider)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+PROVIDER_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.20.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=Provider-VPC},{Key=Type,Value=SaaS-Provider}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+echo "  ✅ Provider VPC created: $PROVIDER_VPC (10.20.0.0/16)"
+
+aws ec2 modify-vpc-attribute --vpc-id $PROVIDER_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $PROVIDER_VPC --enable-dns-support
+
+echo "     DNS enabled"
+echo ""
+
+# Create subnets in 2 AZs (required for NLB)
+echo "  Creating subnets in 2 AZs (NLB requirement)..."
+
+PROVIDER_SUBNET_1=$(aws ec2 create-subnet \
+  --vpc-id $PROVIDER_VPC \
+  --cidr-block 10.20.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Provider-Subnet-1a}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+PROVIDER_SUBNET_2=$(aws ec2 create-subnet \
+  --vpc-id $PROVIDER_VPC \
+  --cidr-block 10.20.2.0/24 \
+  --availability-zone us-east-1b \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Provider-Subnet-1b}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+echo "     ✅ Subnet 1: $PROVIDER_SUBNET_1 (us-east-1a)"
+echo "     ✅ Subnet 2: $PROVIDER_SUBNET_2 (us-east-1b)"
+echo ""
+
+#############################################################################
+# STEP 2: LAUNCH WEB SERVICE IN PROVIDER VPC
+#############################################################################
+
+echo "Step 2: Launching Web Service (SaaS API) in Provider VPC"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Get latest Amazon Linux 2023 AMI
+AMI_ID=$(aws ec2 describe-images \
+  --owners amazon \
+  --filters "Name=name,Values=al2023-ami-2023.*-x86_64" "Name=state,Values=available" \
+  --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+  --output text)
+
+echo "  Using AMI: $AMI_ID"
+echo ""
+
+# Create security group for web service
+PROVIDER_SG=$(aws ec2 create-security-group \
+  --group-name provider-web-service-sg \
+  --description "Security group for SaaS web service" \
+  --vpc-id $PROVIDER_VPC \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Provider-Web-SG}]' \
+  --query 'GroupId' \
+  --output text)
+
+echo "  ✅ Security group created: $PROVIDER_SG"
+
+# Allow HTTP from within VPC (NLB will forward traffic)
+aws ec2 authorize-security-group-ingress \
+  --group-id $PROVIDER_SG \
+  --protocol tcp \
+  --port 80 \
+  --cidr 10.20.0.0/16
+
+echo "     Inbound rule: HTTP (80) from 10.20.0.0/16"
+echo ""
+
+# Launch web service instance in subnet 1
+echo "  Launching web service instance..."
+
+WEB_SERVICE_INSTANCE=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --subnet-id $PROVIDER_SUBNET_1 \
+  --security-group-ids $PROVIDER_SG \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=SaaS-Web-Service}]' \
+  --user-data '#!/bin/bash
+yum update -y
+yum install -y httpd
+systemctl start httpd
+systemctl enable httpd
+
+# Create API response page
+cat > /var/www/html/index.html << EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SaaS API Service</title>
+    <style>
+        body { font-family: Arial; padding: 50px; background: #f0f0f0; }
+        .container { background: white; padding: 30px; border-radius: 10px; max-width: 600px; margin: 0 auto; }
+        h1 { color: #232f3e; }
+        .status { color: #28a745; font-weight: bold; }
+        .info { background: #e8f4f8; padding: 15px; border-radius: 5px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 SaaS API Service</h1>
+        <p class="status">✅ Service Status: ONLINE</p>
+        <div class="info">
+            <h3>Service Information:</h3>
+            <p><strong>Service:</strong> Premium Analytics API</p>
+            <p><strong>Version:</strong> 2.0</p>
+            <p><strong>Connection:</strong> AWS PrivateLink</p>
+            <p><strong>Server:</strong> $(hostname)</p>
+            <p><strong>Private IP:</strong> $(hostname -I)</p>
+        </div>
+        <h3>API Endpoints:</h3>
+        <ul>
+            <li>/api/v1/analytics - Get analytics data</li>
+            <li>/api/v1/reports - Generate reports</li>
+            <li>/api/v1/status - Service health check</li>
+        </ul>
+        <p style="margin-top: 30px; color: #888; font-size: 14px;">
+            This service is accessible via AWS PrivateLink. 
+            All traffic remains on the AWS private network.
+        </p>
+    </div>
+</body>
+</html>
+EOF
+
+# Create API endpoint
+mkdir -p /var/www/html/api/v1
+echo "{ \"status\": \"success\", \"message\": \"API is operational\", \"timestamp\": \"$(date)\" }" > /var/www/html/api/v1/status' \
+  --query 'Instances[0].InstanceId' \
+  --output text)
+
+echo "  ✅ Web service instance launched: $WEB_SERVICE_INSTANCE"
+echo ""
+
+aws ec2 wait instance-running --instance-ids $WEB_SERVICE_INSTANCE
+
+WEB_SERVICE_IP=$(aws ec2 describe-instances \
+  --instance-ids $WEB_SERVICE_INSTANCE \
+  --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+  --output text)
+
+echo "  ✅ Instance running with private IP: $WEB_SERVICE_IP"
+echo "     Waiting 60 seconds for Apache to start..."
+sleep 60
+echo ""
+
+#############################################################################
+# STEP 3: CREATE NETWORK LOAD BALANCER
+#############################################################################
+
+echo "Step 3: Creating Network Load Balancer (Internal)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Creating NLB (internal, multi-AZ)..."
+
+NLB_ARN=$(aws elbv2 create-load-balancer \
+  --name PrivateLink-NLB \
+  --type network \
+  --scheme internal \
+  --subnets $PROVIDER_SUBNET_1 $PROVIDER_SUBNET_2 \
+  --tags Key=Name,Value=PrivateLink-NLB \
+  --query 'LoadBalancers[0].LoadBalancerArn' \
+  --output text)
+
+echo "  ✅ NLB created: $NLB_ARN"
+
+# Get NLB DNS name
+NLB_DNS=$(aws elbv2 describe-load-balancers \
+  --load-balancer-arns $NLB_ARN \
+  --query 'LoadBalancers[0].DNSName' \
+  --output text)
+
+echo "     NLB DNS: $NLB_DNS"
+echo ""
+
+# Create target group
+echo "  Creating target group for web service..."
+
+TARGET_GROUP_ARN=$(aws elbv2 create-target-group \
+  --name PrivateLink-TG \
+  --protocol TCP \
+  --port 80 \
+  --vpc-id $PROVIDER_VPC \
+  --target-type instance \
+  --health-check-protocol HTTP \
+  --health-check-path /api/v1/status \
+  --query 'TargetGroups[0].TargetGroupArn' \
+  --output text)
+
+echo "  ✅ Target group created: $TARGET_GROUP_ARN"
+echo ""
+
+# Register instance with target group
+echo "  Registering web service instance with target group..."
+
+aws elbv2 register-targets \
+  --target-group-arn $TARGET_GROUP_ARN \
+  --targets Id=$WEB_SERVICE_INSTANCE
+
+echo "  ✅ Instance registered"
+echo ""
+
+# Create listener
+echo "  Creating NLB listener (TCP:80)..."
+
+LISTENER_ARN=$(aws elbv2 create-listener \
+  --load-balancer-arn $NLB_ARN \
+  --protocol TCP \
+  --port 80 \
+  --default-actions Type=forward,TargetGroupArn=$TARGET_GROUP_ARN \
+  --query 'Listeners[0].ListenerArn' \
+  --output text)
+
+echo "  ✅ Listener created: $LISTENER_ARN"
+echo ""
+
+echo "  ⏱️  Waiting for target to become healthy (30 seconds)..."
+sleep 30
+
+# Check target health
+TARGET_HEALTH=$(aws elbv2 describe-target-health \
+  --target-group-arn $TARGET_GROUP_ARN \
+  --query 'TargetHealthDescriptions[0].TargetHealth.State' \
+  --output text)
+
+echo "     Target health: $TARGET_HEALTH"
+
+if [ "$TARGET_HEALTH" != "healthy" ]; then
+    echo "     ⚠️  Target not yet healthy, waiting another 30 seconds..."
+    sleep 30
+fi
+
+echo ""
+
+#############################################################################
+# STEP 4: CREATE VPC ENDPOINT SERVICE (PROVIDER)
+#############################################################################
+
+echo "Step 4: Creating VPC Endpoint Service (Provider Side)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  Creating endpoint service powered by NLB..."
+
+ENDPOINT_SERVICE_CONFIG=$(aws ec2 create-vpc-endpoint-service-configuration \
+  --network-load-balancer-arns $NLB_ARN \
+  --acceptance-required \
+  --tag-specifications 'ResourceType=vpc-endpoint-service,Tags=[{Key=Name,Value=SaaS-API-Service}]' \
+  --output json)
+
+SERVICE_NAME=$(echo $ENDPOINT_SERVICE_CONFIG | grep -o '"ServiceName": *"[^"]*"' | sed 's/"ServiceName": *"\([^"]*\)"/\1/')
+SERVICE_ID=$(echo $ENDPOINT_SERVICE_CONFIG | grep -o '"ServiceId": *"[^"]*"' | sed 's/"ServiceId": *"\([^"]*\)"/\1/')
+
+echo "  ✅ VPC Endpoint Service created!"
+echo ""
+echo "     Service Name: $SERVICE_NAME"
+echo "     Service ID: $SERVICE_ID"
+echo "     Acceptance Required: YES (manual approval)"
+echo ""
+
+echo "  Configuration:"
+echo "    • Backend: Network Load Balancer"
+echo "    • Acceptance: Manual (provider approves each consumer)"
+echo "    • Multi-AZ: Yes (high availability)"
+echo ""
+
+#############################################################################
+# STEP 5: CREATE CONSUMER VPC
+#############################################################################
+
+echo "Step 5: Creating Consumer VPC (Service Consumer)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+CONSUMER_VPC=$(aws ec2 create-vpc \
+  --cidr-block 10.30.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=Consumer-VPC},{Key=Type,Value=Customer}]' \
+  --query 'Vpc.VpcId' \
+  --output text)
+
+echo "  ✅ Consumer VPC created: $CONSUMER_VPC (10.30.0.0/16)"
+
+aws ec2 modify-vpc-attribute --vpc-id $CONSUMER_VPC --enable-dns-hostnames
+aws ec2 modify-vpc-attribute --vpc-id $CONSUMER_VPC --enable-dns-support
+
+echo "     DNS enabled"
+echo ""
+
+# Create subnet
+CONSUMER_SUBNET=$(aws ec2 create-subnet \
+  --vpc-id $CONSUMER_VPC \
+  --cidr-block 10.30.1.0/24 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=Consumer-Subnet}]' \
+  --query 'Subnet.SubnetId' \
+  --output text)
+
+echo "  ✅ Consumer subnet created: $CONSUMER_SUBNET"
+echo ""
+
+#############################################################################
+# STEP 6: CREATE VPC ENDPOINT (CONSUMER)
+#############################################################################
+
+echo "Step 6: Creating VPC Endpoint (Consumer Side)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Create security group for endpoint
+ENDPOINT_SG=$(aws ec2 create-security-group \
+  --group-name endpoint-sg \
+  --description "Security group for VPC endpoint" \
+  --vpc-id $CONSUMER_VPC \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Endpoint-SG}]' \
+  --query 'GroupId' \
+  --output text)
+
+# Allow HTTP from within consumer VPC
+aws ec2 authorize-security-group-ingress \
+  --group-id $ENDPOINT_SG \
+  --protocol tcp \
+  --port 80 \
+  --cidr 10.30.0.0/16
+
+echo "  ✅ Endpoint security group created: $ENDPOINT_SG"
+echo ""
+
+echo "  Creating VPC endpoint to connect to service..."
+echo "     Service Name: $SERVICE_NAME"
+echo ""
+
+VPC_ENDPOINT_ID=$(aws ec2 create-vpc-endpoint \
+  --vpc-id $CONSUMER_VPC \
+  --vpc-endpoint-type Interface \
+  --service-name $SERVICE_NAME \
+  --subnet-ids $CONSUMER_SUBNET \
+  --security-group-ids $ENDPOINT_SG \
+  --tag-specifications 'ResourceType=vpc-endpoint,Tags=[{Key=Name,Value=SaaS-API-Endpoint}]' \
+  --query 'VpcEndpoint.VpcEndpointId' \
+  --output text)
+
+echo "  ✅ VPC Endpoint created: $VPC_ENDPOINT_ID"
+echo ""
+echo "  Status: Pending acceptance by provider"
+echo ""
+
+#############################################################################
+# STEP 7: ACCEPT ENDPOINT CONNECTION (PROVIDER APPROVES)
+#############################################################################
+
+echo "Step 7: Accepting Endpoint Connection (Provider Approval)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  ⏱️  Waiting for connection request to appear (10 seconds)..."
+sleep 10
+
+# Get connection request
+CONNECTION_ID=$(aws ec2 describe-vpc-endpoint-connections \
+  --filters "Name=service-id,Values=$SERVICE_ID" \
+  --query 'VpcEndpointConnections[0].VpcEndpointId' \
+  --output text)
+
+echo "  Connection request from: $CONNECTION_ID"
+echo ""
+
+echo "  Provider is reviewing connection request..."
+echo "     Checking connection details..."
+echo ""
+
+# Accept the connection
+aws ec2 accept-vpc-endpoint-connections \
+  --service-id $SERVICE_ID \
+  --vpc-endpoint-ids $VPC_ENDPOINT_ID
+
+echo "  ✅ Connection ACCEPTED by provider!"
+echo ""
+
+echo "  ⏱️  Waiting for endpoint to become available (30 seconds)..."
+sleep 30
+
+# Check endpoint status
+ENDPOINT_STATE=$(aws ec2 describe-vpc-endpoints \
+  --vpc-endpoint-ids $VPC_ENDPOINT_ID \
+  --query 'VpcEndpoints[0].State' \
+  --output text)
+
+echo "     Endpoint state: $ENDPOINT_STATE"
+
+if [ "$ENDPOINT_STATE" != "available" ]; then
+    echo "     Waiting another 30 seconds for availability..."
+    sleep 30
+    
+    ENDPOINT_STATE=$(aws ec2 describe-vpc-endpoints \
+      --vpc-endpoint-ids $VPC_ENDPOINT_ID \
+      --query 'VpcEndpoints[0].State' \
+      --output text)
+    
+    echo "     Endpoint state: $ENDPOINT_STATE"
+fi
+
+echo ""
+
+# Get endpoint IP address
+ENDPOINT_IP=$(aws ec2 describe-vpc-endpoints \
+  --vpc-endpoint-ids $VPC_ENDPOINT_ID \
+  --query 'VpcEndpoints[0].NetworkInterfaceIds[0]' \
+  --output text)
+
+ENDPOINT_PRIVATE_IP=$(aws ec2 describe-network-interfaces \
+  --network-interface-ids $ENDPOINT_IP \
+  --query 'NetworkInterfaces[0].PrivateIpAddress' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$ENDPOINT_PRIVATE_IP" ]; then
+    echo "  ✅ Endpoint is available!"
+    echo "     Private IP in consumer VPC: $ENDPOINT_PRIVATE_IP"
+else
+    echo "  ⚠️  Endpoint IP not yet available"
+fi
+
+echo ""
+
+#############################################################################
+# STEP 8: LAUNCH CONSUMER INSTANCE AND TEST
+#############################################################################
+
+echo "Step 8: Launching Consumer Instance for Testing"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Create security group for consumer instance
+CONSUMER_SG=$(aws ec2 create-security-group \
+  --group-name consumer-instance-sg \
+  --description "Security group for consumer instance" \
+  --vpc-id $CONSUMER_VPC \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=Name,Value=Consumer-Instance-SG}]' \
+  --query 'GroupId' \
+  --output text)
+
+# Allow all outbound (default)
+echo "  ✅ Consumer instance security group created: $CONSUMER_SG"
+echo ""
+
+echo "  Launching consumer instance..."
+
+CONSUMER_INSTANCE=$(aws ec2 run-instances \
+  --image-id $AMI_ID \
+  --instance-type t2.micro \
+  --subnet-id $CONSUMER_SUBNET \
+  --security-group-ids $CONSUMER_SG \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=Consumer-App}]' \
+  --user-data '#!/bin/bash
+yum update -y
+yum install -y curl bind-utils' \
+  --query 'Instances[0].InstanceId' \
+  --output text)
+
+echo "  ✅ Consumer instance launched: $CONSUMER_INSTANCE"
+echo ""
+
+aws ec2 wait instance-running --instance-ids $CONSUMER_INSTANCE
+
+CONSUMER_IP=$(aws ec2 describe-instances \
+  --instance-ids $CONSUMER_INSTANCE \
+  --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+  --output text)
+
+echo "  ✅ Instance running with private IP: $CONSUMER_IP"
+echo "     Waiting 30 seconds for initialization..."
+sleep 30
+echo ""
+
+#############################################################################
+# STEP 9: TEST PRIVATELINK CONNECTIVITY
+#############################################################################
+
+echo "Step 9: Testing PrivateLink Connectivity"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "  ════════════════════════════════════════════════════════════"
+echo "  CONNECTIVITY TEST: Consumer → PrivateLink → Provider Service"
+echo "  ════════════════════════════════════════════════════════════"
+echo ""
+
+if [ ! -z "$ENDPOINT_PRIVATE_IP" ]; then
+    echo "  Consumer instance will access service via:"
+    echo "     Endpoint IP: $ENDPOINT_PRIVATE_IP (in consumer VPC)"
+    echo ""
+    echo "  Traffic flow:"
+    echo "     Consumer Instance ($CONSUMER_IP)"
+    echo "       ↓"
+    echo "     VPC Endpoint ($ENDPOINT_PRIVATE_IP)"
+    echo "       ↓"
+    echo "     AWS PrivateLink (private network)"
+    echo "       ↓"
+    echo "     Network Load Balancer ($NLB_DNS)"
+    echo "       ↓"
+    echo "     Web Service ($WEB_SERVICE_IP)"
+    echo ""
+    
+    echo "  Testing HTTP connection..."
+    echo "     Command: curl http://$ENDPOINT_PRIVATE_IP"
+    echo ""
+    echo "     (In production, consumer app would use this endpoint IP)"
+    echo ""
+else
+    echo "  ⚠️  Endpoint IP not available yet"
+    echo "     In production, would test with:"
+    echo "     curl http://<endpoint-ip>"
+    echo ""
+fi
+
+echo "  Key Points:"
+echo "    ✅ Consumer CANNOT see provider's VPC (10.20.0.0/16)"
+echo "    ✅ Consumer ONLY knows endpoint IP (10.30.x.x in their VPC)"
+echo "    ✅ All traffic is private (no internet gateway needed)"
+echo "    ✅ Provider controls who can connect (manual acceptance)"
+echo "    ✅ No IP overlap issues (consumer uses their own CIDR)"
+echo ""
+
+#############################################################################
+# SUMMARY
+#############################################################################
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║              LAB 93 COMPLETE! ✅                         ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+cat << EOF
+AWS PRIVATELINK ARCHITECTURE DEPLOYED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌─────────────────────────────────────────────────────────────┐
+│              PROVIDER VPC (10.20.0.0/16)                    │
+│              Service Provider (SaaS Company)                 │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ Web Service: $WEB_SERVICE_INSTANCE                   │   │
+│  │ Private IP:  $WEB_SERVICE_IP                         │   │
+│  └──────────────────┬───────────────────────────────────┘   │
+│                     ↓                                        │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ Network Load Balancer (Internal)                     │   │
+│  │ DNS: $NLB_DNS                                        │   │
+│  └──────────────────┬───────────────────────────────────┘   │
+│                     ↓                                        │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ VPC Endpoint Service                                 │   │
+│  │ Service Name: $SERVICE_NAME                          │   │
+│  │ Service ID:   $SERVICE_ID                            │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────┬────────────────────────────────────────┘
+                      │
+                      │ AWS PrivateLink (Private Network)
+                      │
+┌─────────────────────▼────────────────────────────────────────┐
+│              CONSUMER VPC (10.30.0.0/16)                     │
+│              Customer / Service Consumer                      │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ VPC Endpoint (Interface)                             │   │
+│  │ Endpoint ID: $VPC_ENDPOINT_ID                        │   │
+│  │ Private IP:  $ENDPOINT_PRIVATE_IP                    │   │
+│  └──────────────────┬───────────────────────────────────┘   │
+│                     ↑                                        │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ Consumer Application                                 │   │
+│  │ Instance: $CONSUMER_INSTANCE                         │   │
+│  │ Accesses: http://$ENDPOINT_PRIVATE_IP                │   │
+│  └──────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────┘
+
+RESOURCES CREATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Provider Side:
+  • VPC:                    $PROVIDER_VPC (10.20.0.0/16)
+  • Subnets:                $PROVIDER_SUBNET_1, $PROVIDER_SUBNET_2
+  • Web Service Instance:   $WEB_SERVICE_INSTANCE
+  • Network Load Balancer:  $NLB_ARN
+  • Target Group:           $TARGET_GROUP_ARN
+  • VPC Endpoint Service:   $SERVICE_ID
+
+Consumer Side:
+  • VPC:                    $CONSUMER_VPC (10.30.0.0/16)
+  • Subnet:                 $CONSUMER_SUBNET
+  • VPC Endpoint:           $VPC_ENDPOINT_ID
+  • Consumer Instance:      $CONSUMER_INSTANCE
+
+PRIVATELINK BENEFITS DEMONSTRATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ SECURITY:
+   • Consumer cannot access provider's VPC
+   • Only specific service exposed (not entire network)
+   • Traffic stays on AWS private network
+   • Provider approves each consumer connection
+
+✅ SCALABILITY:
+   • Can support thousands of consumers
+   • Each consumer gets own endpoint
+   • No peering connections needed
+   • No CIDR planning required
+
+✅ NO IP CONFLICTS:
+   • Provider VPC: 10.20.0.0/16
+   • Consumer VPC: 10.30.0.0/16
+   • Could be same CIDR - no problem! ✅
+   • Endpoint gets IP in consumer's VPC
+
+✅ SIMPLIFIED ARCHITECTURE:
+   • Consumer doesn't need to know provider's infrastructure
+   • Provider can change backend without affecting consumers
+   • Easy to add/remove consumers
+   • Centralized access control
+
+CONNECTIVITY:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Consumer Application Access:
+  curl http://$ENDPOINT_PRIVATE_IP
+
+What Happens:
+1. Consumer app sends request to endpoint IP (10.30.x.x)
+2. VPC endpoint forwards to PrivateLink
+3. PrivateLink routes to NLB in provider VPC
+4. NLB forwards to web service instance
+5. Response follows reverse path
+6. All traffic is PRIVATE (never leaves AWS network!)
+
+USE CASES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This architecture is perfect for:
+✅ SaaS providers offering private access to customers
+✅ Shared services (AD, DNS) accessed by many VPCs
+✅ Microservices that need to be isolated
+✅ Partner integrations (B2B data exchange)
+✅ Marketplace services on AWS
+
+COST:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Current lab (2 hours):
+├─ VPC Endpoint Service: \$0.01/hour × 2 = \$0.02
+├─ VPC Endpoint: \$0.01/hour × 2 = \$0.02
+├─ NLB: \$0.0225/hour × 2 = \$0.045
+├─ EC2 instances: 2 × \$0.0116 × 2 = \$0.046
+└─ Total: ~\$0.13 ✅
+
+Production (monthly):
+├─ Endpoint Service: \$7.20/month
+├─ 100 Consumer Endpoints: \$720/month
+├─ NLB: \$21/month
+├─ Data processing: Variable
+└─ Total: ~\$750/month for 100 customers
+   → \$7.50/customer/month (very reasonable!)
+
+⚠️  DELETE RESOURCES AFTER TESTING TO AVOID CHARGES!
+
+TESTING (Manual - requires SSH):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+To manually test (if you have SSH access):
+
+1. SSH to consumer instance (need key pair)
+2. Run: curl http://$ENDPOINT_PRIVATE_IP
+3. Should see: SaaS API Service welcome page
+4. Verify: Private connectivity working!
+
+Expected Output:
+{
+  "service": "Premium Analytics API",
+  "status": "online",
+  "connection": "AWS PrivateLink"
+}
+
+EOF
+
+echo ""
+echo "Save these values for cleanup:"
+echo ""
+echo "# Provider VPC"
+echo "PROVIDER_VPC=$PROVIDER_VPC"
+echo "PROVIDER_SUBNET_1=$PROVIDER_SUBNET_1"
+echo "PROVIDER_SUBNET_2=$PROVIDER_SUBNET_2"
+echo "WEB_SERVICE_INSTANCE=$WEB_SERVICE_INSTANCE"
+echo "PROVIDER_SG=$PROVIDER_SG"
+echo ""
+echo "# Network Load Balancer"
+echo "NLB_ARN=$NLB_ARN"
+echo "TARGET_GROUP_ARN=$TARGET_GROUP_ARN"
+echo "LISTENER_ARN=$LISTENER_ARN"
+echo ""
+echo "# VPC Endpoint Service"
+echo "SERVICE_ID=$SERVICE_ID"
+echo "SERVICE_NAME=$SERVICE_NAME"
+echo ""
+echo "# Consumer VPC"
+echo "CONSUMER_VPC=$CONSUMER_VPC"
+echo "CONSUMER_SUBNET=$CONSUMER_SUBNET"
+echo "CONSUMER_INSTANCE=$CONSUMER_INSTANCE"
+echo "CONSUMER_SG=$CONSUMER_SG"
+echo "ENDPOINT_SG=$ENDPOINT_SG"
+echo ""
+echo "# VPC Endpoint"
+echo "VPC_ENDPOINT_ID=$VPC_ENDPOINT_ID"
+echo ""
+
+echo "Press Enter to see cleanup commands..."
+read
+
+#############################################################################
+# CLEANUP COMMANDS
+#############################################################################
+
+cat << 'CLEANUP'
+
+╔═══════════════════════════════════════════════════════════╗
+║                  CLEANUP SCRIPT                          ║
+╚═══════════════════════════════════════════════════════════╝
+
+CRITICAL: Delete in this exact order!
+
+# Step 1: Terminate EC2 instances
+aws ec2 terminate-instances --instance-ids $CONSUMER_INSTANCE
+aws ec2 terminate-instances --instance-ids $WEB_SERVICE_INSTANCE
+
+aws ec2 wait instance-terminated --instance-ids $CONSUMER_INSTANCE
+aws ec2 wait instance-terminated --instance-ids $WEB_SERVICE_INSTANCE
+
+echo "✅ Instances terminated"
+
+# Step 2: Delete VPC Endpoint
+aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $VPC_ENDPOINT_ID
+
+echo "⏱️  Waiting for endpoint deletion (30 seconds)..."
+sleep 30
+echo "✅ VPC Endpoint deleted"
+
+# Step 3: Delete VPC Endpoint Service
+aws ec2 delete-vpc-endpoint-service-configurations --service-ids $SERVICE_ID
+
+echo "✅ VPC Endpoint Service deleted"
+
+# Step 4: Delete Network Load Balancer
+aws elbv2 delete-load-balancer --load-balancer-arn $NLB_ARN
+
+echo "⏱️  Waiting for NLB deletion (30 seconds)..."
+sleep 30
+echo "✅ NLB deleted"
+
+# Step 5: Delete Target Group
+aws elbv2 delete-target-group --target-group-arn $TARGET_GROUP_ARN
+
+echo "✅ Target Group deleted"
+
+# Step 6: Delete Security Groups
+aws ec2 delete-security-group --group-id $ENDPOINT_SG
+aws ec2 delete-security-group --group-id $CONSUMER_SG
+aws ec2 delete-security-group --group-id $PROVIDER_SG
+
+echo "✅ Security Groups deleted"
+
+# Step 7: Delete Consumer VPC
+aws ec2 delete-subnet --subnet-id $CONSUMER_SUBNET
+aws ec2 delete-vpc --vpc-id $CONSUMER_VPC
+
+echo "✅ Consumer VPC deleted"
+
+# Step 8: Delete Provider VPC
+aws ec2 delete-subnet --subnet-id $PROVIDER_SUBNET_1
+aws ec2 delete-subnet --subnet-id $PROVIDER_SUBNET_2
+aws ec2 delete-vpc --vpc-id $PROVIDER_VPC
+
+echo "✅ Provider VPC deleted"
+
+echo ""
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║  ALL RESOURCES DELETED! ✅                               ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+
+CLEANUP
+
+echo ""
+```
+
+---
+
+## **LAB 93 KEY LEARNINGS:**
+
+```
+╔═══════════════════════════════════════════════════════════╗
+║         PRIVATELINK - KEY CONCEPTS LEARNED               ║
+╚═══════════════════════════════════════════════════════════╝
+
+ARCHITECTURE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Provider creates:
+1. Service (web app, API, database)
+2. Network Load Balancer (distributes traffic)
+3. VPC Endpoint Service (PrivateLink interface)
+
+Consumer creates:
+1. VPC Endpoint in their VPC
+2. Endpoint gets private IP in consumer's VPC
+3. Consumer app accesses via that private IP
+
+AWS PrivateLink:
+• Connects endpoint to service
+• Traffic stays on AWS network (private)
+• Encrypted automatically
+• No internet gateway needed
+
+BENEFITS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Security: Consumer can't access provider's VPC
+✅ Scalability: Thousands of consumers supported
+✅ No IP conflicts: Works even with overlapping CIDRs
+✅ Control: Provider approves each consumer
+✅ Simplicity: Consumer doesn't see infrastructure
+
+VS ALTERNATIVES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PrivateLink vs VPC Peering:
+• Peering: Full network access
+• PrivateLink: Service-level only ✅
+
+PrivateLink vs Transit Gateway:
+• TGW: Good for many-to-many
+• PrivateLink: Good for one service, many consumers ✅
+
+PrivateLink vs Public Endpoint:
+• Public: Goes through internet, security risk
+• PrivateLink: Private AWS network ✅
+
+EXAM TIPS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Know when to use PrivateLink:
+✅ SaaS provider with multiple customers
+✅ Shared services (AD, DNS) for many VPCs
+✅ Need to hide provider infrastructure
+✅ IP overlap between VPCs
+✅ One-way connectivity (consumer → provider only)
+
+Don't use PrivateLink for:
+❌ Full VPC-to-VPC connectivity (use peering)
+❌ Transitive routing (use Transit Gateway)
+❌ Just 2 VPCs that need full access (use peering)
+
+Components to remember:
+• NLB (required on provider side)
+• VPC Endpoint Service (provider creates)
+• VPC Endpoint (consumer creates)
+• Interface endpoint (gets private IP in consumer VPC)
+
+Cost: $0.01/hour per endpoint + NLB cost
+```
+
+---
+
+## **CONGRATULATIONS! DAY 27 COMPLETE! 🎉**
+
+```
+╔═══════════════════════════════════════════════════════════╗
+║            DAY 27 COMPLETE - SUMMARY                     ║
+╚═══════════════════════════════════════════════════════════╝
+
+TOPICS MASTERED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Route 53 DNSSEC (Theory)
+   • DNS security with cryptographic signatures
+   • Chain of trust
+   • AWS managed implementation
+
+✅ Route 53 Resolver DNS Firewall (Lab 91)
+   • Domain filtering at DNS level
+   • AWS managed threat lists
+   • Custom blocklists
+   • Cost: $90/month per VPC
+
+✅ Transit Gateway (Lab 92)
+   • Hub-and-spoke architecture
+   • Network segmentation
+   • Centralized routing
+   • Multi-VPC connectivity
+   • Cost: $0.05/hour per attachment
+
+✅ AWS PrivateLink (Lab 93)
+   • Private service connectivity
+   • SaaS architecture
+   • VPC Endpoint Services
+   • No IP conflicts
+   • Cost: $0.01/hour per endpoint
+
+LABS COMPLETED: 3/3
+TIME SPENT: ~2.5 hours
+COST: ~$0.50 (if deleted immediately)
+
+WEEK 4 PROGRESS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Day 22: VPC Security Fundamentals
+✅ Day 23: Security Groups & NACLs
+✅ Day 24: VPC Flow Logs
+✅ Day 25: Network Firewall (Theory - labs optional)
+✅ Day 26: AWS WAF & Shield (Theory - labs optional)
+✅ Day 27: Route 53, TGW, PrivateLink ← YOU ARE HERE!
+🔄 Day 28: Week 4 Review & Integration (NEXT!)
+
+OVERALL PROGRESS: 64% → 67% (+3%) 🚀
+
+DAYS TO EXAM: ~50 days
+ON TRACK: YES! ✅
+
+NEXT SESSION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Day 28: Week 4 Review & Network Security Project
+• Service comparison matrix
+• Decision flowcharts
+• Integration project
+• 30 practice questions
+• Week summary document
+
+Estimated time: 2-3 hours
+No labs (review only)
+Cost: $0
+```
+
+---
+
+**Amazing progress! Ready for Day 28 review?** Or take a break? 🎯

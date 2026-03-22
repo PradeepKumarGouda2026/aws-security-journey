@@ -1,0 +1,557 @@
+# **DAY 28: WEEK 4 REVIEW & NETWORK SECURITY INTEGRATION** 📚
+
+---
+
+## **OVERVIEW**
+
+```
+╔═══════════════════════════════════════════════════════════╗
+║          DAY 28: WEEK 4 REVIEW & CONSOLIDATION          ║
+╚═══════════════════════════════════════════════════════════╝
+
+Time: 2-3 hours
+Cost: $0 (no labs, review only)
+Focus: Solidify understanding, practice questions, exam prep
+
+Topics Covered This Week:
+✅ Day 22: VPC Security Fundamentals
+✅ Day 23: Security Groups & NACLs
+✅ Day 24: VPC Flow Logs
+✅ Day 25: Network Firewall (theory)
+✅ Day 26: WAF & Shield (theory)
+✅ Day 27: Route 53, Transit Gateway, PrivateLink
+✅ Day 28: Integration & Review ← YOU ARE HERE
+```
+
+---
+
+## **PART 1: SERVICE COMPARISON MATRIX (20 MIN)**
+
+### **Network Security Services - Complete Comparison**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                 AWS NETWORK SECURITY SERVICES                             ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────┬────────────┬────────────┬───────────┬──────────┬────────┐
+│ Service          │ Layer      │ Scope      │ Direction │ Cost     │ Use    │
+├──────────────────┼────────────┼────────────┼───────────┼──────────┼────────┤
+│ Security Groups  │ 4 (TCP/UDP)│ Instance   │ Stateful  │ FREE     │ 95%    │
+│                  │            │            │ 2-way auto│          │        │
+├──────────────────┼────────────┼────────────┼───────────┼──────────┼────────┤
+│ NACLs            │ 4 (TCP/UDP)│ Subnet     │ Stateless │ FREE     │ 30%    │
+│                  │            │            │ Manual    │          │        │
+├──────────────────┼────────────┼────────────┼───────────┼──────────┼────────┤
+│ VPC Flow Logs    │ 3-4 (IP)   │ VPC/Subnet │ Logging   │ $1-10/mo │ 40%    │
+│                  │            │ /ENI       │ only      │          │        │
+├──────────────────┼────────────┼────────────┼───────────┼──────────┼────────┤
+│ Network Firewall │ 3-7 (All)  │ VPC        │ Stateful  │ $600+/mo │ 5%     │
+│                  │            │            │ IDS/IPS   │          │        │
+├──────────────────┼────────────┼────────────┼───────────┼──────────┼────────┤
+│ AWS WAF          │ 7 (HTTP)   │ CloudFront │ Stateful  │ $15-50/mo│ 60%    │
+│                  │            │ ALB, API GW│ App layer │          │        │
+├──────────────────┼────────────┼────────────┼───────────┼──────────┼────────┤
+│ Shield Standard  │ 3-4 (DDoS) │ Edge       │ Automatic │ FREE     │ 100%   │
+│                  │            │            │ Always on │          │        │
+├──────────────────┼────────────┼────────────┼───────────┼──────────┼────────┤
+│ Shield Advanced  │ 3-7 (DDoS) │ Full stack │ Enhanced  │ $3k/mo   │ 1%     │
+│                  │            │            │ DRT       │          │        │
+└──────────────────┴────────────┴────────────┴───────────┴──────────┴────────┘
+
+"Use" = % of companies that use this service
+```
+
+---
+
+### **When to Use What - Decision Matrix**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                        DECISION FLOWCHART                                 ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+SCENARIO 1: Block IP Address
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: Need to block a single malicious IP?
+├─ Few IPs (<10): Security Group (deny by omission) ✅
+├─ Many IPs (10-100): NACL (explicit DENY) ✅
+├─ Thousands of IPs: WAF IP Set ✅
+└─ Known malware IPs: Network Firewall (threat intel) ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 2: Protect Web Application
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: Public web application needs protection?
+
+Layer 7 attacks (SQL injection, XSS)?
+→ AWS WAF ✅ (OWASP Top 10, $15/month)
+
+Layer 3/4 attacks (SYN flood, UDP reflection)?
+→ Shield Standard ✅ (FREE, automatic)
+
+Both + Need DRT support?
+→ Shield Advanced ($3k/month, only if critical)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 3: Block Domains/URLs
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: Need to block access to specific domains?
+
+At DNS level (prevent resolution)?
+→ Route 53 Resolver DNS Firewall ✅ ($90/VPC/month)
+
+At network level (inspect TLS SNI)?
+→ Network Firewall domain lists ✅ ($600/month)
+
+At application level (HTTP Host header)?
+→ Cannot do with AWS services directly
+
+Corporate policy (social media blocking)?
+→ DNS Firewall (cheapest) or Network Firewall (if already deployed)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 4: IDS/IPS Requirement
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: Compliance requires intrusion detection/prevention?
+
+PCI-DSS, HIPAA, FedRAMP requirement?
+→ Network Firewall ✅ (Suricata rules, $600/month)
+
+Budget-constrained?
+→ GuardDuty + VPC Flow Logs ($30/month, detection only)
+
+Third-party IDS/IPS?
+→ Marketplace (Palo Alto, Fortinet, Check Point)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 5: Rate Limiting
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: Need to limit requests per IP?
+
+HTTP/HTTPS traffic?
+→ AWS WAF rate-based rules ✅ (100-2B requests/5min)
+
+API rate limiting?
+→ API Gateway throttling ✅ (built-in)
+
+Non-HTTP traffic?
+→ Network Firewall (more complex)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 6: Multi-VPC Connectivity
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: How to connect multiple VPCs securely?
+
+2-3 VPCs, simple connectivity?
+→ VPC Peering ✅ (FREE, direct connection)
+
+10+ VPCs, need hub-and-spoke?
+→ Transit Gateway ✅ ($180/month for 10 VPCs)
+
+Expose one service to many VPCs?
+→ PrivateLink ✅ ($7/month + $7/consumer)
+
+Need centralized inspection?
+→ Transit Gateway + Inspection VPC + Network Firewall
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 7: Logging & Monitoring
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: Need to log network traffic?
+
+Basic connection logs (who talked to whom)?
+→ VPC Flow Logs ✅ ($1-5/month per VPC)
+
+Full packet capture (forensics)?
+→ VPC Traffic Mirroring ($0.015/hour/session)
+
+Application logs (HTTP requests)?
+→ ALB Access Logs (FREE, S3 storage only)
+
+IDS/IPS alerts?
+→ Network Firewall logs ($3/GB)
+
+Threat detection?
+→ GuardDuty ✅ ($4-30/month)
+```
+
+---
+
+## **PART 2: DEFENSE-IN-DEPTH ARCHITECTURE (15 MIN)**
+
+### **Complete Security Stack**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║              ENTERPRISE DEFENSE-IN-DEPTH ARCHITECTURE                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+                           ┌─────────────┐
+                           │   INTERNET  │
+                           └──────┬──────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ LAYER 1: EDGE PROTECTION (Free, Always Active)                         │
+│ ├─ Shield Standard: DDoS protection (Layer 3/4)                        │
+│ └─ Route 53: DNSSEC (optional), Health checks                          │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ LAYER 2: CDN & WAF ($15-50/month)                                      │
+│ ├─ CloudFront: Global distribution, DDoS absorption                    │
+│ └─ WAF on CloudFront: OWASP Top 10, rate limiting, geo-blocking       │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ LAYER 3: APPLICATION LOAD BALANCER ($16/month)                         │
+│ ├─ ALB: SSL termination, path routing                                  │
+│ ├─ WAF on ALB: Additional protection, custom rules                     │
+│ └─ ALB Security Group: Allow CloudFront IPs only                       │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ LAYER 4: VPC NETWORK (Free)                                            │
+│ ├─ Internet Gateway                                                     │
+│ └─ Route Tables: Traffic steering                                      │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ LAYER 5: NETWORK FIREWALL (Optional, $600+/month)                      │
+│ ├─ Stateless rules: Fast packet filtering                              │
+│ ├─ Stateful rules: Connection tracking                                 │
+│ ├─ Domain filtering: Block malicious domains                           │
+│ └─ IDS/IPS: Suricata rules, deep packet inspection                     │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ LAYER 6: SUBNET PROTECTION (Free)                                      │
+│ ├─ NACLs: Subnet-level stateless filtering                             │
+│ └─ Public vs Private subnets                                           │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ LAYER 7: INSTANCE PROTECTION (Free)                                    │
+│ ├─ Security Groups: Instance-level stateful firewall                   │
+│ └─ Least privilege: Allow only necessary ports                         │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ LAYER 8: APPLICATION ($50-200/month)                                   │
+│ ├─ EC2 Instance with hardened OS                                       │
+│ ├─ Systems Manager: Patch management                                   │
+│ ├─ CloudWatch Agent: Logs and metrics                                  │
+│ └─ Application-level security (input validation, etc.)                 │
+└─────────────────────────────────────────────────────────────────────────┘
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                          COST BY TIER                                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+STARTUP (Small website, <1M requests/month):
+├─ Shield Standard: FREE
+├─ CloudFront + WAF: $15/month
+├─ ALB: $16/month
+├─ VPC (SG + NACL): FREE
+├─ EC2 + monitoring: $50/month
+└─ TOTAL: $81/month ✅ Affordable!
+
+MID-SIZE (Growing SaaS, 10M requests/month):
+├─ Shield Standard: FREE
+├─ CloudFront + WAF: $50/month
+├─ ALB: $25/month
+├─ VPC Flow Logs: $10/month
+├─ GuardDuty: $30/month
+├─ EC2 fleet + monitoring: $200/month
+└─ TOTAL: $315/month ✅ Reasonable
+
+ENTERPRISE (Large-scale, compliance required):
+├─ Shield Advanced: $3,000/month
+├─ CloudFront + WAF: $200/month
+├─ ALB: $50/month
+├─ Network Firewall: $600/month
+├─ VPC Flow Logs: $50/month
+├─ GuardDuty: $100/month
+├─ Security Hub: $20/month
+├─ EC2 fleet + monitoring: $1,000/month
+└─ TOTAL: $5,020/month ✅ Worth it for compliance!
+```
+
+---
+
+## **PART 3: COMMON EXAM SCENARIOS (20 MIN)**
+
+### **Practice Scenarios with Answers**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                      EXAM-STYLE SCENARIOS                                 ║
+╚═══════════════════════════════════════════════════════════════════════════╗
+
+SCENARIO 1: SQL Injection Protection
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+A company's web application is experiencing SQL injection attempts.
+The application runs on EC2 behind an Application Load Balancer.
+What is the MOST cost-effective solution to block these attacks?
+
+A) Deploy Network Firewall with Suricata IDS/IPS rules
+B) Implement AWS WAF with SQL injection rule set
+C) Create Security Group rules to block malicious IPs
+D) Use NACLs to filter SQL patterns
+
+Answer: B ✅
+
+Explanation:
+- WAF is Layer 7 (application layer) - perfect for SQL injection
+- AWS Managed Rule Set for SQL injection is FREE
+- Cost: ~$15/month (WAF + rules + requests)
+- Network Firewall ($600/month) is overkill
+- Security Groups can't inspect HTTP content
+- NACLs can't detect SQL patterns (Layer 4 only)
+
+Key Concept: Use WAF for application-layer attacks!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 2: Block Social Media Access
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+A company needs to block employee access to social media sites
+(facebook.com, twitter.com) from their VPC for compliance reasons.
+Employees should still access AWS services and work-related sites.
+What solution provides this capability?
+
+A) Create NACL rules to block social media IP ranges
+B) Use Security Groups to deny outbound traffic to social media
+C) Deploy Route 53 Resolver DNS Firewall with domain blocklist
+D) Implement AWS WAF with custom URL filtering rules
+
+Answer: C ✅
+
+Explanation:
+- DNS Firewall blocks at DNS resolution level
+- Blocks .facebook.com, .twitter.com (wildcard support)
+- Works for HTTPS (doesn't need to decrypt)
+- Cost: $90/VPC/month
+- NACLs: Can't block domains, only IPs (which change)
+- Security Groups: Outbound is allow-all by default (can't deny)
+- WAF: Only protects resources it's attached to (not egress)
+
+Alternative:
+- Network Firewall domain lists ($600/month, if already deployed)
+
+Key Concept: DNS Firewall for domain blocking!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 3: DDoS Protection
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+An e-commerce website is experiencing a Layer 7 DDoS attack
+with thousands of requests per second from different IPs.
+The site uses CloudFront and ALB. What should you implement?
+
+A) Shield Advanced for enhanced DDoS protection
+B) WAF rate-based rule to limit requests per IP
+C) Network Firewall to inspect and block traffic
+D) Increase ALB capacity and EC2 Auto Scaling
+
+Answer: B ✅
+
+Explanation:
+- Layer 7 attack = HTTP flood attack
+- WAF rate-based rule: Block IPs exceeding threshold
+- Example: 2000 requests per 5 minutes per IP
+- Cost: ~$15/month (WAF + rules)
+- Shield Standard (FREE) already protects Layer 3/4
+- Shield Advanced ($3k/month) - not needed for most cases
+- Network Firewall doesn't help with rate limiting
+- Scaling helps but doesn't block attackers
+
+Configuration:
+Rate-based rule: 2000 requests/5min → BLOCK for 10 minutes
+
+Key Concept: WAF for Layer 7 DDoS, Shield for Layer 3/4!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 4: IDS/IPS Requirement
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+A healthcare company must comply with HIPAA, which requires
+intrusion detection and prevention capabilities.
+They have a multi-tier VPC with web, app, and database layers.
+What AWS service meets this requirement?
+
+A) AWS WAF with managed rule groups
+B) GuardDuty with VPC Flow Logs
+C) AWS Network Firewall with Suricata rules
+D) Security Hub with AWS Config rules
+
+Answer: C ✅
+
+Explanation:
+- HIPAA requires IDS/IPS for intrusion detection AND prevention
+- Network Firewall provides both:
+  - IDS mode: ALERT on suspicious traffic
+  - IPS mode: DROP/REJECT malicious traffic
+- Suricata rules for deep packet inspection
+- Supports custom rules and AWS managed rules
+- Cost: $600-1200/month (worth it for compliance)
+
+Why others don't work:
+- WAF: Only Layer 7, no IPS
+- GuardDuty: Detection only, no prevention
+- Security Hub: Aggregation, not IDS/IPS
+
+Key Concept: Network Firewall = IDS/IPS for AWS!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 5: Multi-VPC Security
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+A company has 20 VPCs across development, staging, and production.
+They want centralized security inspection for all egress traffic.
+What architecture should they implement?
+
+A) VPC Peering between all VPCs with NACLs
+B) Transit Gateway with inspection VPC and Network Firewall
+C) PrivateLink endpoints in each VPC
+D) Security Groups allowing traffic between VPCs
+
+Answer: B ✅
+
+Explanation:
+Architecture:
+20 VPCs → Transit Gateway → Inspection VPC → Network Firewall → NAT → Internet
+
+Benefits:
+- Centralized: One firewall for all VPCs ($600/month)
+- Scalable: Easy to add more VPCs
+- Inspection: All traffic goes through firewall
+- Cost-effective: vs 20 separate firewalls ($12k/month)
+
+Routing:
+VPC route tables: 0.0.0.0/0 → Transit Gateway
+TGW route table: 0.0.0.0/0 → Inspection VPC
+Inspection VPC: Traffic → Firewall → NAT → Internet
+
+Cost:
+- Transit Gateway: 20 × $36/month = $720/month
+- Network Firewall: $600/month
+- Total: $1,320/month ✅
+
+Key Concept: TGW + Inspection VPC = Centralized security!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 6: Stateful vs Stateless
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+An application needs to allow inbound HTTP (port 80) but block
+all other inbound traffic. Return traffic must be allowed.
+Which combination provides this with LEAST administrative overhead?
+
+A) Security Group: Allow inbound port 80
+B) NACL: Allow inbound port 80 + outbound ephemeral ports
+C) Both Security Group and NACL with matching rules
+D) Network Firewall with stateful rules
+
+Answer: A ✅
+
+Explanation:
+- Security Groups are STATEFUL
+- Inbound rule: Port 80 → automatically allows return traffic
+- No need to configure outbound rules for responses
+- NACL is STATELESS: Must configure both directions
+  - Inbound: Port 80
+  - Outbound: Ephemeral ports (1024-65535)
+- Network Firewall: Overkill for simple port allow
+
+Rule comparison:
+Security Group (1 rule):
+- Inbound: TCP 80 from 0.0.0.0/0
+
+NACL (2 rules):
+- Inbound: TCP 80 from 0.0.0.0/0
+- Outbound: TCP 1024-65535 to 0.0.0.0/0
+
+Key Concept: Use Security Groups when possible (stateful = easier)!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 7: Private Service Connectivity
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+A SaaS provider wants to offer their analytics API to 100 customers
+without exposing their VPC infrastructure. Customers should access
+via private connectivity without internet traversal.
+What AWS service enables this?
+
+A) VPC Peering with each customer VPC
+B) Transit Gateway with shared routing
+C) AWS PrivateLink with VPC Endpoint Service
+D) Direct Connect to each customer
+
+Answer: C ✅
+
+Explanation:
+PrivateLink architecture:
+Provider: NLB → VPC Endpoint Service → Service Name
+Customers: VPC Endpoint → Private IP in their VPC
+
+Benefits:
+- Scalable: Supports thousands of consumers
+- Private: Traffic never leaves AWS network
+- Secure: Provider approves each connection
+- Hidden: Customers don't see provider VPC
+- No IP conflicts: Each customer uses their own CIDR
+
+Cost:
+- Provider: $7/month (endpoint service)
+- Each customer: $7/month (endpoint)
+- Total for 100 customers: $707/month
+
+Alternatives don't scale:
+- VPC Peering: 100 peering connections (impossible to manage)
+- Transit Gateway: Exposes entire VPC (not just service)
+- Direct Connect: Expensive, physical connectivity
+
+Key Concept: PrivateLink for SaaS/service exposure!
+```
+
+---
+
+**Continue to Part 4 (Practice Questions)?** 
+
+I'll give you 30 practice questions to test your Week 4 knowledge! 🎯
