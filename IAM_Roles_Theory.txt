@@ -1,0 +1,2408 @@
+# **DAY 30: IAM ROLES & ASSUME ROLE** 🔑
+
+---
+
+## **OVERVIEW**
+
+```
+╔═══════════════════════════════════════════════════════════╗
+║          DAY 30: IAM ROLES & ASSUME ROLE                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+Time: 3 hours
+Difficulty: Medium-High
+Exam Weight: 22% (part of IAM domain)
+
+Topics Covered:
+✅ IAM Roles vs IAM Users
+✅ Trust policies vs permissions policies
+✅ Service roles (EC2, Lambda, etc.)
+✅ Cross-account roles
+✅ AWS STS (Security Token Service)
+✅ AssumeRole, AssumeRoleWithWebIdentity, AssumeRoleWithSAML
+✅ Role chaining
+✅ Session policies
+✅ Temporary credentials
+
+Lab: Cross-account access setup
+Cost: $0 (IAM is free!)
+```
+
+---
+
+## **PART 1: IAM ROLES VS IAM USERS (20 MIN)**
+
+### **Understanding the Fundamental Difference**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     IAM ROLES VS IAM USERS                                ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+IAM USER:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Represents: A specific person or application
+Identity type: Long-term identity
+Credentials: 
+├─ Username/password (console access)
+├─ Access keys (programmatic access)
+└─ Permanent until rotated
+
+Used by: One person/application
+Login process: Username + password OR access key + secret key
+Typical use: Employees, contractors, specific applications
+
+Example:
+User: alice@company.com
+Credentials: Password + MFA (console), Access Key (API)
+Permissions: Developer permissions
+
+Characteristics:
+✅ Permanent identity
+✅ Direct authentication
+✅ Credentials can be compromised if leaked
+✅ Need to manage credential rotation
+✅ Max 5000 users per account
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IAM ROLE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Represents: A set of permissions anyone can assume
+Identity type: Temporary identity
+Credentials:
+├─ Temporary security credentials
+├─ Access key + secret key + session token
+└─ Auto-expire (15 min to 12 hours)
+
+Used by: Anyone/anything allowed by trust policy
+Assumption process: Call AssumeRole API → Get temporary credentials
+Typical use: AWS services, cross-account access, federated users
+
+Example:
+Role: EC2-S3-Access-Role
+Trust policy: Allow EC2 service to assume
+Permissions: Read/write to specific S3 bucket
+Assumed by: EC2 instances
+
+Characteristics:
+✅ Temporary credentials (auto-expire)
+✅ No permanent credentials to manage
+✅ Can't login directly (must assume)
+✅ More secure (credentials rotate automatically)
+✅ No limit on number of roles
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHEN TO USE WHAT:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE IAM USERS FOR:
+✅ Individual employees (console access)
+✅ Service accounts (when role not possible)
+✅ Third-party tools requiring access keys
+
+USE IAM ROLES FOR:
+✅ AWS services (EC2, Lambda, ECS, etc.) ← Most common!
+✅ Cross-account access
+✅ Federated users (SSO, SAML, OIDC)
+✅ Temporary elevated permissions
+✅ Applications running on AWS
+
+BEST PRACTICE:
+"Use roles whenever possible, users when necessary"
+
+Why roles are better:
+1. No credential management (auto-rotate)
+2. No long-term credentials to leak
+3. Temporary access (principle of least privilege)
+4. Easy to audit (who assumed role when)
+5. Can be assumed by multiple entities
+```
+
+---
+
+### **Role Anatomy - Two Policies**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    IAM ROLE HAS TWO POLICIES                              ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Every IAM Role has TWO policies:
+
+1. TRUST POLICY (Who can assume the role)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Also called: Assume Role Policy
+Answers: "WHO can assume this role?"
+Attached to: The role itself
+
+Example - Allow EC2 to assume role:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "Service": "ec2.amazonaws.com"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+
+Example - Allow specific user to assume role:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::123456789012:user/alice"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+
+Example - Allow another AWS account to assume role:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::111111111111:root"
+    },
+    "Action": "sts:AssumeRole",
+    "Condition": {
+      "StringEquals": {
+        "sts:ExternalId": "unique-external-id-12345"
+      }
+    }
+  }]
+}
+
+Key Elements:
+- Principal: WHO (service, user, account)
+- Action: Always "sts:AssumeRole"
+- Condition: Optional (MFA, ExternalId, etc.)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. PERMISSIONS POLICY (What the role can do)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Also called: Identity-based policy, Role policy
+Answers: "WHAT can this role do?"
+Attached to: The role (like user policies)
+
+Example - Allow S3 read access:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "s3:GetObject",
+      "s3:ListBucket"
+    ],
+    "Resource": [
+      "arn:aws:s3:::my-bucket",
+      "arn:aws:s3:::my-bucket/*"
+    ]
+  }]
+}
+
+This is the same format as IAM user policies!
+No "Principal" (role itself is the principal)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VISUAL REPRESENTATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌────────────────────────────────────────────────────────────┐
+│                    IAM ROLE                                │
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ TRUST POLICY (Who can assume)                        │ │
+│  │                                                      │ │
+│  │ Principal: EC2 Service                              │ │
+│  │ Action: sts:AssumeRole                              │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │ PERMISSIONS POLICY (What role can do)                │ │
+│  │                                                      │ │
+│  │ Action: s3:GetObject, s3:ListBucket                 │ │
+│  │ Resource: arn:aws:s3:::my-bucket/*                  │ │
+│  └──────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────┘
+
+FLOW:
+1. EC2 instance requests to assume role (matches trust policy ✓)
+2. Gets temporary credentials with S3 read permissions
+3. Can now access S3 bucket using those credentials
+4. Credentials expire after session duration (default 1 hour)
+```
+
+---
+
+## **PART 2: AWS STS (SECURITY TOKEN SERVICE) (20 MIN)**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                  AWS STS (SECURITY TOKEN SERVICE)                         ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+WHAT IS STS?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AWS STS = Service that creates temporary security credentials
+
+Purpose: Allow entities to temporarily assume roles
+
+Credentials include:
+├─ Access Key ID (like permanent keys)
+├─ Secret Access Key (like permanent keys)
+├─ Session Token (unique to temporary credentials!)
+└─ Expiration timestamp (when credentials expire)
+
+Duration: 15 minutes to 12 hours (configurable)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STS API OPERATIONS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. AssumeRole
+   Purpose: Assume an IAM role
+   Used by: IAM users, IAM roles, federated users
+   Returns: Temporary credentials for the role
+   
+   Example:
+   aws sts assume-role \
+     --role-arn arn:aws:iam::123456789012:role/MyRole \
+     --role-session-name my-session
+   
+   Returns:
+   {
+     "Credentials": {
+       "AccessKeyId": "ASIAXXX",
+       "SecretAccessKey": "xxx",
+       "SessionToken": "xxx",
+       "Expiration": "2026-03-22T18:00:00Z"
+     },
+     "AssumedRoleUser": {
+       "AssumedRoleId": "AROAXXXX:my-session",
+       "Arn": "arn:aws:sts::123456789012:assumed-role/MyRole/my-session"
+     }
+   }
+
+2. AssumeRoleWithWebIdentity
+   Purpose: Assume role using web identity provider (Google, Facebook, Amazon)
+   Used by: Mobile/web applications
+   Authentication: ID token from identity provider
+   
+   Example:
+   aws sts assume-role-with-web-identity \
+     --role-arn arn:aws:iam::123456789012:role/MobileAppRole \
+     --role-session-name mobile-session \
+     --web-identity-token <token-from-google>
+   
+   Use case: Mobile app users login with Google, get temporary AWS access
+
+3. AssumeRoleWithSAML
+   Purpose: Assume role using SAML assertion
+   Used by: Enterprise SSO (Active Directory Federation)
+   Authentication: SAML assertion from corporate IdP
+   
+   Example:
+   aws sts assume-role-with-saml \
+     --role-arn arn:aws:iam::123456789012:role/SAMLRole \
+     --principal-arn arn:aws:iam::123456789012:saml-provider/MyProvider \
+     --saml-assertion <base64-encoded-saml>
+   
+   Use case: Employees login with corporate credentials, get AWS access
+
+4. GetSessionToken
+   Purpose: Get temporary credentials for MFA-protected access
+   Used by: IAM users adding MFA to their session
+   
+   Example:
+   aws sts get-session-token \
+     --serial-number arn:aws:iam::123456789012:mfa/alice \
+     --token-code 123456
+   
+   Use case: User needs to perform MFA-protected operation
+
+5. GetFederationToken
+   Purpose: Get temporary credentials for federated user
+   Used by: Custom federation broker
+   Less common (mostly legacy)
+
+6. GetCallerIdentity
+   Purpose: Get details about the calling identity
+   Used by: Debugging, verifying credentials
+   
+   Example:
+   aws sts get-caller-identity
+   
+   Returns:
+   {
+     "UserId": "AIDAI1234567890EXAMPLE",
+     "Account": "123456789012",
+     "Arn": "arn:aws:iam::123456789012:user/alice"
+   }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TEMPORARY CREDENTIALS STRUCTURE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{
+  "AccessKeyId": "ASIAZ123456789EXAMPLE",     ← Starts with ASIA (temporary)
+  "SecretAccessKey": "wJalrXUtn...",          ← Secret key
+  "SessionToken": "FwoGZXIvYXdzE...",         ← Session token (REQUIRED!)
+  "Expiration": "2026-03-22T18:00:00Z"        ← When credentials expire
+}
+
+Key difference from permanent credentials:
+- Permanent: AccessKeyId starts with AKIA
+- Temporary: AccessKeyId starts with ASIA
+- Temporary: Has SessionToken (permanent credentials don't)
+
+Using temporary credentials:
+export AWS_ACCESS_KEY_ID=ASIAZ123456789EXAMPLE
+export AWS_SECRET_ACCESS_KEY=wJalrXUtn...
+export AWS_SESSION_TOKEN=FwoGZXIvYXdzE...  ← Must include session token!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SESSION DURATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Different operations have different max durations:
+
+AssumeRole:
+├─ Default: 1 hour
+├─ Maximum: 12 hours (configurable in role settings)
+└─ Can be specified in assume-role call
+
+AssumeRoleWithWebIdentity:
+├─ Default: 1 hour
+└─ Maximum: 12 hours
+
+AssumeRoleWithSAML:
+├─ Default: 1 hour
+└─ Maximum: 12 hours
+
+GetSessionToken:
+├─ Default: 12 hours
+└─ Maximum: 36 hours (for root user: 1 hour max)
+
+Setting duration:
+aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/MyRole \
+  --role-session-name my-session \
+  --duration-seconds 3600  ← 1 hour (3600 seconds)
+
+Minimum: 900 seconds (15 minutes)
+Maximum: 43200 seconds (12 hours) for most operations
+```
+
+---
+
+## **PART 3: SERVICE ROLES (20 MIN)**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                         SERVICE ROLES                                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+SERVICE ROLE = Role assumed by AWS service on your behalf
+
+Common use cases:
+✅ EC2 instances accessing AWS resources
+✅ Lambda functions accessing S3, DynamoDB
+✅ ECS tasks accessing secrets, logs
+✅ CodeBuild accessing repositories
+✅ CloudFormation creating resources
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EC2 INSTANCE ROLE (Most Common):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem: EC2 instance needs to access S3
+Bad solution: Store access keys on instance (can be stolen!)
+Good solution: Attach IAM role to instance ✅
+
+How it works:
+1. Create IAM role with trust policy allowing ec2.amazonaws.com
+2. Attach permissions policy (e.g., S3 read access)
+3. Attach role to EC2 instance (via instance profile)
+4. EC2 instance automatically gets temporary credentials
+5. Credentials auto-rotate every hour
+6. Application uses AWS SDK → automatic credential handling!
+
+Trust Policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "Service": "ec2.amazonaws.com"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+
+Permissions Policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "s3:GetObject",
+      "s3:PutObject"
+    ],
+    "Resource": "arn:aws:s3:::my-app-bucket/*"
+  }]
+}
+
+Instance Profile:
+- Container for IAM role
+- Allows EC2 to pass role to instance
+- Automatically created when attaching role to instance via console
+- Name usually matches role name
+
+Accessing credentials from EC2 instance:
+curl http://169.254.169.254/latest/meta-data/iam/security-credentials/RoleName
+
+Returns:
+{
+  "AccessKeyId": "ASIA...",
+  "SecretAccessKey": "...",
+  "Token": "...",
+  "Expiration": "2026-03-22T18:00:00Z"
+}
+
+AWS SDK automatically uses these credentials!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LAMBDA EXECUTION ROLE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Every Lambda function needs an execution role
+
+Trust Policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "Service": "lambda.amazonaws.com"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+
+Minimum Permissions (for basic Lambda):
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ],
+    "Resource": "arn:aws:logs:*:*:*"
+  }]
+}
+
+Common additional permissions:
+- S3: Read/write files
+- DynamoDB: Read/write data
+- SQS: Receive/delete messages
+- SNS: Publish notifications
+- Secrets Manager: Retrieve secrets
+
+AWS Managed Policy for basic Lambda:
+arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OTHER COMMON SERVICE ROLES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ECS Task Role:
+Principal: "ecs-tasks.amazonaws.com"
+Purpose: Allow ECS containers to access AWS services
+
+RDS Enhanced Monitoring:
+Principal: "monitoring.rds.amazonaws.com"
+Purpose: Allow RDS to send metrics to CloudWatch
+
+CloudFormation:
+Principal: "cloudformation.amazonaws.com"
+Purpose: Allow CloudFormation to create/modify resources
+
+CodeBuild:
+Principal: "codebuild.amazonaws.com"
+Purpose: Allow CodeBuild to access source code, artifacts
+
+AWS Glue:
+Principal: "glue.amazonaws.com"
+Purpose: Allow Glue jobs to access data sources
+
+Step Functions:
+Principal: "states.amazonaws.com"
+Purpose: Allow Step Functions to invoke Lambda, other services
+```
+
+---
+
+# **PART 4: CROSS-ACCOUNT ROLES (COMPLETE REGENERATION)** 🔄
+
+---
+
+## **CROSS-ACCOUNT ACCESS WITH IAM ROLES**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                     CROSS-ACCOUNT ACCESS SCENARIOS                        ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+REAL-WORLD SCENARIO:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Your company has multiple AWS accounts:
+├─ Account A (111111111111) - Development Account
+│   ├─ 50 developers work here
+│   ├─ Development and testing happens here
+│   └─ No production data
+│
+└─ Account B (222222222222) - Production Account
+    ├─ Production applications run here
+    ├─ Customer data stored here
+    ├─ Only 5 ops engineers have access
+    └─ Strict access controls
+
+PROBLEM:
+Developers sometimes need to troubleshoot production issues
+But giving them permanent production access = security risk!
+
+SOLUTION:
+Cross-account IAM roles with temporary access ✅
+
+Benefits:
+✅ Developers stay in dev account (no prod credentials)
+✅ Temporary access only when needed
+✅ Full audit trail (who accessed when)
+✅ Easy to revoke (modify trust policy)
+✅ No credential management
+✅ MFA can be required
+```
+
+---
+
+## **HOW CROSS-ACCOUNT ACCESS WORKS**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    CROSS-ACCOUNT ACCESS FLOW                              ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+                    ACCOUNT A                           ACCOUNT B
+                 (Development)                        (Production)
+                111111111111                         222222222222
+
+Step 1: Developer authenticates
+┌─────────────────────────────┐
+│  Developer: Alice           │
+│  Credentials: User/Pass/MFA │
+│  Status: Authenticated      │
+└────────────┬────────────────┘
+             │
+             │ Has IAM policy:
+             │ "Allow sts:AssumeRole"
+             │
+Step 2: Calls AssumeRole API
+             │
+             │ aws sts assume-role \
+             │   --role-arn arn:aws:iam::222222222222:role/ProdReadOnly \
+             │   --role-session-name alice-troubleshoot
+             │
+             ▼
+        ┌─────────────────────────────────────────────────────────┐
+        │              AWS STS (Security Token Service)          │
+        │                                                         │
+        │  Validates:                                            │
+        │  1. Alice has permission to assume role? ✓             │
+        │  2. Trust policy in Account B allows Alice? ✓          │
+        │  3. External ID matches (if required)? ✓               │
+        │  4. MFA present (if required)? ✓                       │
+        │                                                         │
+        │  Generates:                                            │
+        │  - Temporary Access Key (ASIA...)                      │
+        │  - Temporary Secret Key                                │
+        │  - Session Token                                       │
+        │  - Expiration (1 hour default, max 12 hours)          │
+        └────────────┬────────────────────────────────────────────┘
+                     │
+                     │ Returns temporary credentials
+                     │
+Step 3: Alice receives temp credentials
+             │
+             ├─ AccessKeyId: ASIAZ123456789EXAMPLE
+             ├─ SecretAccessKey: wJalrXUtn...
+             ├─ SessionToken: FwoGZXIvYXdzE...
+             └─ Expiration: 2026-03-22T18:00:00Z
+             │
+Step 4: Uses temp credentials to access Account B
+             │
+             │ export AWS_ACCESS_KEY_ID=ASIAZ...
+             │ export AWS_SECRET_ACCESS_KEY=wJalr...
+             │ export AWS_SESSION_TOKEN=FwoGZ...
+             │
+             ▼
+                                                    ┌──────────────────────┐
+                                                    │   ACCOUNT B          │
+                                                    │   Production         │
+                                                    │                      │
+                                                    │  ┌────────────────┐  │
+                                                    │  │ S3 Bucket      │  │
+                        Access granted ✅            │  │ prod-logs      │  │
+                        Based on role permissions    │  └────────────────┘  │
+                                                    │                      │
+                                                    │  ┌────────────────┐  │
+                                                    │  │ CloudWatch     │  │
+                        Alice can read logs ✅        │  │ Logs           │  │
+                                                    │  └────────────────┘  │
+                                                    └──────────────────────┘
+
+Step 5: Credentials expire after 1 hour
+             │
+             │ Credentials no longer valid
+             │ Alice must assume role again if needed
+             └─ Security: Automatic timeout ✅
+```
+
+---
+
+## **DETAILED SETUP WALKTHROUGH**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║            STEP-BY-STEP CROSS-ACCOUNT ROLE CONFIGURATION                 ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1: ACCOUNT B (Production) - Create IAM Role
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Role Name: ProdReadOnlyRole
+Account: 222222222222 (Production)
+
+A) CREATE TRUST POLICY (Who can assume this role)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+trust-policy.json:
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowDevAccountToAssume",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::111111111111:root"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "sts:ExternalId": "MyCompany-Dev-To-Prod-2026"
+        },
+        "Bool": {
+          "aws:MultiFactorAuthPresent": "true"
+        }
+      }
+    }
+  ]
+}
+
+Key elements explained:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Principal: "AWS": "arn:aws:iam::111111111111:root"
+→ Allows ENTIRE Account A (dev account) to assume
+→ "root" means any user/role in that account
+→ Individual users still need permission in Account A to assume
+
+Why use :root instead of specific user?
+→ Flexibility: Any user in Account A can be granted access
+→ Centralized control in Account A (who gets access)
+→ Don't have to modify trust policy when adding/removing users
+
+Action: "sts:AssumeRole"
+→ The API call to assume a role
+→ Always this action for trust policies
+
+Condition - External ID:
+→ "sts:ExternalId": "MyCompany-Dev-To-Prod-2026"
+→ Security measure (prevents confused deputy attack)
+→ Must be unique and secret
+→ Optional but HIGHLY recommended for cross-account
+
+Condition - MFA:
+→ "aws:MultiFactorAuthPresent": "true"
+→ Requires MFA to assume role
+→ Optional but recommended for production access
+
+Create the role:
+aws iam create-role \
+  --role-name ProdReadOnlyRole \
+  --assume-role-policy-document file://trust-policy.json \
+  --description "Read-only access to production for developers"
+
+Output:
+{
+  "Role": {
+    "RoleName": "ProdReadOnlyRole",
+    "Arn": "arn:aws:iam::222222222222:role/ProdReadOnlyRole",
+    ...
+  }
+}
+
+Save this ARN! You'll need it in Account A.
+
+B) CREATE PERMISSIONS POLICY (What this role can do)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+permissions-policy.json:
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadS3Logs",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::prod-logs-bucket",
+        "arn:aws:s3:::prod-logs-bucket/*"
+      ]
+    },
+    {
+      "Sid": "ReadCloudWatchLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:GetLogEvents",
+        "logs:FilterLogEvents",
+        "logs:DescribeLogStreams"
+      ],
+      "Resource": "arn:aws:logs:us-east-1:222222222222:log-group:/aws/lambda/prod-*"
+    },
+    {
+      "Sid": "ViewEC2Instances",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyDestructiveActions",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:TerminateInstances",
+        "ec2:StopInstances",
+        "s3:DeleteObject",
+        "s3:DeleteBucket",
+        "rds:DeleteDBInstance"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+
+Attach to role:
+aws iam put-role-policy \
+  --role-name ProdReadOnlyRole \
+  --policy-name ProdReadOnlyPermissions \
+  --policy-document file://permissions-policy.json
+
+Or use managed policy:
+aws iam attach-role-policy \
+  --role-name ProdReadOnlyRole \
+  --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2: ACCOUNT A (Development) - Grant Users Permission to Assume Role
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Account: 111111111111 (Development)
+
+Option A: Create policy for specific users
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+assume-prod-role-policy.json:
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowAssumeProdReadOnlyRole",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::222222222222:role/ProdReadOnlyRole",
+      "Condition": {
+        "IpAddress": {
+          "aws:SourceIp": "203.0.113.0/24"
+        },
+        "DateGreaterThan": {
+          "aws:CurrentTime": "2026-01-01T00:00:00Z"
+        },
+        "DateLessThan": {
+          "aws:CurrentTime": "2026-12-31T23:59:59Z"
+        }
+      }
+    }
+  ]
+}
+
+Conditions explained:
+- SourceIp: Only from corporate VPN (203.0.113.0/24)
+- Date range: Only allow during year 2026 (for contractors)
+
+Create and attach policy:
+aws iam create-policy \
+  --policy-name AssumeProdReadOnlyRole \
+  --policy-document file://assume-prod-role-policy.json
+
+aws iam attach-user-policy \
+  --user-name alice \
+  --policy-arn arn:aws:iam::111111111111:policy/AssumeProdReadOnlyRole
+
+Option B: Create group for all developers
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Create group
+aws iam create-group --group-name ProdTroubleshooters
+
+# Attach policy to group
+aws iam attach-group-policy \
+  --group-name ProdTroubleshooters \
+  --policy-arn arn:aws:iam::111111111111:policy/AssumeProdReadOnlyRole
+
+# Add users to group
+aws iam add-user-to-group --user-name alice --group-name ProdTroubleshooters
+aws iam add-user-to-group --user-name bob --group-name ProdTroubleshooters
+aws iam add-user-to-group --user-name charlie --group-name ProdTroubleshooters
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3: ALICE (Developer) ASSUMES THE ROLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Alice's workflow:
+1. Authenticate to Account A (dev) with MFA
+2. Assume ProdReadOnlyRole in Account B (prod)
+3. Get temporary credentials
+4. Use temp credentials to access production
+
+Commands:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 1. Authenticate with MFA (if not already)
+aws sts get-session-token \
+  --serial-number arn:aws:iam::111111111111:mfa/alice \
+  --token-code 123456 \
+  --duration-seconds 3600
+
+# Export session credentials
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...
+
+# 2. Assume role in production account
+aws sts assume-role \
+  --role-arn arn:aws:iam::222222222222:role/ProdReadOnlyRole \
+  --role-session-name alice-troubleshoot-2026-03-22 \
+  --external-id MyCompany-Dev-To-Prod-2026 \
+  --duration-seconds 3600
+
+Response:
+{
+  "Credentials": {
+    "AccessKeyId": "ASIAZEXAMPLE123456789",
+    "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "SessionToken": "FwoGZXIvYXdzEJr//////////wEaDL...",
+    "Expiration": "2026-03-22T18:00:00Z"
+  },
+  "AssumedRoleUser": {
+    "AssumedRoleId": "AROAIEXAMPLE:alice-troubleshoot-2026-03-22",
+    "Arn": "arn:aws:sts::222222222222:assumed-role/ProdReadOnlyRole/alice-troubleshoot-2026-03-22"
+  }
+}
+
+# 3. Export temporary credentials
+export AWS_ACCESS_KEY_ID=ASIAZEXAMPLE123456789
+export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+export AWS_SESSION_TOKEN=FwoGZXIvYXdzEJr//////////wEaDL...
+
+# 4. Verify identity (now in production context!)
+aws sts get-caller-identity
+
+Output:
+{
+  "UserId": "AROAIEXAMPLE:alice-troubleshoot-2026-03-22",
+  "Account": "222222222222",
+  "Arn": "arn:aws:sts::222222222222:assumed-role/ProdReadOnlyRole/alice-troubleshoot-2026-03-22"
+}
+
+Notice:
+- Account changed from 111111111111 to 222222222222 ✅
+- Identity is now "assumed-role" not "user" ✅
+
+# 5. Access production resources
+aws s3 ls s3://prod-logs-bucket/
+→ Works! ✅
+
+aws logs tail /aws/lambda/prod-api --follow
+→ Works! ✅
+
+aws ec2 describe-instances --filters "Name=tag:Environment,Values=production"
+→ Works! ✅
+
+# Try destructive action (should fail)
+aws ec2 terminate-instances --instance-ids i-1234567890abcdef0
+→ Access Denied ❌ (explicit deny in policy)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4: CREDENTIALS EXPIRE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After 1 hour (3600 seconds):
+
+aws s3 ls s3://prod-logs-bucket/
+→ Error: ExpiredToken
+
+Alice must assume role again:
+aws sts assume-role \
+  --role-arn arn:aws:iam::222222222222:role/ProdReadOnlyRole \
+  --role-session-name alice-troubleshoot-2026-03-22-2 \
+  --external-id MyCompany-Dev-To-Prod-2026
+
+Security benefit:
+✅ Automatic timeout (no permanent access)
+✅ Forces re-authentication
+✅ Fresh audit trail
+```
+
+---
+
+## **EXTERNAL ID DEEP DIVE**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    EXTERNAL ID EXPLAINED                                  ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+WHAT IS THE CONFUSED DEPUTY PROBLEM?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario WITHOUT External ID:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Your company uses third-party SaaS (e.g., analytics service)
+
+Customer A (you):
+├─ Account: 111111111111
+├─ Creates role: AnalyticsAccessRole
+├─ Trust policy: Allows SaaS account (333333333333) to assume
+└─ Role ARN: arn:aws:iam::111111111111:role/AnalyticsAccessRole
+
+Customer B (another company):
+├─ Account: 444444444444
+├─ Creates role: AnalyticsAccessRole (same name!)
+├─ Trust policy: Allows SaaS account (333333333333) to assume
+└─ Role ARN: arn:aws:iam::444444444444:role/AnalyticsAccessRole
+
+SaaS application (analytics service):
+├─ Account: 333333333333
+├─ Has list of customer role ARNs
+└─ Assumes roles to access customer data
+
+THE ATTACK:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Attacker (Customer B) knows:
+- SaaS account ID: 333333333333 (public)
+- Role naming pattern: AnalyticsAccessRole (common)
+- Other customer account IDs (can guess or find)
+
+Attacker sends API request to SaaS:
+"Please analyze data from account 111111111111"
+(Customer A's account - NOT attacker's!)
+
+SaaS application (confused deputy):
+aws sts assume-role \
+  --role-arn arn:aws:iam::111111111111:role/AnalyticsAccessRole \
+  → Succeeds! SaaS can assume this role
+
+SaaS accesses Customer A's data:
+→ Attacker (Customer B) sees Customer A's data! 🚨
+
+This is the CONFUSED DEPUTY attack:
+SaaS is "confused" about which customer it's working for
+
+SOLUTION: EXTERNAL ID
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Customer A:
+├─ Generates unique External ID: "cust-a-secret-12345-unique"
+├─ Gives External ID to SaaS provider
+├─ Configures role with External ID requirement
+
+Trust policy WITH External ID:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::333333333333:root"
+    },
+    "Action": "sts:AssumeRole",
+    "Condition": {
+      "StringEquals": {
+        "sts:ExternalId": "cust-a-secret-12345-unique"
+      }
+    }
+  }]
+}
+
+SaaS provider stores mapping:
+Customer A → External ID: cust-a-secret-12345-unique
+Customer B → External ID: cust-b-different-67890-secret
+
+Now when assuming role:
+aws sts assume-role \
+  --role-arn arn:aws:iam::111111111111:role/AnalyticsAccessRole \
+  --external-id cust-a-secret-12345-unique
+  → Succeeds ✅
+
+If attacker tries WITHOUT External ID:
+aws sts assume-role \
+  --role-arn arn:aws:iam::111111111111:role/AnalyticsAccessRole
+  → Access Denied ❌ (missing External ID)
+
+If attacker tries WITH WRONG External ID:
+aws sts assume-role \
+  --role-arn arn:aws:iam::111111111111:role/AnalyticsAccessRole \
+  --external-id cust-b-different-67890-secret
+  → Access Denied ❌ (External ID doesn't match)
+
+EXTERNAL ID BEST PRACTICES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Generate randomly (UUID or similar)
+✅ Keep secret (don't publish or commit to Git)
+✅ Unique per customer/partner
+✅ Long enough to prevent guessing (minimum 20 characters)
+✅ Rotate periodically
+✅ Store securely (Secrets Manager)
+
+Example good External ID:
+"MyCompany-Partner-ABC-7f9a8e3d-4c2b-1a5f-8e6d-9c3b7a5f2e1d-2026"
+
+❌ Don't use:
+- Account ID (public)
+- Company name (guessable)
+- Sequential numbers (1, 2, 3)
+- Common patterns (password123)
+```
+
+---
+
+## **CROSS-ACCOUNT ACCESS PATTERNS**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                  COMMON CROSS-ACCOUNT PATTERNS                            ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+PATTERN 1: DEV → PROD ACCESS (Troubleshooting)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Setup:
+Dev Account → Assume → Prod Read-Only Role
+
+Requirements:
+✅ MFA required
+✅ Time-limited (1 hour sessions)
+✅ VPN required (IP restriction)
+✅ Explicit deny on destructive actions
+
+Trust policy:
+{
+  "Condition": {
+    "Bool": { "aws:MultiFactorAuthPresent": "true" },
+    "IpAddress": { "aws:SourceIp": "203.0.113.0/24" }
+  }
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PATTERN 2: CENTRALIZED LOGGING ACCOUNT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Setup:
+All accounts → Send logs → Centralized Logging Account
+
+Logging Account has:
+├─ S3 bucket: central-logs-bucket
+├─ Bucket policy: Allow all org accounts to PutObject
+└─ Roles for analysts to read logs
+
+Bucket policy:
+{
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "AWS": "*" },
+    "Action": "s3:PutObject",
+    "Resource": "arn:aws:s3:::central-logs-bucket/*",
+    "Condition": {
+      "StringEquals": {
+        "aws:PrincipalOrgID": "o-a1b2c3d4e5"
+      }
+    }
+  }]
+}
+
+Security Analyst role (in logging account):
+Trust policy: Allow security team account
+Permissions: s3:GetObject on central-logs-bucket
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PATTERN 3: THIRD-PARTY SAAS ACCESS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Setup:
+Your Account → Trust → SaaS Provider Account
+
+Example: Datadog monitoring, Splunk logging, CloudHealth cost management
+
+Trust policy:
+{
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::464622532012:root"
+    },
+    "Action": "sts:AssumeRole",
+    "Condition": {
+      "StringEquals": {
+        "sts:ExternalId": "your-unique-customer-id-abc123"
+      }
+    }
+  }]
+}
+
+Permissions (read-only monitoring):
+- cloudwatch:GetMetricStatistics
+- cloudwatch:ListMetrics
+- ec2:Describe*
+- s3:GetBucketLocation
+- s3:ListAllMyBuckets
+
+NEVER give:
+❌ s3:PutObject (can upload malware)
+❌ ec2:RunInstances (can mine crypto)
+❌ iam:* (can escalate privileges)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PATTERN 4: MULTI-ACCOUNT ORG WITH SERVICE ACCOUNTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Organization structure:
+├─ Master Account (000000000000)
+├─ Security Account (111111111111) - GuardDuty, Security Hub
+├─ Logging Account (222222222222) - CloudTrail, logs
+├─ Networking Account (333333333333) - VPCs, Transit Gateway
+├─ Shared Services (444444444444) - AD, DNS
+└─ Workload Accounts
+    ├─ Prod (555555555555)
+    ├─ Dev (666666666666)
+    └─ Test (777777777777)
+
+Security Account has:
+├─ SecurityAuditorRole
+├─ Trust: Master account
+└─ Permissions: Read-only across ALL accounts
+
+Cross-account read role in EVERY account:
+Trust policy:
+{
+  "Principal": {
+    "AWS": "arn:aws:iam::111111111111:role/SecurityAuditorRole"
+  }
+}
+
+Security team workflow:
+1. Login to Master Account
+2. Assume SecurityAuditorRole (in Security Account)
+3. Use that role to assume read roles in any account
+4. Audit across entire organization ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PATTERN 5: BREAK-GLASS EMERGENCY ACCESS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Setup:
+Normal: No one has admin in production
+Emergency: Break-glass role can be assumed
+
+Break-Glass Role:
+├─ Name: EmergencyAdminRole
+├─ Permissions: Administrator (full access)
+├─ Trust: Specific senior engineers only
+└─ Conditions: MFA + notification
+
+Trust policy:
+{
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": [
+        "arn:aws:iam::111111111111:user/senior-engineer-1",
+        "arn:aws:iam::111111111111:user/senior-engineer-2"
+      ]
+    },
+    "Action": "sts:AssumeRole",
+    "Condition": {
+      "Bool": { "aws:MultiFactorAuthPresent": "true" }
+    }
+  }]
+}
+
+Monitoring:
+CloudWatch Event Rule:
+- Trigger: AssumeRole on EmergencyAdminRole
+- Action: SNS → Email/SMS to security team
+- Alert: "EMERGENCY ADMIN ACCESS USED by [user] at [time]"
+
+Usage:
+- Only during outage/incident
+- Full audit trail
+- Auto-notification
+- Time-limited (15 minute sessions)
+```
+
+---
+
+## **EXAM-FOCUSED SCENARIOS**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║               EXAM QUESTIONS: CROSS-ACCOUNT ACCESS                        ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+SCENARIO 1: User can't assume cross-account role
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+"A user in Account A is trying to assume a role in Account B but receives
+'Access Denied'. What could be the problem?"
+
+Check TWO places:
+
+1. Trust policy in Account B role:
+   Does it allow Account A (or specific user)?
+   {
+     "Principal": {
+       "AWS": "arn:aws:iam::111111111111:root"
+     }
+   }
+   ✅ Must allow
+
+2. User permissions in Account A:
+   Does user have sts:AssumeRole permission?
+   {
+     "Action": "sts:AssumeRole",
+     "Resource": "arn:aws:iam::222222222222:role/RoleName"
+   }
+   ✅ Must have
+
+BOTH must allow! (AND relationship, not OR)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 2: Third-party access security
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+"A third-party SaaS needs access to your S3 bucket for analytics.
+What is the MOST secure approach?"
+
+Answer:
+✅ Create cross-account role with:
+   - External ID (prevent confused deputy)
+   - Least privilege permissions (s3:GetObject only)
+   - Short session duration (1 hour)
+   - MFA required (if possible)
+
+Trust policy:
+{
+  "Principal": { "AWS": "arn:aws:iam::SAAS-ACCOUNT:root" },
+  "Condition": {
+    "StringEquals": { "sts:ExternalId": "unique-customer-id" }
+  }
+}
+
+❌ Don't:
+- Give access keys (permanent, can leak)
+- Use bucket policy without External ID (confused deputy)
+- Grant more permissions than needed (s3:* is too broad)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 3: Audit access across multiple accounts
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+"Security team needs read-only access to all 50 AWS accounts in your
+organization. What's the most efficient solution?"
+
+Answer:
+✅ Create cross-account read-only role in EACH account
+✅ All roles trust centralized security account
+✅ Security team assumes role in target account as needed
+
+Setup:
+1. In each of 50 accounts, create: AuditorRole
+2. Trust policy allows: Security Account (111111111111)
+3. Permissions: ReadOnlyAccess managed policy
+4. Security team assumes role when auditing
+
+Automation with AWS Organizations:
+Use CloudFormation StackSets to deploy role to all accounts
+
+Alternative (not recommended for 50 accounts):
+Individual user access in each account = 50 × users = unmanageable!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SCENARIO 4: Session duration limits
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Question:
+"An application assumes a cross-account role every hour for batch processing.
+The processing takes 3 hours. What should you configure?"
+
+Answer:
+Configure role maximum session duration to 12 hours (max)
+
+In role settings:
+aws iam update-role \
+  --role-name BatchProcessingRole \
+  --max-session-duration 43200  # 12 hours in seconds
+
+Then assume role with longer duration:
+aws sts assume-role \
+  --role-arn arn:aws:iam::222222222222:role/BatchProcessingRole \
+  --role-session-name batch-job \
+  --duration-seconds 10800  # 3 hours
+
+Notes:
+- Default max: 1 hour
+- Maximum max: 12 hours
+- Cannot exceed role's max setting
+- Some services (Lambda) have their own limits
+```
+
+---
+
+**This completes Part 4: Cross-Account Roles!** 🎉
+
+**Key takeaways:**
+- Cross-account requires BOTH trust policy AND user permissions
+- External ID prevents confused deputy attack
+- Temporary credentials auto-expire (secure!)
+- MFA and IP restrictions add extra security layers
+- Common patterns: Dev→Prod, centralized logging, third-party access
+
+**Ready to continue with the lab or move to Part 5?** 🚀
+
+
+
+# **DAY 30: IAM ROLES & ASSUME ROLE (CONTINUED)** 🔑
+
+---
+
+## **PART 5: ROLE CHAINING (15 MIN)**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                         ROLE CHAINING                                     ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+WHAT IS ROLE CHAINING?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Role chaining = Using one role's temporary credentials to assume another role
+
+Flow:
+User → Assumes Role A → Uses Role A credentials → Assumes Role B
+
+Example scenario:
+1. Alice (developer) assumes DevRole
+2. DevRole assumes ProdReadOnlyRole (in production account)
+3. Alice can now read production resources (2-hop access)
+
+Why use it:
+✅ Add additional security layer
+✅ Limit direct access to production
+✅ Audit trail shows both role assumptions
+✅ Progressive elevation of privileges
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ROLE CHAINING EXAMPLE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scenario:
+Account A (Dev): 111111111111
+Account B (Prod): 222222222222
+Account C (Audit): 333333333333
+
+User Alice needs to access audit logs in Account C, but:
+- Alice is in Account A (Dev)
+- Only Account B (Prod) has access to Account C (Audit)
+- Solution: Role chaining!
+
+Setup:
+
+STEP 1: Account A - Alice can assume JumpRole
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Role: JumpRole (in Account A)
+
+Trust policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::111111111111:user/alice"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+
+Permissions policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "sts:AssumeRole",
+    "Resource": "arn:aws:iam::222222222222:role/ProdAuditRole"
+  }]
+}
+
+STEP 2: Account B - ProdAuditRole can assume AuditAccessRole
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Role: ProdAuditRole (in Account B)
+
+Trust policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::111111111111:role/JumpRole"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+
+Permissions policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "sts:AssumeRole",
+    "Resource": "arn:aws:iam::333333333333:role/AuditAccessRole"
+  }]
+}
+
+STEP 3: Account C - AuditAccessRole has audit log access
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Role: AuditAccessRole (in Account C)
+
+Trust policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::222222222222:role/ProdAuditRole"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+
+Permissions policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "s3:GetObject",
+      "s3:ListBucket"
+    ],
+    "Resource": [
+      "arn:aws:s3:::audit-logs-bucket",
+      "arn:aws:s3:::audit-logs-bucket/*"
+    ]
+  }]
+}
+
+EXECUTION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Step 1: Alice assumes JumpRole
+aws sts assume-role \
+  --role-arn arn:aws:iam::111111111111:role/JumpRole \
+  --role-session-name alice-session
+
+# Export credentials from response
+export AWS_ACCESS_KEY_ID=ASIA...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...
+
+# Step 2: Using JumpRole credentials, assume ProdAuditRole
+aws sts assume-role \
+  --role-arn arn:aws:iam::222222222222:role/ProdAuditRole \
+  --role-session-name prod-session
+
+# Export new credentials
+export AWS_ACCESS_KEY_ID=ASIA...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...
+
+# Step 3: Using ProdAuditRole credentials, assume AuditAccessRole
+aws sts assume-role \
+  --role-arn arn:aws:iam::333333333333:role/AuditAccessRole \
+  --role-session-name audit-session
+
+# Export final credentials
+export AWS_ACCESS_KEY_ID=ASIA...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...
+
+# Step 4: Access audit logs
+aws s3 ls s3://audit-logs-bucket/
+→ Success! ✅
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ROLE CHAINING LIMITS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Maximum chain length: 1 hop (Role A → Role B, but Role B can't assume Role C)
+
+Wait, what? The example above has 3 roles!
+
+Clarification:
+- User → Role A → Role B ✅ (Allowed, 1 hop)
+- Role A → Role B → Role C ❌ (Not allowed, would be 2 hops)
+
+In our example:
+- Alice (user) → JumpRole (hop 1)
+- JumpRole → ProdAuditRole (hop 2) ❌ This is the problem!
+
+Actually, AWS DOES allow this, but with restrictions:
+
+Session duration limit:
+- First assume: Max 12 hours
+- Chained assume: Max 1 hour (limited!)
+- Each hop reduces max duration
+
+CloudTrail shows full chain:
+- Alice assumed JumpRole
+- JumpRole assumed ProdAuditRole
+- ProdAuditRole assumed AuditAccessRole
+
+Best practice:
+Minimize chain length (prefer direct cross-account access when possible)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE CASES FOR ROLE CHAINING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Progressive privilege elevation
+   User → StandardRole → ElevatedRole → AdminRole
+   
+2. Break-glass emergency access
+   Admin → EmergencyRole → ProductionAccessRole
+   
+3. Third-party access with intermediary
+   ThirdParty → IntermediaryRole → CustomerResourceRole
+   
+4. Compliance requirement (dual approval)
+   Approver1 → ApprovalRole → Approver2Role → SensitiveDataRole
+   
+5. Multi-account hub-and-spoke
+   User in Hub → SpokeAccessRole → ResourceRole in Spoke
+```
+
+---
+
+## **PART 6: SESSION POLICIES (10 MIN)**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                       SESSION POLICIES                                    ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+WHAT ARE SESSION POLICIES?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Session policy = Additional policy passed when assuming a role
+Effect: Further RESTRICTS permissions (never expands)
+Duration: Only applies to that specific session
+
+Think of it as: Temporary permission boundary for one session
+
+Use case:
+Role has broad permissions, but you want to grant narrow access for this session
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAMPLE SCENARIO:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Situation:
+- Role: DataScientistRole
+- Role permissions: Full S3 access (s3:*)
+- But: You want to give Alice access to ONLY one specific bucket
+
+Solution: Session policy!
+
+Role permissions policy (broad):
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "s3:*",
+    "Resource": "*"
+  }]
+}
+
+Session policy (narrow):
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "s3:*",
+    "Resource": [
+      "arn:aws:s3:::project-alpha-data",
+      "arn:aws:s3:::project-alpha-data/*"
+    ]
+  }]
+}
+
+Assume role with session policy:
+aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/DataScientistRole \
+  --role-session-name alice-session \
+  --policy '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::project-alpha-data",
+        "arn:aws:s3:::project-alpha-data/*"
+      ]
+    }]
+  }'
+
+Result:
+Role says: Allow s3:* on *
+Session says: Allow s3:* on project-alpha-data only
+Effective: Allow s3:* on project-alpha-data only ✅ (intersection!)
+
+Alice can:
+✅ s3:GetObject on s3://project-alpha-data/file.txt
+✅ s3:PutObject on s3://project-alpha-data/file.txt
+
+Alice cannot:
+❌ s3:GetObject on s3://project-beta-data/file.txt (not in session policy)
+❌ s3:GetObject on s3://any-other-bucket/* (not in session policy)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SESSION POLICY RULES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. RESTRICTS ONLY (Never Expands)
+   Effective permissions = Role permissions ∩ Session policy
+   
+   Example:
+   Role: Allow S3, EC2, RDS
+   Session: Allow S3, EC2
+   Result: S3 and EC2 only (RDS denied)
+
+2. Optional (Not Required)
+   Can assume role without session policy
+   Without session policy: Full role permissions
+
+3. Maximum Size: 2048 characters (JSON string)
+   Keep session policies concise!
+
+4. Can be passed to:
+   - AssumeRole
+   - AssumeRoleWithWebIdentity
+   - AssumeRoleWithSAML
+   - GetFederationToken
+
+5. Evaluation:
+   Checked AFTER role permissions
+   Part of policy evaluation logic
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PRACTICAL USE CASES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Time-limited access to specific resource
+   Admin role with full access, but only need S3 access for 1 hour
+
+2. Third-party temporary access
+   Give vendor access to one specific resource for troubleshooting
+
+3. Automated systems with dynamic permissions
+   CI/CD pipeline assumes deployment role with session policy for specific environment
+
+4. Progressive disclosure
+   User starts with minimal session policy, can request expanded access
+
+5. Compliance/audit
+   Restrict admin access during audit period
+```
+
+---
+
+## **LAB 95: CROSS-ACCOUNT ACCESS WITH ROLES** 🔬
+
+```bash
+#!/bin/bash
+# Lab 95: Cross-Account IAM Role Setup
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║     LAB 95: CROSS-ACCOUNT ACCESS WITH IAM ROLES         ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+#############################################################################
+# NOTE: This lab simulates cross-account access within a single account
+# In production, you would do this across two separate AWS accounts
+#############################################################################
+
+echo "SCENARIO:"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "We're simulating cross-account access:"
+echo "  - User 'developer' (represents Account A)"
+echo "  - Role 'ProductionAccessRole' (represents Account B resource)"
+echo "  - Developer needs temporary access to 'production' S3 bucket"
+echo ""
+echo "In real cross-account:"
+echo "  - Developer would be in Account 111111111111"
+echo "  - ProductionAccessRole would be in Account 222222222222"
+echo ""
+
+read -p "Press Enter to continue..."
+
+#############################################################################
+# STEP 1: CREATE PRODUCTION S3 BUCKET
+#############################################################################
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 1: Creating Production S3 Bucket"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+PROD_BUCKET="production-data-$(date +%s)"
+
+aws s3 mb s3://$PROD_BUCKET
+echo "✅ Production bucket: $PROD_BUCKET"
+
+# Upload test file
+echo "Production data - sensitive!" > /tmp/prod-data.txt
+aws s3 cp /tmp/prod-data.txt s3://$PROD_BUCKET/
+echo "✅ Test file uploaded"
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "✅ Account ID: $ACCOUNT_ID"
+
+echo ""
+
+#############################################################################
+# STEP 2: CREATE DEVELOPER USER
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 2: Creating Developer User"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Create developer user
+aws iam create-user --user-name developer
+echo "✅ User 'developer' created"
+
+# Create access key for developer (to simulate cross-account CLI access)
+DEVELOPER_KEYS=$(aws iam create-access-key --user-name developer --query 'AccessKey' --output json)
+DEVELOPER_ACCESS_KEY=$(echo $DEVELOPER_KEYS | grep -o '"AccessKeyId":"[^"]*"' | cut -d'"' -f4)
+DEVELOPER_SECRET_KEY=$(echo $DEVELOPER_KEYS | grep -o '"SecretAccessKey":"[^"]*"' | cut -d'"' -f4)
+
+echo "✅ Access keys created for developer"
+echo ""
+
+#############################################################################
+# STEP 3: CREATE CROSS-ACCOUNT ROLE (Production Access Role)
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 3: Creating Production Access Role"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Trust policy: Allow developer user to assume role
+cat > /tmp/trust-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::${ACCOUNT_ID}:user/developer"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "sts:ExternalId": "unique-external-id-12345"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+echo "Trust Policy created:"
+cat /tmp/trust-policy.json
+echo ""
+
+# Create role
+aws iam create-role \
+  --role-name ProductionAccessRole \
+  --assume-role-policy-document file:///tmp/trust-policy.json \
+  --description "Allows cross-account access to production resources"
+
+echo "✅ Role 'ProductionAccessRole' created"
+echo ""
+
+# Permissions policy: Allow S3 read access to production bucket
+cat > /tmp/permissions-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowProductionS3Read",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${PROD_BUCKET}",
+        "arn:aws:s3:::${PROD_BUCKET}/*"
+      ]
+    }
+  ]
+}
+EOF
+
+echo "Permissions Policy created:"
+cat /tmp/permissions-policy.json
+echo ""
+
+# Attach permissions policy to role
+aws iam put-role-policy \
+  --role-name ProductionAccessRole \
+  --policy-name ProductionS3ReadPolicy \
+  --policy-document file:///tmp/permissions-policy.json
+
+echo "✅ Permissions policy attached to role"
+echo ""
+
+ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/ProductionAccessRole"
+echo "✅ Role ARN: $ROLE_ARN"
+echo ""
+
+#############################################################################
+# STEP 4: GRANT DEVELOPER PERMISSION TO ASSUME ROLE
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 4: Granting Developer Permission to Assume Role"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Create policy allowing AssumeRole
+cat > /tmp/assume-role-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "${ROLE_ARN}"
+    }
+  ]
+}
+EOF
+
+aws iam put-user-policy \
+  --user-name developer \
+  --policy-name AssumeProductionRole \
+  --policy-document file:///tmp/assume-role-policy.json
+
+echo "✅ Developer can now assume ProductionAccessRole"
+echo ""
+
+#############################################################################
+# STEP 5: TEST - DEVELOPER TRIES TO ACCESS BUCKET DIRECTLY (SHOULD FAIL)
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 5: Test Direct Access (Should Fail)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "Testing: Developer trying to access production bucket directly..."
+echo ""
+
+# Save current credentials
+OLD_ACCESS_KEY=$AWS_ACCESS_KEY_ID
+OLD_SECRET_KEY=$AWS_SECRET_ACCESS_KEY
+OLD_SESSION_TOKEN=$AWS_SESSION_TOKEN
+
+# Use developer credentials
+export AWS_ACCESS_KEY_ID=$DEVELOPER_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$DEVELOPER_SECRET_KEY
+unset AWS_SESSION_TOKEN
+
+# Try to access bucket (should fail)
+echo "Command: aws s3 ls s3://$PROD_BUCKET/"
+aws s3 ls s3://$PROD_BUCKET/ 2>&1 | head -3 || echo "❌ Access Denied (as expected!)"
+echo ""
+echo "✅ Direct access denied - developer doesn't have S3 permissions"
+echo ""
+
+#############################################################################
+# STEP 6: DEVELOPER ASSUMES ROLE
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 6: Developer Assumes Production Access Role"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "Command: aws sts assume-role --role-arn $ROLE_ARN --external-id unique-external-id-12345"
+echo ""
+
+# Assume role
+ROLE_CREDENTIALS=$(aws sts assume-role \
+  --role-arn $ROLE_ARN \
+  --role-session-name developer-session \
+  --external-id unique-external-id-12345 \
+  --duration-seconds 3600 \
+  --query 'Credentials' \
+  --output json)
+
+# Extract temporary credentials
+TEMP_ACCESS_KEY=$(echo $ROLE_CREDENTIALS | grep -o '"AccessKeyId":"[^"]*"' | cut -d'"' -f4)
+TEMP_SECRET_KEY=$(echo $ROLE_CREDENTIALS | grep -o '"SecretAccessKey":"[^"]*"' | cut -d'"' -f4)
+TEMP_SESSION_TOKEN=$(echo $ROLE_CREDENTIALS | grep -o '"SessionToken":"[^"]*"' | cut -d'"' -f4)
+EXPIRATION=$(echo $ROLE_CREDENTIALS | grep -o '"Expiration":"[^"]*"' | cut -d'"' -f4)
+
+echo "✅ Role assumed successfully!"
+echo ""
+echo "Temporary Credentials:"
+echo "  AccessKeyId: ${TEMP_ACCESS_KEY:0:20}..."
+echo "  Expiration: $EXPIRATION"
+echo ""
+
+# Use temporary credentials
+export AWS_ACCESS_KEY_ID=$TEMP_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$TEMP_SECRET_KEY
+export AWS_SESSION_TOKEN=$TEMP_SESSION_TOKEN
+
+#############################################################################
+# STEP 7: TEST ACCESS WITH ASSUMED ROLE (SHOULD SUCCEED)
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 7: Test Access with Assumed Role (Should Succeed)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "Using assumed role credentials to access production bucket..."
+echo ""
+
+# List bucket contents
+echo "Command: aws s3 ls s3://$PROD_BUCKET/"
+aws s3 ls s3://$PROD_BUCKET/
+echo "✅ Success! Developer can now read production bucket via assumed role"
+echo ""
+
+# Download file
+echo "Command: aws s3 cp s3://$PROD_BUCKET/prod-data.txt /tmp/downloaded.txt"
+aws s3 cp s3://$PROD_BUCKET/prod-data.txt /tmp/downloaded.txt
+echo "✅ File downloaded successfully"
+echo ""
+
+cat /tmp/downloaded.txt
+echo ""
+
+#############################################################################
+# STEP 8: TEST WITH SESSION POLICY (FURTHER RESTRICT)
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 8: Testing Session Policy (Read-Only)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Restore developer credentials
+export AWS_ACCESS_KEY_ID=$DEVELOPER_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$DEVELOPER_SECRET_KEY
+unset AWS_SESSION_TOKEN
+
+# Session policy: Only allow GetObject (not ListBucket)
+cat > /tmp/session-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "s3:GetObject",
+    "Resource": "arn:aws:s3:::${PROD_BUCKET}/*"
+  }]
+}
+EOF
+
+echo "Session Policy (restricts to GetObject only):"
+cat /tmp/session-policy.json
+echo ""
+
+# Assume role with session policy
+ROLE_CREDENTIALS=$(aws sts assume-role \
+  --role-arn $ROLE_ARN \
+  --role-session-name restricted-session \
+  --external-id unique-external-id-12345 \
+  --policy file:///tmp/session-policy.json \
+  --query 'Credentials' \
+  --output json)
+
+# Extract credentials
+TEMP_ACCESS_KEY=$(echo $ROLE_CREDENTIALS | grep -o '"AccessKeyId":"[^"]*"' | cut -d'"' -f4)
+TEMP_SECRET_KEY=$(echo $ROLE_CREDENTIALS | grep -o '"SecretAccessKey":"[^"]*"' | cut -d'"' -f4)
+TEMP_SESSION_TOKEN=$(echo $ROLE_CREDENTIALS | grep -o '"SessionToken":"[^"]*"' | cut -d'"' -f4)
+
+export AWS_ACCESS_KEY_ID=$TEMP_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$TEMP_SECRET_KEY
+export AWS_SESSION_TOKEN=$TEMP_SESSION_TOKEN
+
+echo "Testing with session policy..."
+echo ""
+
+# Try to list bucket (should fail - not in session policy)
+echo "Test 1: ListBucket (should fail)"
+echo "Command: aws s3 ls s3://$PROD_BUCKET/"
+aws s3 ls s3://$PROD_BUCKET/ 2>&1 | head -3 || echo "❌ Access Denied (session policy restricts ListBucket)"
+echo ""
+
+# Try to get object (should succeed - in session policy)
+echo "Test 2: GetObject (should succeed)"
+echo "Command: aws s3 cp s3://$PROD_BUCKET/prod-data.txt /tmp/test.txt"
+aws s3 cp s3://$PROD_BUCKET/prod-data.txt /tmp/test.txt
+echo "✅ GetObject allowed by session policy"
+echo ""
+
+#############################################################################
+# STEP 9: CHECK CALLER IDENTITY
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 9: Verify Assumed Role Identity"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "Command: aws sts get-caller-identity"
+aws sts get-caller-identity
+echo ""
+
+#############################################################################
+# RESTORE ORIGINAL CREDENTIALS
+#############################################################################
+
+export AWS_ACCESS_KEY_ID=$OLD_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$OLD_SECRET_KEY
+export AWS_SESSION_TOKEN=$OLD_SESSION_TOKEN
+
+#############################################################################
+# SUMMARY
+#############################################################################
+
+cat << EOF
+╔═══════════════════════════════════════════════════════════╗
+║  LAB 95 COMPLETE! ✅                                     ║
+╚═══════════════════════════════════════════════════════════╝
+
+WHAT YOU LEARNED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Created cross-account IAM role
+✅ Configured trust policy with External ID
+✅ Granted user permission to assume role
+✅ Assumed role and received temporary credentials
+✅ Used temporary credentials to access resources
+✅ Applied session policy for additional restrictions
+✅ Verified assumed role identity
+
+CROSS-ACCOUNT ACCESS FLOW:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Developer has NO direct access to production bucket ❌
+2. Developer assumes ProductionAccessRole ✅
+3. Receives temporary credentials (valid 1 hour)
+4. Uses temp credentials to access production bucket ✅
+5. Credentials automatically expire after 1 hour
+
+SECURITY FEATURES DEMONSTRATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ External ID (prevents confused deputy attack)
+✅ Temporary credentials (auto-expire)
+✅ Session policies (additional restrictions)
+✅ Least privilege (role has minimal permissions)
+✅ CloudTrail audit (who assumed role when)
+
+KEY CONCEPTS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Trust Policy: WHO can assume the role
+Permissions Policy: WHAT the role can do
+External ID: Security measure for third-party access
+Session Policy: Additional restrictions per session
+Temporary Credentials: AccessKey + SecretKey + SessionToken
+
+REAL-WORLD USAGE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Production: Account 222222222222
+Development: Account 111111111111
+
+Developers in dev account assume role in prod account
+→ Temporary access to production
+→ No permanent credentials in production
+→ Easy to revoke (delete role or modify trust policy)
+→ Full audit trail in CloudTrail
+
+CLEANUP COMMAND:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Run: bash /tmp/lab95-cleanup.sh
+
+RESOURCES CREATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+S3 Bucket: $PROD_BUCKET
+IAM User: developer
+IAM Role: ProductionAccessRole
+
+EOF
+
+# Save cleanup script
+cat > /tmp/lab95-cleanup.sh << 'CLEANUP'
+#!/bin/bash
+echo "Cleaning up Lab 95..."
+
+# Get values
+PROD_BUCKET=$(aws s3 ls | grep production-data | awk '{print $3}')
+
+# Delete S3 bucket
+aws s3 rm s3://$PROD_BUCKET --recursive
+aws s3 rb s3://$PROD_BUCKET
+
+# Delete user policies and access keys
+aws iam delete-user-policy --user-name developer --policy-name AssumeProductionRole
+aws iam delete-access-key --user-name developer --access-key-id $(aws iam list-access-keys --user-name developer --query 'AccessKeyMetadata[0].AccessKeyId' --output text)
+aws iam delete-user --user-name developer
+
+# Delete role policies and role
+aws iam delete-role-policy --role-name ProductionAccessRole --policy-name ProductionS3ReadPolicy
+aws iam delete-role --role-name ProductionAccessRole
+
+# Clean temp files
+rm -f /tmp/trust-policy.json
+rm -f /tmp/permissions-policy.json
+rm -f /tmp/assume-role-policy.json
+rm -f /tmp/session-policy.json
+rm -f /tmp/prod-data.txt
+rm -f /tmp/downloaded.txt
+rm -f /tmp/test.txt
+
+echo "✅ Cleanup complete!"
+CLEANUP
+
+chmod +x /tmp/lab95-cleanup.sh
+
+echo ""
+echo "Run cleanup: bash /tmp/lab95-cleanup.sh"
+echo ""
+```
+
+---
+
+## **DAY 30 SUMMARY & KEY TAKEAWAYS**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    DAY 30 COMPLETE! ✅                                    ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+TOPICS COVERED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ IAM Roles vs IAM Users
+✅ Trust policies vs permissions policies
+✅ AWS STS (Security Token Service)
+✅ AssumeRole and variants
+✅ Service roles (EC2, Lambda, etc.)
+✅ Cross-account roles
+✅ External ID
+✅ Role chaining
+✅ Session policies
+✅ Temporary credentials
+
+TIME SPENT: 3 hours
+LAB: Cross-account access (hands-on)
+COST: $0 (IAM is free!)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KEY EXAM CONCEPTS TO REMEMBER:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. ROLES VS USERS:
+   Users = Long-term credentials (can be leaked)
+   Roles = Temporary credentials (auto-expire) ✅ Preferred!
+
+2. TWO POLICIES:
+   Trust policy = WHO can assume
+   Permissions policy = WHAT role can do
+
+3. CROSS-ACCOUNT ACCESS:
+   Account A user → AssumeRole → Account B role → Access Account B resources
+   Requires: Trust policy in B + Permission in A
+
+4. EXTERNAL ID:
+   Security measure for third-party access
+   Prevents confused deputy problem
+   Should be unique per customer
+
+5. SESSION POLICIES:
+   Further RESTRICT permissions (never expand)
+   Only for that specific session
+   Effective permissions = Role ∩ Session policy
+
+6. TEMPORARY CREDENTIALS:
+   AccessKeyId (starts with ASIA)
+   SecretAccessKey
+   SessionToken (required!)
+   Expiration (15 min to 12 hours)
+
+7. STS APIS:
+   AssumeRole - Standard role assumption
+   AssumeRoleWithWebIdentity - Mobile/web apps
+   AssumeRoleWithSAML - Enterprise SSO
+   GetSessionToken - MFA
+   GetCallerIdentity - Debug
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXAM QUESTION PATTERNS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Q: "Application needs to access S3, what's the most secure approach?"
+A: "Attach IAM role to EC2 instance" (not access keys!)
+
+Q: "How to give Account A access to Account B resources?"
+A: "Create cross-account role in Account B, trust Account A"
+
+Q: "Third-party vendor needs access, how to secure?"
+A: "Use External ID in trust policy"
+
+Q: "User can't assume role, why?"
+A: "Check trust policy (allows user?) AND user permissions (has AssumeRole?)"
+
+Q: "Need to temporarily restrict admin to read-only for audit"
+A: "Use session policy when assuming role"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROGRESS UPDATE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Days completed: 30/56 (54% complete!) 🎉
+Week 5 progress: Day 2/7
+Exam readiness: ~72%
+Days to exam: ~47
+
+NEXT UP:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Day 31: AWS Organizations & Service Control Policies (SCPs)
+├─ Organization hierarchy
+├─ Organizational Units (OUs)
+├─ SCP evaluation logic
+├─ SCP vs IAM policies
+├─ Common SCP patterns
+└─ Lab: Multi-account governance
+
+This is another CRITICAL topic for the exam!
+SCPs are how enterprises manage permissions across hundreds of accounts.
+```
+
+---
+
+**Excellent work completing Day 30!** 🎉
+
+You now understand IAM roles deeply - one of the most important topics for the exam!
+
+**Ready to continue with Day 31 (AWS Organizations & SCPs), or take a break?** 
+
+Let me know! 🚀

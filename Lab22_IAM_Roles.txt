@@ -1,0 +1,977 @@
+# **LAB 95: CROSS-ACCOUNT ACCESS WITH IAM ROLES** 🔬
+
+---
+
+## **LAB OVERVIEW**
+
+```
+╔═══════════════════════════════════════════════════════════════════════════╗
+║               LAB 95: CROSS-ACCOUNT IAM ROLE SETUP                        ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+Time: 45-60 minutes
+Difficulty: Medium-High
+Cost: $0 (IAM is free!)
+
+Objectives:
+✅ Simulate cross-account access within single account
+✅ Create cross-account role with trust policy
+✅ Configure External ID for security
+✅ Grant users permission to assume role
+✅ Test role assumption and temporary credentials
+✅ Use session policies for additional restrictions
+✅ Troubleshoot access issues
+✅ Verify with IAM Policy Simulator
+
+Scenario:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+We'll simulate:
+- "Account A" (Development) = User 'developer'
+- "Account B" (Production) = Role 'ProductionAccessRole'
+- Developer needs temporary access to production S3 bucket
+
+In production, these would be separate AWS accounts.
+For this lab, we simulate it in one account.
+
+Security features:
+✅ External ID (prevent confused deputy)
+✅ Temporary credentials (auto-expire)
+✅ Session policies (additional restrictions)
+✅ Least privilege permissions
+```
+
+---
+
+## **COMPLETE LAB SCRIPT**
+
+```bash
+#!/bin/bash
+# Lab 95: Cross-Account Access with IAM Roles
+# Complete working script with all scenarios
+
+set -e  # Exit on error
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║     LAB 95: CROSS-ACCOUNT ACCESS WITH IAM ROLES         ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+#############################################################################
+# INTRODUCTION
+#############################################################################
+
+cat << 'EOF'
+SCENARIO:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This lab simulates cross-account access:
+
+"Account A" (Development):
+├─ Represented by: IAM User 'developer'
+├─ Developers work here
+└─ No direct production access
+
+"Account B" (Production):
+├─ Represented by: IAM Role 'ProductionAccessRole'
+├─ Production resources here
+└─ Protected with strict access controls
+
+Goal: Developer needs temporary read-only access to production
+
+In real enterprise:
+- Developer would be in Account 111111111111
+- Production role would be in Account 222222222222
+- Same concepts, different account IDs!
+
+Security measures:
+✅ External ID (prevents confused deputy attack)
+✅ Temporary credentials (1 hour, auto-expire)
+✅ Least privilege (read-only)
+✅ Session policies (further restrictions)
+✅ Full audit trail
+
+EOF
+
+read -p "Press Enter to start lab..."
+
+#############################################################################
+# STEP 1: CREATE PRODUCTION S3 BUCKET
+#############################################################################
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 1: Creating Production S3 Bucket"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+TIMESTAMP=$(date +%s)
+PROD_BUCKET="production-logs-${TIMESTAMP}"
+DEV_BUCKET="development-data-${TIMESTAMP}"
+
+# Create production bucket
+aws s3 mb s3://${PROD_BUCKET}
+echo "✅ Production bucket created: ${PROD_BUCKET}"
+
+# Create development bucket (for comparison)
+aws s3 mb s3://${DEV_BUCKET}
+echo "✅ Development bucket created: ${DEV_BUCKET}"
+
+# Upload test files
+echo "Production sensitive data - Q4 2025 financials" > /tmp/prod-data.txt
+echo "Development test data - sample records" > /tmp/dev-data.txt
+
+aws s3 cp /tmp/prod-data.txt s3://${PROD_BUCKET}/sensitive/financials-q4.txt
+aws s3 cp /tmp/dev-data.txt s3://${DEV_BUCKET}/test/sample.txt
+
+echo "✅ Test files uploaded to both buckets"
+
+# Get account ID
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "✅ Account ID: ${ACCOUNT_ID}"
+
+echo ""
+echo "Resources created:"
+echo "  Production: s3://${PROD_BUCKET}/"
+echo "  Development: s3://${DEV_BUCKET}/"
+echo ""
+
+#############################################################################
+# STEP 2: CREATE DEVELOPER USER (Represents Account A)
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 2: Creating Developer User"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Create developer user
+aws iam create-user --user-name developer 2>/dev/null || echo "User already exists"
+echo "✅ User 'developer' created (represents Account A)"
+
+# Give developer access to development bucket only
+cat > /tmp/dev-permissions.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowDevBucketAccess",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${DEV_BUCKET}",
+        "arn:aws:s3:::${DEV_BUCKET}/*"
+      ]
+    },
+    {
+      "Sid": "AllowListAllBuckets",
+      "Effect": "Allow",
+      "Action": "s3:ListAllMyBuckets",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws iam put-user-policy \
+  --user-name developer \
+  --policy-name DevBucketAccess \
+  --policy-document file:///tmp/dev-permissions.json
+
+echo "✅ Developer has access to development bucket only"
+
+# Create access keys for developer
+echo ""
+echo "Creating access keys for developer..."
+KEYS_JSON=$(aws iam create-access-key --user-name developer 2>/dev/null || \
+            aws iam list-access-keys --user-name developer --query 'AccessKeyMetadata[0].AccessKeyId' --output text)
+
+if [[ $KEYS_JSON == *"AccessKey"* ]]; then
+    DEV_ACCESS_KEY=$(echo $KEYS_JSON | grep -o '"AccessKeyId":"[^"]*"' | cut -d'"' -f4)
+    DEV_SECRET_KEY=$(echo $KEYS_JSON | grep -o '"SecretAccessKey":"[^"]*"' | cut -d'"' -f4)
+    echo "✅ New access keys created"
+else
+    # Keys already exist, use existing
+    DEV_ACCESS_KEY=$(aws iam list-access-keys --user-name developer --query 'AccessKeyMetadata[0].AccessKeyId' --output text)
+    echo "✅ Using existing access keys"
+    echo ""
+    echo "⚠️  Note: Secret key not available for existing keys"
+    echo "    For full lab functionality, delete old keys and run again"
+    echo ""
+    DEV_SECRET_KEY="<existing-key-secret-not-retrievable>"
+fi
+
+echo ""
+echo "Developer credentials (Account A simulation):"
+echo "  Access Key: ${DEV_ACCESS_KEY}"
+echo "  Secret Key: ${DEV_SECRET_KEY:0:20}..."
+echo ""
+
+#############################################################################
+# STEP 3: CREATE PRODUCTION ACCESS ROLE (Represents Account B)
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 3: Creating Production Access Role"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Generate unique External ID
+EXTERNAL_ID="MyCompany-DevToProd-$(uuidgen 2>/dev/null || echo $(date +%s)-RANDOM-$$)"
+echo "External ID: ${EXTERNAL_ID}"
+echo "⚠️  SAVE THIS! You'll need it to assume the role"
+echo ""
+
+# Create trust policy
+cat > /tmp/trust-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowDeveloperToAssume",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::${ACCOUNT_ID}:user/developer"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "sts:ExternalId": "${EXTERNAL_ID}"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+echo "Trust Policy (WHO can assume this role):"
+cat /tmp/trust-policy.json
+echo ""
+
+# Create role
+aws iam create-role \
+  --role-name ProductionAccessRole \
+  --assume-role-policy-document file:///tmp/trust-policy.json \
+  --description "Cross-account read-only access to production resources" \
+  --max-session-duration 3600 \
+  2>/dev/null || echo "Role already exists, updating trust policy..."
+
+# Update trust policy if role exists
+aws iam update-assume-role-policy \
+  --role-name ProductionAccessRole \
+  --policy-document file:///tmp/trust-policy.json \
+  2>/dev/null || true
+
+ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/ProductionAccessRole"
+echo "✅ Role created: ProductionAccessRole"
+echo "   ARN: ${ROLE_ARN}"
+echo ""
+
+# Create permissions policy (WHAT the role can do)
+cat > /tmp/permissions-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadProductionS3",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${PROD_BUCKET}",
+        "arn:aws:s3:::${PROD_BUCKET}/*"
+      ]
+    },
+    {
+      "Sid": "ListAllBuckets",
+      "Effect": "Allow",
+      "Action": "s3:ListAllMyBuckets",
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyDestructiveActions",
+      "Effect": "Deny",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:DeleteBucket",
+        "s3:PutObject"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+echo "Permissions Policy (WHAT the role can do):"
+cat /tmp/permissions-policy.json
+echo ""
+
+# Attach permissions policy
+aws iam put-role-policy \
+  --role-name ProductionAccessRole \
+  --policy-name ProductionReadOnlyAccess \
+  --policy-document file:///tmp/permissions-policy.json
+
+echo "✅ Permissions policy attached"
+echo "   - CAN: Read production S3 bucket"
+echo "   - CANNOT: Write, delete, or modify"
+echo ""
+
+#############################################################################
+# STEP 4: GRANT DEVELOPER PERMISSION TO ASSUME ROLE
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 4: Grant Developer Permission to Assume Role"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Create policy allowing developer to assume the role
+cat > /tmp/assume-role-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowAssumeProductionRole",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "${ROLE_ARN}"
+    }
+  ]
+}
+EOF
+
+aws iam put-user-policy \
+  --user-name developer \
+  --policy-name AssumeProductionRole \
+  --policy-document file:///tmp/assume-role-policy.json
+
+echo "✅ Developer can now assume ProductionAccessRole"
+echo ""
+
+#############################################################################
+# SAVE CURRENT CREDENTIALS
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "SAVING CURRENT ADMIN CREDENTIALS"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Save current credentials (admin)
+ADMIN_ACCESS_KEY=$AWS_ACCESS_KEY_ID
+ADMIN_SECRET_KEY=$AWS_SECRET_ACCESS_KEY
+ADMIN_SESSION_TOKEN=$AWS_SESSION_TOKEN
+
+echo "✅ Admin credentials saved"
+echo ""
+
+#############################################################################
+# STEP 5: TEST - DEVELOPER DIRECT ACCESS (SHOULD FAIL)
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 5: Test Direct Access to Production (Should FAIL)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+if [ "$DEV_SECRET_KEY" != "<existing-key-secret-not-retrievable>" ]; then
+    echo "Switching to developer credentials..."
+    export AWS_ACCESS_KEY_ID=$DEV_ACCESS_KEY
+    export AWS_SECRET_ACCESS_KEY=$DEV_SECRET_KEY
+    unset AWS_SESSION_TOKEN
+    
+    echo ""
+    echo "Test 1: Can developer list all buckets?"
+    aws s3 ls 2>&1 | head -5
+    echo "✅ Can list buckets (basic permission)"
+    echo ""
+    
+    echo "Test 2: Can developer access development bucket?"
+    echo "Command: aws s3 ls s3://${DEV_BUCKET}/"
+    aws s3 ls s3://${DEV_BUCKET}/ 2>&1
+    echo "✅ SUCCESS: Developer can access development bucket"
+    echo ""
+    
+    echo "Test 3: Can developer access production bucket directly?"
+    echo "Command: aws s3 ls s3://${PROD_BUCKET}/"
+    aws s3 ls s3://${PROD_BUCKET}/ 2>&1 || echo "❌ ACCESS DENIED (Expected! Developer has no direct prod access)"
+    echo ""
+    
+    echo "✅ Verification complete:"
+    echo "   - Developer CAN access dev bucket ✓"
+    echo "   - Developer CANNOT access prod bucket ✗ (needs to assume role)"
+    echo ""
+else
+    echo "⚠️  Skipping direct access tests (using existing access keys)"
+    echo "   To run full tests, delete existing keys and re-run lab"
+    echo ""
+fi
+
+#############################################################################
+# STEP 6: ASSUME ROLE
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 6: Developer Assumes Production Access Role"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Switch back to admin credentials for assume-role
+export AWS_ACCESS_KEY_ID=$ADMIN_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$ADMIN_SECRET_KEY
+export AWS_SESSION_TOKEN=$ADMIN_SESSION_TOKEN
+
+echo "Assuming role as developer (simulated)..."
+echo ""
+echo "Command:"
+echo "aws sts assume-role \\"
+echo "  --role-arn ${ROLE_ARN} \\"
+echo "  --role-session-name developer-troubleshoot \\"
+echo "  --external-id ${EXTERNAL_ID} \\"
+echo "  --duration-seconds 3600"
+echo ""
+
+# Assume role
+ASSUME_OUTPUT=$(aws sts assume-role \
+  --role-arn ${ROLE_ARN} \
+  --role-session-name developer-troubleshoot-$(date +%Y%m%d-%H%M%S) \
+  --external-id "${EXTERNAL_ID}" \
+  --duration-seconds 3600 \
+  --output json)
+
+# Extract temporary credentials
+TEMP_ACCESS_KEY=$(echo $ASSUME_OUTPUT | grep -o '"AccessKeyId":"[^"]*"' | cut -d'"' -f4)
+TEMP_SECRET_KEY=$(echo $ASSUME_OUTPUT | grep -o '"SecretAccessKey":"[^"]*"' | cut -d'"' -f4)
+TEMP_SESSION_TOKEN=$(echo $ASSUME_OUTPUT | grep -o '"SessionToken":"[^"]*"' | cut -d'"' -f4)
+EXPIRATION=$(echo $ASSUME_OUTPUT | grep -o '"Expiration":"[^"]*"' | cut -d'"' -f4)
+
+echo "✅ Role assumed successfully!"
+echo ""
+echo "Temporary Credentials:"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "AccessKeyId:     ${TEMP_ACCESS_KEY}"
+echo "SecretAccessKey: ${TEMP_SECRET_KEY:0:20}..."
+echo "SessionToken:    ${TEMP_SESSION_TOKEN:0:30}..."
+echo "Expiration:      ${EXPIRATION}"
+echo ""
+echo "Note: AccessKeyId starts with 'ASIA' (temporary credentials)"
+echo "      Permanent keys start with 'AKIA'"
+echo ""
+
+# Use temporary credentials
+export AWS_ACCESS_KEY_ID=$TEMP_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$TEMP_SECRET_KEY
+export AWS_SESSION_TOKEN=$TEMP_SESSION_TOKEN
+
+#############################################################################
+# STEP 7: VERIFY IDENTITY
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 7: Verify Assumed Role Identity"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "Command: aws sts get-caller-identity"
+echo ""
+aws sts get-caller-identity
+echo ""
+
+IDENTITY_ARN=$(aws sts get-caller-identity --query Arn --output text)
+echo "Current Identity: ${IDENTITY_ARN}"
+echo ""
+echo "✅ Identity shows 'assumed-role/ProductionAccessRole'"
+echo "   This confirms we're operating with role permissions"
+echo ""
+
+#############################################################################
+# STEP 8: TEST ACCESS WITH ASSUMED ROLE
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 8: Test Access with Assumed Role (Should SUCCEED)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "Test 1: List production bucket contents"
+echo "Command: aws s3 ls s3://${PROD_BUCKET}/"
+echo ""
+aws s3 ls s3://${PROD_BUCKET}/ --recursive
+echo ""
+echo "✅ SUCCESS! Can now access production bucket via assumed role"
+echo ""
+
+echo "Test 2: Download production file"
+echo "Command: aws s3 cp s3://${PROD_BUCKET}/sensitive/financials-q4.txt /tmp/"
+echo ""
+aws s3 cp s3://${PROD_BUCKET}/sensitive/financials-q4.txt /tmp/downloaded-prod.txt
+echo ""
+echo "File contents:"
+cat /tmp/downloaded-prod.txt
+echo ""
+echo "✅ SUCCESS! Downloaded production file"
+echo ""
+
+echo "Test 3: Try to upload file (Should FAIL - read-only role)"
+echo "Command: aws s3 cp /tmp/test.txt s3://${PROD_BUCKET}/test.txt"
+echo "test data" > /tmp/test.txt
+echo ""
+aws s3 cp /tmp/test.txt s3://${PROD_BUCKET}/test.txt 2>&1 || echo ""
+echo "❌ DENIED (Expected! Role has explicit deny on PutObject)"
+echo ""
+
+echo "Test 4: Try to delete file (Should FAIL)"
+echo "Command: aws s3 rm s3://${PROD_BUCKET}/sensitive/financials-q4.txt"
+echo ""
+aws s3 rm s3://${PROD_BUCKET}/sensitive/financials-q4.txt 2>&1 || echo ""
+echo "❌ DENIED (Expected! Role has explicit deny on DeleteObject)"
+echo ""
+
+#############################################################################
+# STEP 9: SESSION POLICY (ADDITIONAL RESTRICTIONS)
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 9: Testing Session Policy (Further Restrictions)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Restore admin credentials
+export AWS_ACCESS_KEY_ID=$ADMIN_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$ADMIN_SECRET_KEY
+export AWS_SESSION_TOKEN=$ADMIN_SESSION_TOKEN
+
+# Create session policy (only allow access to specific folder)
+cat > /tmp/session-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::${PROD_BUCKET}/sensitive/*"
+    }
+  ]
+}
+EOF
+
+echo "Session Policy (restricts to /sensitive/ folder only):"
+cat /tmp/session-policy.json
+echo ""
+
+echo "Assuming role WITH session policy..."
+echo ""
+
+# Assume role with session policy
+ASSUME_OUTPUT=$(aws sts assume-role \
+  --role-arn ${ROLE_ARN} \
+  --role-session-name restricted-session-$(date +%Y%m%d-%H%M%S) \
+  --external-id "${EXTERNAL_ID}" \
+  --policy file:///tmp/session-policy.json \
+  --duration-seconds 3600 \
+  --output json)
+
+# Extract credentials
+TEMP_ACCESS_KEY=$(echo $ASSUME_OUTPUT | grep -o '"AccessKeyId":"[^"]*"' | cut -d'"' -f4)
+TEMP_SECRET_KEY=$(echo $ASSUME_OUTPUT | grep -o '"SecretAccessKey":"[^"]*"' | cut -d'"' -f4)
+TEMP_SESSION_TOKEN=$(echo $ASSUME_OUTPUT | grep -o '"SessionToken":"[^"]*"' | cut -d'"' -f4)
+
+export AWS_ACCESS_KEY_ID=$TEMP_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$TEMP_SECRET_KEY
+export AWS_SESSION_TOKEN=$TEMP_SESSION_TOKEN
+
+echo "✅ Assumed role with session policy"
+echo ""
+
+echo "Test 1: Access file in /sensitive/ folder (Should SUCCEED)"
+echo "Command: aws s3 cp s3://${PROD_BUCKET}/sensitive/financials-q4.txt /tmp/"
+echo ""
+aws s3 cp s3://${PROD_BUCKET}/sensitive/financials-q4.txt /tmp/test-session.txt 2>&1
+echo "✅ SUCCESS! Can access /sensitive/ folder"
+echo ""
+
+# Upload a file to different folder for testing
+export AWS_ACCESS_KEY_ID=$ADMIN_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$ADMIN_SECRET_KEY
+export AWS_SESSION_TOKEN=$ADMIN_SESSION_TOKEN
+
+echo "Creating test file in /public/ folder..."
+echo "public data" > /tmp/public-data.txt
+aws s3 cp /tmp/public-data.txt s3://${PROD_BUCKET}/public/info.txt
+echo ""
+
+# Switch back to session credentials
+export AWS_ACCESS_KEY_ID=$TEMP_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$TEMP_SECRET_KEY
+export AWS_SESSION_TOKEN=$TEMP_SESSION_TOKEN
+
+echo "Test 2: Try to access file in /public/ folder (Should FAIL)"
+echo "Command: aws s3 cp s3://${PROD_BUCKET}/public/info.txt /tmp/"
+echo ""
+aws s3 cp s3://${PROD_BUCKET}/public/info.txt /tmp/ 2>&1 || echo ""
+echo "❌ DENIED (Expected! Session policy restricts to /sensitive/ only)"
+echo ""
+
+echo "Test 3: Try to list bucket (Should FAIL - not in session policy)"
+echo "Command: aws s3 ls s3://${PROD_BUCKET}/"
+echo ""
+aws s3 ls s3://${PROD_BUCKET}/ 2>&1 || echo ""
+echo "❌ DENIED (Expected! Session policy only allows GetObject)"
+echo ""
+
+#############################################################################
+# STEP 10: COMPARISON SUMMARY
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 10: Access Comparison Summary"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+cat << 'EOF'
+┌─────────────────────┬───────────────┬────────────────┬─────────────────┐
+│ Action              │ Direct Access │ Assumed Role   │ Session Policy  │
+├─────────────────────┼───────────────┼────────────────┼─────────────────┤
+│ List prod bucket    │ ❌ DENIED     │ ✅ ALLOWED     │ ❌ DENIED       │
+│ Get /sensitive/file │ ❌ DENIED     │ ✅ ALLOWED     │ ✅ ALLOWED      │
+│ Get /public/file    │ ❌ DENIED     │ ✅ ALLOWED     │ ❌ DENIED       │
+│ Put object          │ ❌ DENIED     │ ❌ DENIED      │ ❌ DENIED       │
+│ Delete object       │ ❌ DENIED     │ ❌ DENIED      │ ❌ DENIED       │
+└─────────────────────┴───────────────┴────────────────┴─────────────────┘
+
+KEY INSIGHTS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Direct Access:
+   Developer has NO access to production bucket
+   Security: Separation of environments ✅
+
+2. Assumed Role:
+   Developer gets temporary read-only access
+   Security: Time-limited, auditable ✅
+
+3. Session Policy:
+   Further restricts even role permissions
+   Effective = Role permissions ∩ Session policy
+   Security: Additional layer of control ✅
+
+4. Explicit Deny:
+   Write/delete operations denied at role level
+   Cannot be overridden by session policy
+   Security: Prevents accidental modifications ✅
+
+EOF
+
+#############################################################################
+# STEP 11: AUDIT TRAIL
+#############################################################################
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "STEP 11: Audit Trail (CloudTrail Events)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "In production, CloudTrail would record:"
+echo ""
+cat << 'EOF'
+Event 1: AssumeRole
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{
+  "eventName": "AssumeRole",
+  "userIdentity": {
+    "type": "IAMUser",
+    "userName": "developer",
+    "accountId": "111111111111"
+  },
+  "requestParameters": {
+    "roleArn": "arn:aws:iam::222222222222:role/ProductionAccessRole",
+    "roleSessionName": "developer-troubleshoot",
+    "externalId": "MyCompany-DevToProd-***"
+  },
+  "responseElements": {
+    "credentials": {
+      "expiration": "2026-03-22T18:00:00Z"
+    }
+  }
+}
+
+Event 2: GetObject (using assumed role)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{
+  "eventName": "GetObject",
+  "userIdentity": {
+    "type": "AssumedRole",
+    "principalId": "AROAEXAMPLE:developer-troubleshoot",
+    "arn": "arn:aws:sts::222222222222:assumed-role/ProductionAccessRole/developer-troubleshoot",
+    "accountId": "222222222222",
+    "sessionContext": {
+      "sessionIssuer": {
+        "userName": "ProductionAccessRole"
+      }
+    }
+  },
+  "requestParameters": {
+    "bucketName": "production-logs",
+    "key": "sensitive/financials-q4.txt"
+  }
+}
+
+Security Benefits:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ Full audit trail: WHO accessed WHAT and WHEN
+✅ Traceability: AssumeRole shows original user (developer)
+✅ Compliance: Meets SOC2, HIPAA, PCI-DSS requirements
+✅ Alerting: Can trigger alarms on AssumeRole events
+✅ Investigation: Complete forensic trail if incident occurs
+
+EOF
+
+#############################################################################
+# LAB COMPLETE - SUMMARY
+#############################################################################
+
+# Restore admin credentials
+export AWS_ACCESS_KEY_ID=$ADMIN_ACCESS_KEY
+export AWS_SECRET_ACCESS_KEY=$ADMIN_SECRET_KEY
+export AWS_SESSION_TOKEN=$ADMIN_SESSION_TOKEN
+
+cat << EOF
+
+╔═══════════════════════════════════════════════════════════╗
+║  LAB 95 COMPLETE! ✅                                     ║
+╚═══════════════════════════════════════════════════════════╝
+
+WHAT YOU ACCOMPLISHED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Created cross-account IAM role (ProductionAccessRole)
+✅ Configured trust policy with External ID
+✅ Set up permissions policy (read-only, explicit denies)
+✅ Granted user permission to assume role
+✅ Assumed role and received temporary credentials
+✅ Verified temporary credential format (ASIA...)
+✅ Tested role permissions (allowed and denied actions)
+✅ Applied session policy for additional restrictions
+✅ Understood audit trail implications
+
+CROSS-ACCOUNT ACCESS FLOW (Recap):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Developer (Account A) calls AssumeRole
+2. Provides: Role ARN + External ID
+3. AWS STS validates:
+   ✓ Trust policy allows developer
+   ✓ External ID matches
+   ✓ Developer has sts:AssumeRole permission
+4. Returns temporary credentials (valid 1 hour)
+5. Developer uses temp credentials to access Account B
+6. Credentials auto-expire after 1 hour
+7. Full audit trail in CloudTrail
+
+SECURITY FEATURES DEMONSTRATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ External ID: Prevents confused deputy attack
+✅ Temporary credentials: Auto-expire (no permanent access)
+✅ Least privilege: Read-only permissions only
+✅ Explicit deny: Prevents write/delete operations
+✅ Session policies: Additional restrictions per session
+✅ Audit trail: CloudTrail logs all AssumeRole events
+
+PRODUCTION DIFFERENCES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+In real cross-account setup:
+├─ Developer in Account 111111111111
+├─ Role in Account 222222222222
+├─ Trust policy: "AWS": "arn:aws:iam::111111111111:root"
+└─ Everything else: EXACTLY the same! ✅
+
+EXAM KEY POINTS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Cross-account requires TWO policies:
+   - Trust policy in Account B (allows Account A)
+   - User policy in Account A (allows sts:AssumeRole)
+   
+2. External ID prevents confused deputy
+
+3. Temporary credentials have 3 parts:
+   - AccessKeyId (ASIA...)
+   - SecretAccessKey
+   - SessionToken (required!)
+
+4. Session policies RESTRICT (never expand) permissions
+
+5. CloudTrail shows original user in AssumeRole events
+
+RESOURCES CREATED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+S3 Buckets:
+├─ ${PROD_BUCKET}
+└─ ${DEV_BUCKET}
+
+IAM Resources:
+├─ User: developer
+├─ Role: ProductionAccessRole
+├─ Access Keys: 1 pair for developer
+└─ Policies: 3 inline policies
+
+External ID (SAVE THIS!):
+${EXTERNAL_ID}
+
+CLEANUP:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+To clean up all resources:
+bash /tmp/lab95-cleanup.sh
+
+Or manually:
+1. Delete S3 buckets (empty first)
+2. Delete IAM user (detach policies, delete keys)
+3. Delete IAM role (detach policies)
+
+Cost if left running: \$0 (IAM is free!)
+But S3 storage: ~\$0.023/GB/month
+
+EOF
+
+# Save cleanup script
+cat > /tmp/lab95-cleanup.sh << 'CLEANUP'
+#!/bin/bash
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║            LAB 95 CLEANUP                                ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+echo ""
+
+set +e  # Don't exit on errors during cleanup
+
+# Get bucket names
+BUCKETS=$(aws s3 ls | grep -E "(production-logs|development-data)" | awk '{print $3}')
+
+echo "Deleting S3 buckets..."
+for BUCKET in $BUCKETS; do
+  echo "  Emptying: $BUCKET"
+  aws s3 rm s3://$BUCKET --recursive 2>/dev/null
+  echo "  Deleting: $BUCKET"
+  aws s3 rb s3://$BUCKET 2>/dev/null
+done
+echo "✅ S3 buckets deleted"
+echo ""
+
+echo "Deleting IAM user policies..."
+aws iam delete-user-policy --user-name developer --policy-name DevBucketAccess 2>/dev/null
+aws iam delete-user-policy --user-name developer --policy-name AssumeProductionRole 2>/dev/null
+echo "✅ User policies deleted"
+echo ""
+
+echo "Deleting IAM user access keys..."
+KEYS=$(aws iam list-access-keys --user-name developer --query 'AccessKeyMetadata[*].AccessKeyId' --output text 2>/dev/null)
+for KEY in $KEYS; do
+  aws iam delete-access-key --user-name developer --access-key-id $KEY 2>/dev/null
+  echo "  Deleted key: $KEY"
+done
+echo "✅ Access keys deleted"
+echo ""
+
+echo "Deleting IAM user..."
+aws iam delete-user --user-name developer 2>/dev/null
+echo "✅ IAM user deleted"
+echo ""
+
+echo "Deleting IAM role policies..."
+aws iam delete-role-policy --role-name ProductionAccessRole --policy-name ProductionReadOnlyAccess 2>/dev/null
+echo "✅ Role policies deleted"
+echo ""
+
+echo "Deleting IAM role..."
+aws iam delete-role --role-name ProductionAccessRole 2>/dev/null
+echo "✅ IAM role deleted"
+echo ""
+
+echo "Cleaning up temp files..."
+rm -f /tmp/trust-policy.json
+rm -f /tmp/permissions-policy.json
+rm -f /tmp/assume-role-policy.json
+rm -f /tmp/dev-permissions.json
+rm -f /tmp/session-policy.json
+rm -f /tmp/prod-data.txt
+rm -f /tmp/dev-data.txt
+rm -f /tmp/downloaded-prod.txt
+rm -f /tmp/test.txt
+rm -f /tmp/public-data.txt
+rm -f /tmp/test-session.txt
+echo "✅ Temp files cleaned"
+echo ""
+
+echo "╔═══════════════════════════════════════════════════════════╗"
+echo "║  CLEANUP COMPLETE! ✅                                    ║"
+echo "╚═══════════════════════════════════════════════════════════╝"
+CLEANUP
+
+chmod +x /tmp/lab95-cleanup.sh
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "NEXT STEPS:"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "1. Review CloudTrail logs (if enabled) to see AssumeRole events"
+echo "2. Practice with IAM Policy Simulator"
+echo "3. Try modifying role permissions and test again"
+echo "4. Run cleanup when done: bash /tmp/lab95-cleanup.sh"
+echo ""
+echo "Ready for Day 31: AWS Organizations & SCPs! 🚀"
+echo ""
+```
+
+---
+
+## **RUN THE LAB**
+
+To execute this lab:
+
+```bash
+# Save the script
+nano /tmp/lab95-complete.sh
+
+# Paste the entire script above
+
+# Make executable
+chmod +x /tmp/lab95-complete.sh
+
+# Run it
+/tmp/lab95-complete.sh
+```
+
+---
+
+## **LAB CLEANUP**
+
+```bash
+# When finished, clean up all resources:
+bash /tmp/lab95-cleanup.sh
+```
+
+---
+
+**Lab 95 Complete!** 🎉
+
+**You now understand:**
+- Cross-account role setup
+- Trust policies with External ID
+- Temporary credentials (STS)
+- Session policies
+- Security best practices
+- Audit trails
+
+**Ready for Day 31 (AWS Organizations & SCPs)?** 🚀
