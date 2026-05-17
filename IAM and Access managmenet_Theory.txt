@@ -381,7 +381,7 @@ MEMORIZE THIS: "Deny, Allow, Boundary, SCP, or Deny"
   "Version": "2012-10-17",                    ← Policy language version
   "Statement": [                              ← Array of statements
     {
-      "Sid": "Allo	wS3ReadAccess",            ← Statement ID (optional)
+      "Sid": "AllowS3ReadAccess",            ← Statement ID (optional)
       "Effect": "Allow",                      ← Allow or Deny
       "Principal": {                          ← Who (resource-based only!)
         "AWS": "arn:aws:iam::123456789012:user/Alice"
@@ -1277,6 +1277,7 @@ A: "Use IAM Access Analyzer to identify unused permissions,
 Q: "A security audit requires finding all externally accessible resources"
 A: "Enable IAM Access Analyzer and review findings" ✅
 ```
+
 
 ---
 

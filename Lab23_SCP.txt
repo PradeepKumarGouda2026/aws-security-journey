@@ -1,0 +1,181 @@
+
+## 🧪 Lab Block (45 mins)
+
+### Lab 31A — Write & Analyze SCPs
+
+**Scenario 1: Deny all actions outside ap-south-1 (Mumbai)**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyOutsideApSouth1",
+      "Effect": "Deny",
+      "NotAction": [
+        "iam:*",
+        "organizations:*",
+        "support:*",
+        "sts:AssumeRole"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:RequestedRegion": "ap-south-1"
+        }
+      }
+    }
+  ]
+}
+```
+> ⚠️ Note `NotAction` — global services like IAM, STS must be excluded or you'll lock yourself out!
+
+---
+
+**Scenario 2: Prevent disabling CloudTrail**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ProtectCloudTrail",
+      "Effect": "Deny",
+      "Action": [
+        "cloudtrail:StopLogging",
+        "cloudtrail:DeleteTrail",
+        "cloudtrail:UpdateTrail"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+---
+
+**Scenario 3: Enforce MFA for sensitive actions**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyWithoutMFA",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:StopInstances",
+        "ec2:TerminateInstances",
+        "s3:DeleteBucket"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "BoolIfExists": {
+          "aws:MultiFactorAuthPresent": "false"
+        }
+      }
+    }
+  ]
+}
+```
+
+---
+
+
+
+### 2. Lab 96 — Organization Setup with SCPs
+
+Here's the hands-on lab script:
+
+```bash
+#!/bin/bash
+# Lab 96: AWS Organizations + SCP Setup
+# Day 31 - AWS Security Specialist Study Plan
+
+echo "========================================="
+echo "Lab 96: Organization Setup with SCPs"
+echo "========================================="
+
+# Prerequisites check
+echo "[1] Checking AWS CLI configuration..."
+aws sts get-caller-identity --query '{Account:Account, ARN:Arn}' --output table
+
+# Step 1: Check if Organizations is already set up
+echo ""
+echo "[2] Checking AWS Organizations status..."
+aws organizations describe-organization \
+  --query 'Organization.{Id:Id, MasterAccountId:MasterAccountId, FeatureSet:FeatureSet}' \
+  --output table 2>/dev/null || echo "Organizations not yet enabled or insufficient permissions"
+
+# Step 2: List existing OUs
+echo ""
+echo "[3] Listing Organizational Units..."
+ROOT_ID=$(aws organizations list-roots --query 'Roots[0].Id' --output text)
+echo "Root ID: $ROOT_ID"
+
+aws organizations list-organizational-units-for-parent \
+  --parent-id $ROOT_ID \
+  --query 'OrganizationalUnits[*].{Name:Name, Id:Id}' \
+  --output table
+
+# Step 3: List existing SCPs
+echo ""
+echo "[4] Listing existing SCPs..."
+aws organizations list-policies \
+  --filter SERVICE_CONTROL_POLICY \
+  --query 'Policies[*].{Name:Name, Id:Id, Description:Description}' \
+  --output table
+
+# Step 4: View the default FullAWSAccess SCP
+echo ""
+echo "[5] Viewing FullAWSAccess SCP (default)..."
+FULL_ACCESS_ID=$(aws organizations list-policies \
+  --filter SERVICE_CONTROL_POLICY \
+  --query "Policies[?Name=='FullAWSAccess'].Id" \
+  --output text)
+echo "FullAWSAccess SCP ID: $FULL_ACCESS_ID"
+
+# Step 5: Create a sample Deny SCP (CloudTrail Protection)
+echo ""
+echo "[6] Creating CloudTrail Protection SCP..."
+cat > /tmp/scp-cloudtrail-protect.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ProtectCloudTrail",
+      "Effect": "Deny",
+      "Action": [
+        "cloudtrail:StopLogging",
+        "cloudtrail:DeleteTrail",
+        "cloudtrail:UpdateTrail"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws organizations create-policy \
+  --name "DenyCloudTrailModification" \
+  --description "Prevents disabling or modifying CloudTrail" \
+  --content file:///tmp/scp-cloudtrail-protect.json \
+  --type SERVICE_CONTROL_POLICY \
+  --query 'Policy.PolicySummary.{Name:Name, Id:Id}' \
+  --output table 2>/dev/null && echo "SCP Created!" || echo "Note: Skipping creation (may already exist or insufficient perms)"
+
+# Step 6: Simulate SCP inheritance check
+echo ""
+echo "[7] Checking SCPs attached to Root..."
+aws organizations list-policies-for-target \
+  --target-id $ROOT_ID \
+  --filter SERVICE_CONTROL_POLICY \
+  --query 'Policies[*].{Name:Name, Id:Id}' \
+  --output table
+
+echo ""
+echo "========================================="
+echo "Lab 96 Complete!"
+echo "Key Takeaway: SCPs flow ROOT -> OU -> Account"
+echo "Management account is ALWAYS exempt from SCPs"
+echo "========================================="
+```
+
+---

@@ -1,0 +1,955 @@
+# 📅 Day 32 — Section 3: Lab 97
+
+---
+
+# SECTION 3 — LAB BLOCK
+
+---
+
+## Lab 97: IAM Identity Center — Full Exploration & Configuration
+
+---
+
+## 🎯 Lab Objective
+In this lab you will:
+- Explore your IAM Identity Center instance configuration
+- Explore identity store — users, groups, attributes
+- Create and inspect Permission Sets
+- Simulate account assignments
+- Configure and test CLI SSO profile
+- Audit IAM Identity Center via CloudTrail
+- Verify ABAC attribute configuration
+
+---
+
+## 📋 Prerequisites Check
+
+```bash
+#!/bin/bash
+# Lab 97 - Prerequisites Check
+# Day 32 - AWS Security Specialist Study Plan
+
+echo "=============================================="
+echo "  Lab 97: IAM Identity Center - Prerequisites"
+echo "=============================================="
+
+# Check AWS CLI version (need 2.x for SSO support)
+echo ""
+echo "[1] Checking AWS CLI version..."
+aws --version
+CLI_VERSION=$(aws --version 2>&1 | awk '{print $1}' | cut -d/ -f2 | cut -d. -f1)
+if [ "$CLI_VERSION" -ge 2 ]; then
+  echo "✅ AWS CLI v2 detected — SSO commands supported"
+else
+  echo "❌ AWS CLI v1 detected — upgrade to v2 for full SSO support"
+fi
+
+# Check caller identity
+echo ""
+echo "[2] Checking caller identity..."
+aws sts get-caller-identity --output table
+
+# Check if Organizations is enabled
+echo ""
+echo "[3] Checking AWS Organizations..."
+aws organizations describe-organization \
+  --query 'Organization.{Id:Id, FeatureSet:FeatureSet, MasterAccountId:MasterAccountId}' \
+  --output table 2>/dev/null || echo "⚠️  Organizations not enabled or insufficient permissions"
+
+# Check current region
+echo ""
+echo "[4] Checking current region..."
+REGION=$(aws configure get region)
+echo "Current region: $REGION"
+echo "Note: IAM Identity Center is a global service — managed from us-east-1 internally"
+
+# Check IAM Identity Center availability
+echo ""
+echo "[5] Checking IAM Identity Center instance..."
+aws sso-admin list-instances --output table 2>/dev/null || \
+  echo "⚠️  IAM Identity Center not enabled or insufficient permissions"
+
+echo ""
+echo "=============================================="
+echo "Prerequisites check complete!"
+echo "=============================================="
+```
+
+---
+
+## Part 1 — Explore IAM Identity Center Instance
+
+```bash
+#!/bin/bash
+# Lab 97 - Part 1: Explore IAM Identity Center Instance
+# Day 32 - AWS Security Specialist Study Plan
+
+echo "=============================================="
+echo "  Part 1: IAM Identity Center Instance Info"
+echo "=============================================="
+
+# Step 1: Get instance details
+echo ""
+echo "[1] Fetching IAM Identity Center instance details..."
+INSTANCE_INFO=$(aws sso-admin list-instances --output json)
+echo $INSTANCE_INFO | python3 -m json.tool
+
+# Extract key values for use in subsequent steps
+INSTANCE_ARN=$(echo $INSTANCE_INFO | python3 -c \
+  "import sys,json; print(json.load(sys.stdin)['Instances'][0]['InstanceArn'])")
+
+IDENTITY_STORE_ID=$(echo $INSTANCE_INFO | python3 -c \
+  "import sys,json; print(json.load(sys.stdin)['Instances'][0]['IdentityStoreId'])")
+
+OWNER_ACCOUNT=$(echo $INSTANCE_INFO | python3 -c \
+  "import sys,json; print(json.load(sys.stdin)['Instances'][0]['OwnerAccountId'])")
+
+echo ""
+echo "----------------------------------------------"
+echo "Key Values Extracted:"
+echo "  INSTANCE_ARN:      $INSTANCE_ARN"
+echo "  IDENTITY_STORE_ID: $IDENTITY_STORE_ID"
+echo "  OWNER_ACCOUNT:     $OWNER_ACCOUNT"
+echo "----------------------------------------------"
+
+# Save to env file for reuse across lab parts
+cat > /tmp/lab97-env.sh << EOF
+export INSTANCE_ARN="$INSTANCE_ARN"
+export IDENTITY_STORE_ID="$IDENTITY_STORE_ID"
+export OWNER_ACCOUNT="$OWNER_ACCOUNT"
+EOF
+echo ""
+echo "✅ Environment variables saved to /tmp/lab97-env.sh"
+echo "   Run: source /tmp/lab97-env.sh to reload in new terminal"
+
+# Step 2: Check registered regions
+echo ""
+echo "[2] Checking registered regions for IAM Identity Center..."
+aws sso-admin list-instances \
+  --query 'Instances[*].{OwnerAccountId:OwnerAccountId}' \
+  --output table
+
+# Step 3: Check delegated administrators
+echo ""
+echo "[3] Checking delegated administrators..."
+aws organizations list-delegated-administrators \
+  --service-principal sso.amazonaws.com \
+  --query 'DelegatedAdministrators[*].{AccountId:Id, Name:Name, Status:Status}' \
+  --output table 2>/dev/null || echo "No delegated administrators or insufficient permissions"
+
+echo ""
+echo "=============================================="
+echo "Part 1 Complete!"
+echo "Understanding: Instance ARN uniquely identifies"
+echo "your IAM Identity Center deployment."
+echo "=============================================="
+```
+
+---
+
+## Part 2 — Explore Identity Store (Users & Groups)
+
+```bash
+#!/bin/bash
+# Lab 97 - Part 2: Identity Store Exploration
+# Day 32 - AWS Security Specialist Study Plan
+
+source /tmp/lab97-env.sh
+
+echo "=============================================="
+echo "  Part 2: Identity Store — Users & Groups"
+echo "=============================================="
+
+# Step 1: List all users
+echo ""
+echo "[1] Listing all users in Identity Store..."
+aws identitystore list-users \
+  --identity-store-id $IDENTITY_STORE_ID \
+  --query 'Users[*].{
+    UserId:UserId,
+    UserName:UserName,
+    DisplayName:DisplayName,
+    Email:Emails[0].Value
+  }' \
+  --output table 2>/dev/null || echo "No users found or insufficient permissions"
+
+# Step 2: List all groups
+echo ""
+echo "[2] Listing all groups in Identity Store..."
+aws identitystore list-groups \
+  --identity-store-id $IDENTITY_STORE_ID \
+  --query 'Groups[*].{
+    GroupId:GroupId,
+    DisplayName:DisplayName,
+    Description:Description
+  }' \
+  --output table 2>/dev/null || echo "No groups found or insufficient permissions"
+
+# Step 3: Get a specific user's details (if users exist)
+echo ""
+echo "[3] Getting first user's full details..."
+FIRST_USER_ID=$(aws identitystore list-users \
+  --identity-store-id $IDENTITY_STORE_ID \
+  --query 'Users[0].UserId' \
+  --output text 2>/dev/null)
+
+if [ "$FIRST_USER_ID" != "None" ] && [ ! -z "$FIRST_USER_ID" ]; then
+  aws identitystore describe-user \
+    --identity-store-id $IDENTITY_STORE_ID \
+    --user-id $FIRST_USER_ID \
+    --output json | python3 -m json.tool
+else
+  echo "No users found in identity store"
+fi
+
+# Step 4: Check group memberships
+echo ""
+echo "[4] Checking group memberships..."
+FIRST_GROUP_ID=$(aws identitystore list-groups \
+  --identity-store-id $IDENTITY_STORE_ID \
+  --query 'Groups[0].GroupId' \
+  --output text 2>/dev/null)
+
+if [ "$FIRST_GROUP_ID" != "None" ] && [ ! -z "$FIRST_GROUP_ID" ]; then
+  echo "Members of first group ($FIRST_GROUP_ID):"
+  aws identitystore list-group-memberships \
+    --identity-store-id $IDENTITY_STORE_ID \
+    --group-id $FIRST_GROUP_ID \
+    --query 'GroupMemberships[*].{MembershipId:MembershipId, MemberId:MemberId.UserId}' \
+    --output table
+else
+  echo "No groups found in identity store"
+fi
+
+# Step 5: Create a sample user (for exploration)
+echo ""
+echo "[5] Creating sample lab user..."
+aws identitystore create-user \
+  --identity-store-id $IDENTITY_STORE_ID \
+  --user-name "lab97.testuser" \
+  --display-name "Lab97 Test User" \
+  --name '{"GivenName":"Lab97","FamilyName":"TestUser"}' \
+  --emails '[{"Value":"lab97testuser@example.com","Type":"work","Primary":true}]' \
+  --query 'UserId' \
+  --output text 2>/dev/null && echo "✅ Test user created" || \
+  echo "⚠️  Could not create user (may already exist or insufficient permissions)"
+
+# Step 6: Create a sample group
+echo ""
+echo "[6] Creating sample lab group..."
+aws identitystore create-group \
+  --identity-store-id $IDENTITY_STORE_ID \
+  --display-name "Lab97-SecurityTeam" \
+  --description "Lab 97 test group for security team" \
+  --query 'GroupId' \
+  --output text 2>/dev/null && echo "✅ Test group created" || \
+  echo "⚠️  Could not create group (may already exist or insufficient permissions)"
+
+echo ""
+echo "=============================================="
+echo "Part 2 Complete!"
+echo "Key takeaway: Identity Store holds all users"
+echo "and groups regardless of identity source."
+echo "=============================================="
+```
+
+---
+
+## Part 3 — Create & Inspect Permission Sets
+
+```bash
+#!/bin/bash
+# Lab 97 - Part 3: Permission Sets
+# Day 32 - AWS Security Specialist Study Plan
+
+source /tmp/lab97-env.sh
+
+echo "=============================================="
+echo "  Part 3: Permission Sets"
+echo "=============================================="
+
+# Step 1: List existing permission sets
+echo ""
+echo "[1] Listing all existing Permission Sets..."
+PERMISSION_SET_ARNS=$(aws sso-admin list-permission-sets \
+  --instance-arn $INSTANCE_ARN \
+  --query 'PermissionSets[]' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$PERMISSION_SET_ARNS" ]; then
+  for PS_ARN in $PERMISSION_SET_ARNS; do
+    aws sso-admin describe-permission-set \
+      --instance-arn $INSTANCE_ARN \
+      --permission-set-arn $PS_ARN \
+      --query 'PermissionSet.{Name:Name, SessionDuration:SessionDuration, Description:Description}' \
+      --output table
+  done
+else
+  echo "No existing permission sets found"
+fi
+
+# Step 2: Create SecurityAudit Permission Set
+echo ""
+echo "[2] Creating SecurityAudit Permission Set..."
+SECURITY_AUDIT_PS_ARN=$(aws sso-admin create-permission-set \
+  --instance-arn $INSTANCE_ARN \
+  --name "Lab97-SecurityAudit" \
+  --description "Read-only access to security services for audit team" \
+  --session-duration "PT4H" \
+  --relay-state "https://console.aws.amazon.com/securityhub/home" \
+  --query 'PermissionSet.PermissionSetArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$SECURITY_AUDIT_PS_ARN" ]; then
+  echo "✅ SecurityAudit Permission Set created"
+  echo "   ARN: $SECURITY_AUDIT_PS_ARN"
+  echo "export SECURITY_AUDIT_PS_ARN=\"$SECURITY_AUDIT_PS_ARN\"" >> /tmp/lab97-env.sh
+else
+  echo "⚠️  Could not create permission set"
+fi
+
+# Step 3: Attach AWS managed policy to permission set
+echo ""
+echo "[3] Attaching SecurityAudit managed policy..."
+aws sso-admin attach-managed-policy-to-permission-set \
+  --instance-arn $INSTANCE_ARN \
+  --permission-set-arn $SECURITY_AUDIT_PS_ARN \
+  --managed-policy-arn "arn:aws:iam::aws:policy/SecurityAudit" 2>/dev/null && \
+  echo "✅ SecurityAudit policy attached" || \
+  echo "⚠️  Could not attach policy"
+
+# Step 4: Add inline policy to permission set
+echo ""
+echo "[4] Adding inline policy (deny destructive actions)..."
+cat > /tmp/ps-inline-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyDestructiveActions",
+      "Effect": "Deny",
+      "Action": [
+        "cloudtrail:DeleteTrail",
+        "cloudtrail:StopLogging",
+        "config:DeleteConfigRule",
+        "guardduty:DeleteDetector",
+        "securityhub:DisableSecurityHub"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws sso-admin put-inline-policy-to-permission-set \
+  --instance-arn $INSTANCE_ARN \
+  --permission-set-arn $SECURITY_AUDIT_PS_ARN \
+  --inline-policy file:///tmp/ps-inline-policy.json 2>/dev/null && \
+  echo "✅ Inline policy attached" || \
+  echo "⚠️  Could not attach inline policy"
+
+# Step 5: Create PowerUser Permission Set
+echo ""
+echo "[5] Creating PowerUser Permission Set..."
+POWER_USER_PS_ARN=$(aws sso-admin create-permission-set \
+  --instance-arn $INSTANCE_ARN \
+  --name "Lab97-PowerUser" \
+  --description "Power user access for developers" \
+  --session-duration "PT8H" \
+  --query 'PermissionSet.PermissionSetArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$POWER_USER_PS_ARN" ]; then
+  echo "✅ PowerUser Permission Set created"
+  echo "   ARN: $POWER_USER_PS_ARN"
+  echo "export POWER_USER_PS_ARN=\"$POWER_USER_PS_ARN\"" >> /tmp/lab97-env.sh
+
+  # Attach PowerUserAccess managed policy
+  aws sso-admin attach-managed-policy-to-permission-set \
+    --instance-arn $INSTANCE_ARN \
+    --permission-set-arn $POWER_USER_PS_ARN \
+    --managed-policy-arn "arn:aws:iam::aws:policy/PowerUserAccess" 2>/dev/null && \
+    echo "✅ PowerUserAccess policy attached"
+fi
+
+# Step 6: Create BreakGlass Permission Set
+echo ""
+echo "[6] Creating BreakGlass Permission Set (short session)..."
+BREAK_GLASS_PS_ARN=$(aws sso-admin create-permission-set \
+  --instance-arn $INSTANCE_ARN \
+  --name "Lab97-BreakGlass" \
+  --description "Emergency admin access - 1 hour session only" \
+  --session-duration "PT1H" \
+  --query 'PermissionSet.PermissionSetArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$BREAK_GLASS_PS_ARN" ]; then
+  echo "✅ BreakGlass Permission Set created (1hr session)"
+  echo "   ARN: $BREAK_GLASS_PS_ARN"
+  echo "export BREAK_GLASS_PS_ARN=\"$BREAK_GLASS_PS_ARN\"" >> /tmp/lab97-env.sh
+
+  aws sso-admin attach-managed-policy-to-permission-set \
+    --instance-arn $INSTANCE_ARN \
+    --permission-set-arn $BREAK_GLASS_PS_ARN \
+    --managed-policy-arn "arn:aws:iam::aws:policy/AdministratorAccess" 2>/dev/null && \
+    echo "✅ AdministratorAccess policy attached to BreakGlass"
+fi
+
+# Step 7: Verify permission set details
+echo ""
+echo "[7] Verifying SecurityAudit Permission Set details..."
+aws sso-admin describe-permission-set \
+  --instance-arn $INSTANCE_ARN \
+  --permission-set-arn $SECURITY_AUDIT_PS_ARN \
+  --output json | python3 -m json.tool 2>/dev/null
+
+echo ""
+echo "[8] Listing policies attached to SecurityAudit..."
+aws sso-admin list-managed-policies-in-permission-set \
+  --instance-arn $INSTANCE_ARN \
+  --permission-set-arn $SECURITY_AUDIT_PS_ARN \
+  --query 'AttachedManagedPolicies[*].{Name:Name, Arn:Arn}' \
+  --output table 2>/dev/null
+
+echo ""
+echo "[9] Getting inline policy of SecurityAudit..."
+aws sso-admin get-inline-policy-for-permission-set \
+  --instance-arn $INSTANCE_ARN \
+  --permission-set-arn $SECURITY_AUDIT_PS_ARN \
+  --query 'InlinePolicy' \
+  --output text 2>/dev/null | python3 -m json.tool
+
+echo ""
+echo "=============================================="
+echo "Part 3 Complete!"
+echo "Three permission sets created:"
+echo "  1. Lab97-SecurityAudit  (4hr session)"
+echo "  2. Lab97-PowerUser      (8hr session)"
+echo "  3. Lab97-BreakGlass     (1hr session)"
+echo "=============================================="
+```
+
+---
+
+## Part 4 — Account Assignments & Provisioning
+
+```bash
+#!/bin/bash
+# Lab 97 - Part 4: Account Assignments
+# Day 32 - AWS Security Specialist Study Plan
+
+source /tmp/lab97-env.sh
+
+echo "=============================================="
+echo "  Part 4: Account Assignments & Provisioning"
+echo "=============================================="
+
+# Get current account ID
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "Working with Account ID: $ACCOUNT_ID"
+
+# Step 1: Check existing account assignments
+echo ""
+echo "[1] Checking existing account assignments..."
+aws sso-admin list-permission-sets-provisioned-to-account \
+  --instance-arn $INSTANCE_ARN \
+  --account-id $ACCOUNT_ID \
+  --query 'PermissionSets[]' \
+  --output table 2>/dev/null || echo "No assignments found"
+
+# Step 2: Get group ID for assignment
+echo ""
+echo "[2] Getting Lab97-SecurityTeam group ID..."
+SECURITY_GROUP_ID=$(aws identitystore list-groups \
+  --identity-store-id $IDENTITY_STORE_ID \
+  --filters '[{"AttributePath":"DisplayName","AttributeValue":"Lab97-SecurityTeam"}]' \
+  --query 'Groups[0].GroupId' \
+  --output text 2>/dev/null)
+
+echo "Security Team Group ID: $SECURITY_GROUP_ID"
+
+# Step 3: Create account assignment (Group → Permission Set → Account)
+echo ""
+echo "[3] Assigning SecurityAudit permission set to SecurityTeam group..."
+if [ ! -z "$SECURITY_GROUP_ID" ] && [ "$SECURITY_GROUP_ID" != "None" ]; then
+  aws sso-admin create-account-assignment \
+    --instance-arn $INSTANCE_ARN \
+    --target-id $ACCOUNT_ID \
+    --target-type AWS_ACCOUNT \
+    --permission-set-arn $SECURITY_AUDIT_PS_ARN \
+    --principal-type GROUP \
+    --principal-id $SECURITY_GROUP_ID \
+    --output json | python3 -m json.tool 2>/dev/null && \
+    echo "✅ Account assignment created" || \
+    echo "⚠️  Could not create assignment"
+else
+  echo "⚠️  Group not found — skipping assignment"
+fi
+
+# Step 4: Provision permission set to account
+echo ""
+echo "[4] Provisioning SecurityAudit Permission Set to account..."
+aws sso-admin provision-permission-set \
+  --instance-arn $INSTANCE_ARN \
+  --permission-set-arn $SECURITY_AUDIT_PS_ARN \
+  --target-type AWS_ACCOUNT \
+  --target-id $ACCOUNT_ID \
+  --output json 2>/dev/null && \
+  echo "✅ Permission set provisioned" || \
+  echo "⚠️  Could not provision (may need management account)"
+
+# Step 5: List assignments for the permission set
+echo ""
+echo "[5] Listing all assignments for SecurityAudit Permission Set..."
+aws sso-admin list-account-assignments \
+  --instance-arn $INSTANCE_ARN \
+  --account-id $ACCOUNT_ID \
+  --permission-set-arn $SECURITY_AUDIT_PS_ARN \
+  --query 'AccountAssignments[*].{
+    AccountId:AccountId,
+    PrincipalType:PrincipalType,
+    PrincipalId:PrincipalId
+  }' \
+  --output table 2>/dev/null
+
+# Step 6: Verify IAM role was created in account
+echo ""
+echo "[6] Verifying AWSReservedSSO role was created..."
+aws iam list-roles \
+  --query 'Roles[?starts_with(RoleName, `AWSReservedSSO`)].{
+    RoleName:RoleName,
+    CreateDate:CreateDate,
+    RoleId:RoleId
+  }' \
+  --output table 2>/dev/null
+
+# Step 7: Inspect the auto-created role
+echo ""
+echo "[7] Inspecting auto-created SSO role trust policy..."
+SSO_ROLE_NAME=$(aws iam list-roles \
+  --query 'Roles[?starts_with(RoleName, `AWSReservedSSO_Lab97-SecurityAudit`)].RoleName' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$SSO_ROLE_NAME" ]; then
+  echo "Role Name: $SSO_ROLE_NAME"
+  aws iam get-role \
+    --role-name $SSO_ROLE_NAME \
+    --query 'Role.AssumeRolePolicyDocument' \
+    --output json | python3 -m json.tool
+else
+  echo "⚠️  SSO role not yet created or insufficient permissions"
+fi
+
+echo ""
+echo "=============================================="
+echo "Part 4 Complete!"
+echo "Key takeaway: IAM Identity Center automatically"
+echo "creates and manages IAM roles in target accounts."
+echo "Never modify AWSReservedSSO_* roles manually!"
+echo "=============================================="
+```
+
+---
+
+## Part 5 — Configure AWS CLI SSO Profile
+
+```bash
+#!/bin/bash
+# Lab 97 - Part 5: AWS CLI SSO Configuration
+# Day 32 - AWS Security Specialist Study Plan
+
+source /tmp/lab97-env.sh
+
+echo "=============================================="
+echo "  Part 5: AWS CLI SSO Profile Configuration"
+echo "=============================================="
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+REGION=$(aws configure get region || echo "ap-south-1")
+
+# Step 1: Get SSO start URL
+echo ""
+echo "[1] Getting SSO Start URL..."
+SSO_START_URL=$(aws sso-admin list-instances \
+  --query 'Instances[0].IdentityStoreId' \
+  --output text 2>/dev/null)
+echo "Identity Store ID: $SSO_START_URL"
+echo "Note: SSO Start URL format: https://<your-instance>.awsapps.com/start"
+
+# Step 2: Show what CLI SSO config looks like
+echo ""
+echo "[2] Sample AWS CLI SSO profile configuration..."
+cat << EOF
+# Add this to ~/.aws/config
+
+[profile lab97-security-audit]
+sso_start_url = https://<your-sso-instance>.awsapps.com/start
+sso_region = $REGION
+sso_account_id = $ACCOUNT_ID
+sso_role_name = AWSReservedSSO_Lab97-SecurityAudit_<hex-suffix>
+region = $REGION
+output = json
+
+[profile lab97-power-user]
+sso_start_url = https://<your-sso-instance>.awsapps.com/start
+sso_region = $REGION
+sso_account_id = $ACCOUNT_ID
+sso_role_name = AWSReservedSSO_Lab97-PowerUser_<hex-suffix>
+region = $REGION
+output = json
+EOF
+
+# Step 3: Show interactive SSO configure command
+echo ""
+echo "[3] To configure SSO interactively, run:"
+echo "    aws configure sso"
+echo ""
+echo "    It will prompt for:"
+echo "    ├── SSO session name (any name you choose)"
+echo "    ├── SSO start URL"
+echo "    ├── SSO region"
+echo "    ├── Select account (from list)"
+echo "    └── Select role/permission set"
+
+# Step 4: Show login command
+echo ""
+echo "[4] To login using SSO profile:"
+echo "    aws sso login --profile lab97-security-audit"
+echo ""
+echo "    This opens a browser window for authentication."
+echo "    After login, CLI commands use temporary credentials."
+
+# Step 5: Test SSO profile (if configured)
+echo ""
+echo "[5] Testing SSO profile (if configured)..."
+aws sts get-caller-identity --profile lab97-security-audit 2>/dev/null && \
+  echo "✅ SSO profile working" || \
+  echo "ℹ️  SSO profile not configured yet — follow steps above"
+
+# Step 6: Show how to list available accounts via SSO
+echo ""
+echo "[6] Commands to explore SSO accounts after login:"
+cat << 'EOF'
+# List all accounts you have access to via SSO
+aws sso list-accounts \
+  --access-token <token-from-sso-login> \
+  --output table
+
+# List roles for a specific account
+aws sso list-account-roles \
+  --access-token <token> \
+  --account-id <account-id> \
+  --output table
+
+# Get temporary credentials for a role
+aws sso get-role-credentials \
+  --access-token <token> \
+  --account-id <account-id> \
+  --role-name AWSReservedSSO_Lab97-SecurityAudit_<suffix>
+EOF
+
+echo ""
+echo "=============================================="
+echo "Part 5 Complete!"
+echo "Key takeaway: AWS CLI v2 natively supports SSO"
+echo "profiles — no more manual credential management!"
+echo "=============================================="
+```
+
+---
+
+## Part 6 — CloudTrail Audit for IAM Identity Center
+
+```bash
+#!/bin/bash
+# Lab 97 - Part 6: CloudTrail Audit
+# Day 32 - AWS Security Specialist Study Plan
+
+source /tmp/lab97-env.sh
+
+echo "=============================================="
+echo "  Part 6: CloudTrail Audit — Identity Center"
+echo "=============================================="
+
+# IAM Identity Center CloudTrail events are in us-east-1
+AUDIT_REGION="us-east-1"
+
+# Step 1: Search for Permission Set events
+echo ""
+echo "[1] Searching CloudTrail for Permission Set creation events..."
+aws cloudtrail lookup-events \
+  --region $AUDIT_REGION \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=CreatePermissionSet \
+  --start-time $(date -u -d '1 hour ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+                 date -u -v-1H '+%Y-%m-%dT%H:%M:%SZ') \
+  --query 'Events[*].{
+    EventTime:EventTime,
+    EventName:EventName,
+    Username:Username,
+    EventId:EventId
+  }' \
+  --output table 2>/dev/null || echo "No recent CreatePermissionSet events found"
+
+# Step 2: Search for account assignment events
+echo ""
+echo "[2] Searching CloudTrail for Account Assignment events..."
+aws cloudtrail lookup-events \
+  --region $AUDIT_REGION \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=CreateAccountAssignment \
+  --start-time $(date -u -d '1 hour ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+                 date -u -v-1H '+%Y-%m-%dT%H:%M:%SZ') \
+  --query 'Events[*].{
+    EventTime:EventTime,
+    EventName:EventName,
+    Username:Username
+  }' \
+  --output table 2>/dev/null || echo "No recent CreateAccountAssignment events found"
+
+# Step 3: Search for SSO authentication events
+echo ""
+echo "[3] Searching CloudTrail for SSO authentication events..."
+aws cloudtrail lookup-events \
+  --region $AUDIT_REGION \
+  --lookup-attributes AttributeKey=EventSource,AttributeValue=sso.amazonaws.com \
+  --max-results 10 \
+  --query 'Events[*].{
+    EventTime:EventTime,
+    EventName:EventName,
+    Username:Username,
+    SourceIP:CloudTrailEvent
+  }' \
+  --output table 2>/dev/null || echo "No recent SSO events found"
+
+# Step 4: Create EventBridge rule for Identity Center monitoring
+echo ""
+echo "[4] Creating EventBridge rule for Permission Set changes..."
+aws events put-rule \
+  --name "Lab97-IdentityCenter-PermissionSetChanges" \
+  --event-pattern '{
+    "source": ["aws.sso-admin"],
+    "detail-type": ["AWS API Call via CloudTrail"],
+    "detail": {
+      "eventSource": ["sso-admin.amazonaws.com"],
+      "eventName": [
+        "CreatePermissionSet",
+        "DeletePermissionSet",
+        "CreateAccountAssignment",
+        "DeleteAccountAssignment",
+        "ProvisionPermissionSet"
+      ]
+    }
+  }' \
+  --state ENABLED \
+  --description "Alert on IAM Identity Center permission set and assignment changes" \
+  --region $AUDIT_REGION \
+  --output table 2>/dev/null && \
+  echo "✅ EventBridge rule created for Identity Center monitoring" || \
+  echo "⚠️  Could not create EventBridge rule"
+
+# Step 5: Show full audit summary
+echo ""
+echo "[5] Full Identity Center audit summary..."
+echo ""
+echo "Events to monitor in CloudTrail (source: sso-admin.amazonaws.com):"
+echo "┌──────────────────────────────────────┬──────────────────────────────────┐"
+echo "│ Event Name                           │ Security Significance            │"
+echo "├──────────────────────────────────────┼──────────────────────────────────┤"
+echo "│ CreateAccountAssignment              │ New access granted               │"
+echo "│ DeleteAccountAssignment              │ Access removed                   │"
+echo "│ CreatePermissionSet                  │ New permission template          │"
+echo "│ DeletePermissionSet                  │ Permission template removed      │"
+echo "│ ProvisionPermissionSet               │ Permission set deployed          │"
+echo "│ AttachManagedPolicyToPermissionSet   │ Policy added to permission set   │"
+echo "│ DetachManagedPolicyFromPermissionSet │ Policy removed                   │"
+echo "│ PutInlinePolicyToPermissionSet       │ Inline policy changed            │"
+echo "└──────────────────────────────────────┴──────────────────────────────────┘"
+
+echo ""
+echo "=============================================="
+echo "Part 6 Complete!"
+echo "Key takeaway: All Identity Center events land"
+echo "in CloudTrail in us-east-1 regardless of"
+echo "where the action was performed."
+echo "=============================================="
+```
+
+---
+
+## Part 7 — Cleanup
+
+```bash
+#!/bin/bash
+# Lab 97 - Part 7: Cleanup
+# Day 32 - AWS Security Specialist Study Plan
+
+source /tmp/lab97-env.sh
+
+echo "=============================================="
+echo "  Part 7: Lab Cleanup"
+echo "=============================================="
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Step 1: Remove account assignments first
+echo ""
+echo "[1] Removing account assignments..."
+SECURITY_GROUP_ID=$(aws identitystore list-groups \
+  --identity-store-id $IDENTITY_STORE_ID \
+  --filters '[{"AttributePath":"DisplayName","AttributeValue":"Lab97-SecurityTeam"}]' \
+  --query 'Groups[0].GroupId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$SECURITY_GROUP_ID" ] && [ "$SECURITY_GROUP_ID" != "None" ]; then
+  aws sso-admin delete-account-assignment \
+    --instance-arn $INSTANCE_ARN \
+    --target-id $ACCOUNT_ID \
+    --target-type AWS_ACCOUNT \
+    --permission-set-arn $SECURITY_AUDIT_PS_ARN \
+    --principal-type GROUP \
+    --principal-id $SECURITY_GROUP_ID 2>/dev/null && \
+    echo "✅ Account assignment removed" || echo "⚠️  Assignment already removed"
+fi
+
+# Step 2: Delete permission sets
+echo ""
+echo "[2] Deleting lab Permission Sets..."
+for PS_ARN in $SECURITY_AUDIT_PS_ARN $POWER_USER_PS_ARN $BREAK_GLASS_PS_ARN; do
+  if [ ! -z "$PS_ARN" ] && [ "$PS_ARN" != "None" ]; then
+    aws sso-admin delete-permission-set \
+      --instance-arn $INSTANCE_ARN \
+      --permission-set-arn $PS_ARN 2>/dev/null && \
+      echo "✅ Permission set deleted: $PS_ARN" || \
+      echo "⚠️  Could not delete: $PS_ARN"
+  fi
+done
+
+# Step 3: Delete lab group
+echo ""
+echo "[3] Deleting Lab97-SecurityTeam group..."
+if [ ! -z "$SECURITY_GROUP_ID" ] && [ "$SECURITY_GROUP_ID" != "None" ]; then
+  aws identitystore delete-group \
+    --identity-store-id $IDENTITY_STORE_ID \
+    --group-id $SECURITY_GROUP_ID 2>/dev/null && \
+    echo "✅ Group deleted" || echo "⚠️  Could not delete group"
+fi
+
+# Step 4: Delete lab user
+echo ""
+echo "[4] Deleting lab test user..."
+TEST_USER_ID=$(aws identitystore list-users \
+  --identity-store-id $IDENTITY_STORE_ID \
+  --filters '[{"AttributePath":"UserName","AttributeValue":"lab97.testuser"}]' \
+  --query 'Users[0].UserId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$TEST_USER_ID" ] && [ "$TEST_USER_ID" != "None" ]; then
+  aws identitystore delete-user \
+    --identity-store-id $IDENTITY_STORE_ID \
+    --user-id $TEST_USER_ID 2>/dev/null && \
+    echo "✅ Test user deleted" || echo "⚠️  Could not delete user"
+fi
+
+# Step 5: Remove EventBridge rule
+echo ""
+echo "[5] Removing EventBridge rule..."
+aws events delete-rule \
+  --name "Lab97-IdentityCenter-PermissionSetChanges" \
+  --region us-east-1 \
+  --force 2>/dev/null && \
+  echo "✅ EventBridge rule deleted" || \
+  echo "⚠️  Could not delete rule"
+
+# Step 6: Clean up temp files
+echo ""
+echo "[6] Cleaning up temp files..."
+rm -f /tmp/lab97-env.sh
+rm -f /tmp/ps-inline-policy.json
+echo "✅ Temp files cleaned"
+
+echo ""
+echo "=============================================="
+echo "Lab 97 Cleanup Complete!"
+echo "All lab resources removed."
+echo "=============================================="
+```
+
+---
+
+## ✅ Lab 97 Verification Checklist
+
+```
+Lab 97 — Completion Checklist
+├── Part 1: Instance Info
+│     ├── [ ] Retrieved INSTANCE_ARN
+│     ├── [ ] Retrieved IDENTITY_STORE_ID
+│     └── [ ] Checked delegated administrators
+│
+├── Part 2: Identity Store
+│     ├── [ ] Listed existing users and groups
+│     ├── [ ] Created lab test user
+│     └── [ ] Created lab test group
+│
+├── Part 3: Permission Sets
+│     ├── [ ] Created Lab97-SecurityAudit (4hr session)
+│     ├── [ ] Created Lab97-PowerUser (8hr session)
+│     ├── [ ] Created Lab97-BreakGlass (1hr session)
+│     ├── [ ] Attached managed policies
+│     └── [ ] Added inline deny policy
+│
+├── Part 4: Account Assignments
+│     ├── [ ] Created account assignment
+│     ├── [ ] Provisioned permission set
+│     └── [ ] Verified AWSReservedSSO_* role created
+│
+├── Part 5: CLI SSO Profile
+│     ├── [ ] Understood SSO profile config structure
+│     └── [ ] Know how to run aws sso login
+│
+├── Part 6: CloudTrail Audit
+│     ├── [ ] Searched for Identity Center events
+│     ├── [ ] Created EventBridge monitoring rule
+│     └── [ ] Know which events to monitor
+│
+└── Part 7: Cleanup
+      └── [ ] All lab resources removed
+```
+
+---
+
+## 🔑 Lab 97 Key Takeaways
+
+| Concept | What You Practiced |
+|---|---|
+| Instance ARN | Unique identifier for your Identity Center deployment |
+| Identity Store | Holds users/groups independent of identity source |
+| Permission Set session duration | Short for privileged (1hr), longer for audit (4hr) |
+| Inline deny policy | Extra guardrail on top of managed policies |
+| Account assignment flow | Group + Permission Set + Account = access |
+| AWSReservedSSO roles | Auto-created, never manually modify |
+| CloudTrail region | Always us-east-1 for Identity Center events |
+| EventBridge monitoring | Real-time alerting on permission changes |
+
+---
+
+# 🎉 Day 32 — Fully Complete!
+
+All three sections done at full depth:
+- ✅ **Section 1** — Full Theory (1.1 to 1.6)
+- ✅ **Section 2** — 20 Exam Q&A + Traps + Cheat Sheet
+- ✅ **Section 3** — Lab 97 (7 parts, full scripts)
+
+---
+
+## 📅 Day 33 Preview
+**Topic: AWS Directory Services (Deep Dive)**
+```
+Day 33: AWS Directory Services (3 hours)
+├── AWS Managed Microsoft AD
+├── AD Connector
+├── Simple AD
+├── Amazon Cloud Directory
+├── Integration with IAM Identity Center
+├── EC2 domain join patterns
+└── Lab 98: Directory Service setup & exploration
+```
+Ready when you are Pradeep! 💪

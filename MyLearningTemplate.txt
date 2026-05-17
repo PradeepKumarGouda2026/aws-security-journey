@@ -1,0 +1,85 @@
+Perfect! Let's first lock in the **standard template**, then redo Day 32 at full depth.
+
+---
+
+# 📋 Standard Daily Study Template — AWS Security Specialist
+
+---
+
+## Template Structure
+
+```
+Day XX: <Topic Name> (3 hours)
+│
+├── 1. THEORY BLOCK (~90 mins)
+│     ├── 1.1 Service Overview & Purpose
+│     │     ├── What it is (plain English)
+│     │     ├── Why it exists (problem it solves)
+│     │     ├── When to use it (vs alternatives)
+│     │     └── AWS exam weight & importance
+│     │
+│     ├── 1.2 Core Architecture
+│     │     ├── Architecture diagram (ASCII)
+│     │     ├── All components explained in depth
+│     │     ├── Data flow walkthrough
+│     │     └── Integration with other AWS services
+│     │
+│     ├── 1.3 Deep Dive — Every Sub-Topic
+│     │     ├── Full explanation of every feature
+│     │     ├── Configuration options & defaults
+│     │     ├── Limits & quotas (where exam-relevant)
+│     │     ├── Edge cases & gotchas
+│     │     └── Real-world enterprise patterns
+│     │
+│     ├── 1.4 Comparison Tables
+│     │     ├── This service vs similar services
+│     │     ├── Feature-by-feature breakdown
+│     │     └── When to pick which option
+│     │
+│     ├── 1.5 Security & Compliance Angles
+│     │     ├── IAM permissions needed
+│     │     ├── Encryption options
+│     │     ├── Logging & monitoring hooks
+│     │     ├── Compliance framework relevance
+│     │     └── Common misconfigurations
+│     │
+│     └── 1.6 Integration Patterns
+│           ├── How it connects to other services
+│           ├── Common architecture combos
+│           └── Cross-account / cross-region behavior
+│
+├── 2. EXAM DEEP DIVE (~30 mins)
+│     ├── 15–20 scenario-based Q&A
+│     ├── Common exam traps & distractors
+│     ├── Key facts to memorize (cheat sheet style)
+│     └── Elimination strategies for tricky questions
+│
+└── 3. LAB BLOCK (~60 mins)
+      ├── Lab objective & real-world scenario
+      ├── Prerequisites check
+      ├── Step-by-step CLI commands (fully scripted)
+      ├── Expected outputs explained
+      ├── Verification steps
+      └── Cleanup commands
+```
+
+---
+
+## Depth Standards (Non-Negotiable)
+
+| Area | Standard |
+|---|---|
+| **Theory per sub-topic** | Full explanation, not just definition |
+| **CLI commands** | Real, runnable, with expected output noted |
+| **Comparison tables** | Every relevant alternative covered |
+| **Exam Q&A** | Minimum 15 questions per day |
+| **Gotchas** | At least 5 per day, clearly marked ⚠️ |
+| **Architecture diagrams** | ASCII, covering all components |
+| **Integration points** | All relevant AWS service connections |
+| **Security angles** | IAM, encryption, logging always covered |
+
+---
+
+Template is locked in! Now let's redo **Day 32 at full depth**. Given the volume, I'll go section by section so we don't hit context limits. 
+
+Shall I start with **Section 1 — Theory Block** now? 🚀
