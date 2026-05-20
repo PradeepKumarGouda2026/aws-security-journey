@@ -1,0 +1,1377 @@
+# 📅 Day 34 — AWS KMS: Key Management Service
+
+---
+
+# SECTION 1 — THEORY BLOCK
+
+---
+
+## 1.1 Service Overview & Purpose
+
+### What is AWS KMS?
+AWS Key Management Service (KMS) is a **fully managed service** that makes it easy to **create, control, and rotate cryptographic keys** used to encrypt your data across AWS services and applications.
+
+Think of KMS as a **highly secure key vault** — it stores and manages the master keys that encrypt everything in your AWS environment. You never see the actual key material directly — KMS performs encryption/decryption operations **on your behalf**, keeping the key material inside a **FIPS 140-2 validated Hardware Security Module (HSM)**.
+
+### Why Does It Exist? (Problem It Solves)
+```
+Without KMS:
+├── Where do you store encryption keys?
+│     ├── In the application? (stolen if app is compromised)
+│     ├── In S3? (who encrypts S3?)
+│     ├── On-premises HSM? (expensive, complex)
+│     └── In code? (biggest anti-pattern ever)
+│
+├── How do you rotate keys safely?
+├── How do you audit who used which key?
+├── How do you share keys across accounts?
+└── How do you enforce least privilege on key usage?
+```
+
+```
+With KMS:
+├── Keys stored in FIPS 140-2 HSMs (never leave AWS KMS)
+├── Every key usage logged in CloudTrail automatically
+├── Automatic key rotation (annual)
+├── Fine-grained access control via key policies
+├── Cross-account key sharing natively
+├── Native integration with 100+ AWS services
+└── Pay per API call — no upfront HSM costs
+```
+
+### Exam Weight & Importance
+- Appears in **Domain 1: Threat Detection & Incident Response** and **Domain 3: Infrastructure Security**
+- One of the **most heavily tested** services in the entire exam
+- Expect **5–8 questions** directly involving KMS
+- Critical to understand deeply — key policies, envelope encryption, grants all appear frequently
+
+---
+
+## 1.2 Core Architecture
+
+### KMS Architecture Overview
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        AWS KMS                                   │
+│                                                                  │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │              Hardware Security Modules (HSMs)              │  │
+│  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │  │
+│  │   │     HSM 1    │  │    HSM 2     │  │    HSM 3     │   │  │
+│  │   │  KMS Key A   │  │  KMS Key A   │  │  KMS Key A   │   │  │
+│  │   │  KMS Key B   │  │  KMS Key B   │  │  KMS Key B   │   │  │
+│  │   └──────────────┘  └──────────────┘  └──────────────┘   │  │
+│  │           Multi-AZ replication (automatic)                 │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                    KMS API Layer                           │  │
+│  │  Encrypt │ Decrypt │ GenerateDataKey │ Sign │ Verify      │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                  Access Control Layer                      │  │
+│  │  Key Policies │ IAM Policies │ Grants │ VPC Endpoint      │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+           S3 SSE-KMS    EBS Encryption   RDS Encryption
+           DynamoDB      Secrets Manager  CloudTrail
+           Lambda        SNS/SQS          EFS
+```
+
+### Key Concepts Relationship
+```
+KMS Key (CMK)
+    │
+    │ generates
+    ▼
+Data Key (plaintext + encrypted copy)
+    │                    │
+    │ encrypts           │ stored alongside
+    ▼                    ▼
+Your Data           Encrypted Data Key
+(then plaintext     (safe to store anywhere)
+ data key deleted)
+```
+
+---
+
+## 1.3 Deep Dive — Every Sub-Topic
+
+### A. KMS Key Types (Full Detail)
+
+#### Type 1: AWS Owned Keys
+```
+├── Created and managed entirely by AWS
+├── Used by AWS services internally
+├── You have NO visibility or control
+├── Cannot view, use directly, or audit in CloudTrail
+├── No cost to you
+└── Examples: S3 SSE-S3, DynamoDB default encryption
+```
+
+#### Type 2: AWS Managed Keys
+```
+├── Created by AWS on your behalf when you enable encryption
+├── Name format: aws/<service> (e.g., aws/s3, aws/ebs, aws/rds)
+├── You can VIEW key metadata
+├── You CANNOT manage (rotate manually, change policy, delete)
+├── Automatic rotation: every 3 years (was 1 year before 2023)
+├── CloudTrail logs usage ✅
+├── No cost for key itself (only API call costs)
+└── Examples: aws/s3, aws/ebs, aws/rds, aws/secretsmanager
+```
+
+> ⚠️ **Exam trap:** AWS Managed Keys rotate every **3 years** now (changed from 1 year). Customer Managed Keys auto-rotate every **1 year** when enabled.
+
+#### Type 3: Customer Managed Keys (CMK) — Most Important
+```
+├── Created by YOU in KMS
+├── Full control: policies, rotation, deletion, grants
+├── Automatic rotation: optional, every 1 year when enabled
+├── Manual rotation: supported (you provide new key material)
+├── Cost: $1/month per key + $0.03 per 10,000 API calls
+├── CloudTrail logs ALL usage ✅
+├── Can be used cross-account ✅
+├── Can be disabled or deleted (with 7-30 day waiting period)
+└── Types:
+      ├── Symmetric (AES-256) — most common, used for encrypt/decrypt
+      ├── Asymmetric (RSA, ECC) — public/private key pair
+      └── HMAC — for message authentication codes
+```
+
+#### CMK Origin Types
+| Origin | Description | Use Case |
+|---|---|---|
+| **AWS_KMS** | Key material generated by KMS | Default, most common |
+| **EXTERNAL** | You import your own key material | Compliance requirements, bring-your-own-key |
+| **AWS_CLOUDHSM** | Key material from your CloudHSM cluster | Highest compliance needs |
+
+> ⚠️ **Exam critical:** When origin is **EXTERNAL**, you are responsible for the key material. If you lose it, the key is permanently unusable. AWS cannot recover it.
+
+#### Symmetric vs Asymmetric Keys
+
+| Feature | Symmetric (AES-256) | Asymmetric (RSA/ECC) |
+|---|---|---|
+| **Key material** | Single key | Public + private key pair |
+| **Operations** | Encrypt, Decrypt, GenerateDataKey | Encrypt, Decrypt, Sign, Verify |
+| **Who can encrypt** | Only via KMS API | Anyone with public key |
+| **Who can decrypt** | Only via KMS API | Only via KMS API (private key) |
+| **Performance** | Faster | Slower |
+| **Use case** | Server-side encryption | Digital signing, asymmetric crypto |
+| **Cross-account use** | ✅ Yes | ✅ Yes |
+| **Data key generation** | ✅ Yes | ❌ No |
+
+---
+
+### B. Key Policies (Full Detail — Exam Critical)
+
+#### What is a Key Policy?
+A key policy is a **resource-based policy** attached directly to a KMS key. It is the **primary access control mechanism** for KMS keys.
+
+> ⚠️ **Most critical KMS exam concept:** Unlike other AWS resources where IAM policies alone can grant access, **KMS keys require the key policy to explicitly allow IAM to work**. Without this, even account root cannot use the key via IAM.
+
+#### The Default Key Policy
+When you create a KMS key, AWS creates a default key policy:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Enable IAM User Permissions",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::123456789012:root"
+      },
+      "Action": "kms:*",
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**This statement is critical** — it delegates KMS key access control to **IAM policies in the account**. Without it:
+- Only the key policy itself can grant access
+- IAM policies are completely ignored
+- Even account administrators cannot use the key
+
+#### Key Policy Structure (Full Example)
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Enable IAM User Permissions",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::123456789012:root"
+      },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "Allow Key Administrators",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::123456789012:role/KeyAdminRole",
+          "arn:aws:iam::123456789012:user/SecurityAdmin"
+        ]
+      },
+      "Action": [
+        "kms:Create*",
+        "kms:Describe*",
+        "kms:Enable*",
+        "kms:List*",
+        "kms:Put*",
+        "kms:Update*",
+        "kms:Revoke*",
+        "kms:Disable*",
+        "kms:Get*",
+        "kms:Delete*",
+        "kms:ScheduleKeyDeletion",
+        "kms:CancelKeyDeletion"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Allow Key Usage",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::123456789012:role/AppRole",
+          "arn:aws:iam::123456789012:role/LambdaRole"
+        ]
+      },
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Allow Cross-Account Usage",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::987654321098:root"
+      },
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+#### Key Policy vs IAM Policy Evaluation
+```
+Request to use KMS key
+        │
+        ▼
+Does key policy explicitly DENY? ──YES──▶ DENIED
+        │
+        NO
+        ▼
+Does key policy allow the action?
+        │
+   ┌────┴────┐
+   YES       NO
+   │         │
+   ▼         ▼
+Check IAM  DENIED
+policy     (key policy
+   │        is the gate)
+   │
+   ▼
+Does IAM policy allow?
+   │
+   ├── YES → ALLOWED
+   └── NO  → DENIED
+```
+
+> ⚠️ **Key insight:** Key policy is the **outer gate**. IAM policy is the **inner gate**. BOTH must allow for access to be granted (when the default root delegation statement exists).
+
+---
+
+### C. Envelope Encryption (Exam Critical)
+
+#### The Problem with Direct Encryption
+```
+Problem: KMS has a 4KB limit on data it can encrypt directly
+Solution: Envelope encryption
+```
+
+#### How Envelope Encryption Works
+```
+Step 1: App calls KMS GenerateDataKey(KeyId=CMK-ARN)
+
+Step 2: KMS returns TWO things:
+        ├── Plaintext Data Key (use immediately, then DELETE)
+        └── Encrypted Data Key (safe to store permanently)
+
+Step 3: App uses Plaintext Data Key to encrypt large data
+        (using AES-256 locally — no size limit)
+
+Step 4: App stores:
+        ├── Encrypted Data
+        └── Encrypted Data Key (alongside the data)
+        (Plaintext Data Key is discarded from memory)
+
+Step 5: To DECRYPT later:
+        ├── Retrieve Encrypted Data Key
+        ├── Call KMS Decrypt(EncryptedDataKey)
+        ├── KMS returns Plaintext Data Key
+        ├── Use Plaintext Data Key to decrypt data locally
+        └── Discard Plaintext Data Key again
+```
+
+#### Visual Diagram
+```
+ENCRYPT:
+                    ┌─────────┐
+                    │   KMS   │
+                    │   CMK   │
+                    └────┬────┘
+                         │ GenerateDataKey
+                    ┌────▼────┐
+                    │ Returns │
+          ┌─────────┤  Both   ├─────────┐
+          │         └─────────┘         │
+          ▼                             ▼
+  Plaintext Data Key           Encrypted Data Key
+          │                             │
+          │ encrypts                    │ stored with
+          ▼                             ▼
+    Your Large Data ──────────── Encrypted Data
+          │
+    (delete plaintext key)
+
+DECRYPT:
+  Encrypted Data Key ──▶ KMS Decrypt ──▶ Plaintext Data Key
+                                                │
+  Encrypted Data ──────────────────────────────▶ Decrypted Data
+                        (local AES decrypt)
+```
+
+#### Why Envelope Encryption Matters
+- **No size limit** — data key encrypts locally, no 4KB KMS limit
+- **Performance** — local AES encryption is much faster than KMS API calls
+- **Cost** — one KMS API call per session, not per byte
+- **Auditing** — every data key generation is logged in CloudTrail
+- **Security** — plaintext key never persisted anywhere
+
+---
+
+### D. Key Rotation (Full Detail)
+
+#### Automatic Rotation
+```
+CMK (Customer Managed):
+  ├── Must be ENABLED manually per key
+  ├── Rotates every 365 days (1 year)
+  ├── New backing key material generated
+  ├── Old key material RETAINED (to decrypt old data)
+  ├── Key ID, ARN, alias — all stay the SAME
+  └── Zero application changes needed
+
+AWS Managed Keys:
+  ├── Automatic, always ON
+  ├── Rotates every 3 years
+  └── Cannot be disabled
+
+AWS Owned Keys:
+  └── Managed entirely by AWS, not customer-visible
+```
+
+> ⚠️ **Critical exam point:** When a CMK rotates, the **old key material is retained** so previously encrypted data can still be decrypted. The **key ID and ARN never change**. Applications don't need updates.
+
+#### Manual Rotation
+```
+When needed:
+├── Asymmetric keys (auto-rotation not supported)
+├── Keys with imported material (EXTERNAL origin)
+├── CloudHSM-backed keys
+└── When you want rotation on your own schedule
+
+Manual rotation process:
+Step 1: Create a NEW KMS key
+Step 2: Update all key aliases to point to new key
+Step 3: Re-encrypt data with new key (if needed)
+Step 4: Keep old key to decrypt historical data
+Step 5: (Eventually) schedule old key deletion
+```
+
+#### Key Rotation Comparison
+| Aspect | Automatic | Manual |
+|---|---|---|
+| **CMK support** | ✅ Symmetric only | ✅ All types |
+| **Asymmetric keys** | ❌ | ✅ |
+| **Imported material** | ❌ | ✅ |
+| **Key ID changes** | ❌ Same | ✅ New key ID |
+| **Old material kept** | ✅ Yes | Depends on config |
+| **App changes needed** | ❌ No | ✅ Update references |
+
+---
+
+### E. KMS Grants (Full Detail)
+
+#### What is a Grant?
+A **grant** is a mechanism to give **temporary, programmatic access** to a KMS key without modifying the key policy.
+
+#### When to Use Grants
+```
+Use grants when:
+├── AWS services need temporary key access
+│   (e.g., EBS needs to decrypt your volume during EC2 start)
+├── You want to delegate key access without policy changes
+├── Access needs to be automatically revoked
+└── You need to give access to a specific operation only
+```
+
+#### Grant Structure
+```json
+{
+  "KeyId": "arn:aws:kms:ap-south-1:123456789012:key/abc-123",
+  "GranteePrincipal": "arn:aws:iam::123456789012:role/AppRole",
+  "Operations": [
+    "Decrypt",
+    "GenerateDataKey"
+  ],
+  "Constraints": {
+    "EncryptionContextEquals": {
+      "Environment": "Production",
+      "AppId": "MyApp"
+    }
+  },
+  "RetiringPrincipal": "arn:aws:iam::123456789012:role/AdminRole"
+}
+```
+
+#### Grant Operations Available
+```
+├── Decrypt
+├── Encrypt
+├── GenerateDataKey
+├── GenerateDataKeyWithoutPlaintext
+├── ReEncryptFrom
+├── ReEncryptTo
+├── Sign
+├── Verify
+├── GetPublicKey
+├── CreateGrant (delegate grant creation)
+├── RetireGrant
+└── DescribeKey
+```
+
+#### Grant Constraints — Encryption Context
+```
+Grants can be restricted by encryption context:
+├── EncryptionContextEquals — ALL context must match exactly
+└── EncryptionContextSubset — context must contain these pairs
+
+Example:
+Grant only allows decrypt if context includes:
+  {"Environment": "Production", "AppId": "PaymentService"}
+
+This means the same key can be used for multiple apps
+but each app can only decrypt its OWN data.
+```
+
+---
+
+### F. Encryption Context (Full Detail)
+
+#### What is Encryption Context?
+Encryption context is a set of **key-value pairs** that provide **additional authenticated data (AAD)** for encryption operations. It is:
+- NOT secret (stored in plaintext alongside encrypted data)
+- NOT part of the encrypted data itself
+- Required to match exactly during decryption
+- Logged in CloudTrail for every operation
+
+#### How It Works
+```
+ENCRYPT:
+aws kms encrypt \
+  --key-id alias/my-key \
+  --plaintext "sensitive data" \
+  --encryption-context '{"App":"PaymentService","Env":"Prod"}'
+
+DECRYPT (must provide same context):
+aws kms decrypt \
+  --ciphertext-blob fileb://encrypted.bin \
+  --encryption-context '{"App":"PaymentService","Env":"Prod"}'
+
+If context doesn't match → DECRYPT FAILS
+```
+
+#### Security Benefits
+```
+1. Additional authentication:
+   Even if attacker gets encrypted data, they need
+   correct encryption context to decrypt it
+
+2. Audit trail:
+   CloudTrail logs show what context was used
+   You can see which app encrypted/decrypted what
+
+3. Policy enforcement:
+   Key policy conditions can require specific context
+   e.g., only allow decrypt if Env=Production
+```
+
+#### Encryption Context in Key Policy
+```json
+{
+  "Sid": "RequireEncryptionContext",
+  "Effect": "Allow",
+  "Principal": {
+    "AWS": "arn:aws:iam::123456789012:role/AppRole"
+  },
+  "Action": "kms:Decrypt",
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": {
+      "kms:EncryptionContext:App": "PaymentService",
+      "kms:EncryptionContext:Env": "Production"
+    }
+  }
+}
+```
+
+---
+
+### G. Cross-Account Key Usage (Full Detail)
+
+#### Two-Step Process
+```
+Step 1: Key Policy in Key Owner Account (Account A)
+        Must allow the external account (Account B)
+
+Step 2: IAM Policy in External Account (Account B)
+        Must allow the role/user to use the key
+```
+
+#### Step 1 — Key Policy (Account A — key owner)
+```json
+{
+  "Sid": "AllowCrossAccountUsage",
+  "Effect": "Allow",
+  "Principal": {
+    "AWS": "arn:aws:iam::AccountB-ID:root"
+  },
+  "Action": [
+    "kms:Encrypt",
+    "kms:Decrypt",
+    "kms:ReEncrypt*",
+    "kms:GenerateDataKey*",
+    "kms:DescribeKey"
+  ],
+  "Resource": "*"
+}
+```
+
+#### Step 2 — IAM Policy (Account B — key user)
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "arn:aws:kms:ap-south-1:AccountA-ID:key/key-id"
+    }
+  ]
+}
+```
+
+> ⚠️ **Both steps are required.** Key policy alone = not enough. IAM policy alone = not enough. BOTH must allow.
+
+#### Cross-Account via Grants (Alternative)
+```
+Instead of modifying key policy:
+Account A creates a grant for Account B's role directly
+→ Account B role gets access without needing IAM policy update
+→ Grant can be retired when no longer needed
+```
+
+---
+
+### H. Key States (Full Detail)
+
+```
+KMS Key States:
+│
+├── Enabled
+│     ├── Default state for new keys
+│     └── All cryptographic operations allowed
+│
+├── Disabled
+│     ├── Manually disabled by key administrator
+│     ├── NO cryptographic operations allowed
+│     ├── Key metadata can still be viewed
+│     └── Can be re-enabled immediately
+│
+├── Pending Deletion
+│     ├── Scheduled for deletion (7–30 day window)
+│     ├── NO cryptographic operations allowed
+│     ├── Can be cancelled before deletion date
+│     └── After window expires → permanently deleted
+│
+├── Pending Import
+│     ├── Key with EXTERNAL origin created
+│     └── Waiting for key material to be imported
+│
+└── Unavailable
+      ├── CloudHSM-backed key
+      └── Associated CloudHSM cluster is unavailable
+```
+
+> ⚠️ **Exam critical:** Once a KMS key is **deleted**, it is **permanently gone**. All data encrypted with it becomes **permanently unrecoverable**. The 7–30 day waiting period exists for this reason — use it to verify nothing still uses the key.
+
+#### Key Deletion Best Practices
+```bash
+# Before deleting, check key usage in CloudTrail
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=ResourceName,AttributeValue=<key-id> \
+  --start-time $(date -u -d '30 days ago' '+%Y-%m-%dT%H:%M:%SZ')
+
+# Schedule deletion with maximum waiting period (30 days)
+aws kms schedule-key-deletion \
+  --key-id <key-id> \
+  --pending-window-in-days 30
+
+# Cancel if you change your mind
+aws kms cancel-key-deletion \
+  --key-id <key-id>
+```
+
+---
+
+### I. KMS Key Aliases
+
+#### What is an Alias?
+An alias is a **friendly name** for a KMS key:
+```
+Key ARN:   arn:aws:kms:ap-south-1:123456789012:key/1234abcd-...
+Alias:     alias/my-app-key
+           alias/production-s3-key
+           alias/payment-encryption-key
+```
+
+#### Alias Benefits
+```
+├── Human-readable reference instead of UUID
+├── Can be updated to point to different key
+│   (useful for manual rotation without app changes)
+├── Can be used in most KMS API calls
+└── Format: alias/<name> (must start with alias/)
+```
+
+#### AWS Reserved Aliases
+```
+alias/aws/*  → Reserved for AWS managed keys
+Examples:
+├── alias/aws/s3
+├── alias/aws/ebs
+├── alias/aws/rds
+└── alias/aws/secretsmanager
+```
+
+---
+
+## 1.4 Comparison Tables
+
+### KMS Key Types Full Comparison
+
+| Feature | AWS Owned | AWS Managed | Customer Managed |
+|---|---|---|---|
+| **Created by** | AWS | AWS (for you) | You |
+| **Cost** | Free | Free (API costs) | $1/mo + API costs |
+| **View metadata** | ❌ | ✅ | ✅ |
+| **Control policy** | ❌ | ❌ | ✅ |
+| **Rotate manually** | ❌ | ❌ | ✅ |
+| **Auto rotation** | AWS managed | Every 3 years | Every 1 year (opt-in) |
+| **Cross-account** | ❌ | ❌ | ✅ |
+| **Disable/Delete** | ❌ | ❌ | ✅ |
+| **CloudTrail** | ❌ | ✅ | ✅ |
+| **Grants** | ❌ | ❌ | ✅ |
+| **Aliases** | ❌ | ✅ (aws/*) | ✅ |
+
+### KMS vs CloudHSM
+
+| Feature | AWS KMS | AWS CloudHSM |
+|---|---|---|
+| **Management** | Fully managed | You manage HSM cluster |
+| **Compliance** | FIPS 140-2 Level 2 | FIPS 140-2 Level 3 |
+| **Key control** | Shared HSMs | Dedicated HSMs |
+| **Integration** | 100+ AWS services | Manual integration |
+| **Cost** | Per API call | ~$1.60/hr per HSM |
+| **Performance** | Scalable | Fixed per HSM |
+| **Use case** | Most workloads | Highest compliance needs |
+| **Multi-tenant** | Yes | No (dedicated) |
+
+---
+
+## 1.5 Security & Compliance Angles
+
+### IAM Permissions for KMS
+
+| Action | IAM Permission |
+|---|---|
+| Create key | `kms:CreateKey` |
+| Encrypt data | `kms:Encrypt` |
+| Decrypt data | `kms:Decrypt` |
+| Generate data key | `kms:GenerateDataKey` |
+| Describe key | `kms:DescribeKey` |
+| Create alias | `kms:CreateAlias` |
+| Schedule deletion | `kms:ScheduleKeyDeletion` |
+| Create grant | `kms:CreateGrant` |
+| Rotate key | `kms:EnableKeyRotation` |
+
+### CloudTrail Integration
+Every KMS API call is logged:
+```
+Key events to monitor:
+├── kms:Decrypt              → Who is decrypting what
+├── kms:Encrypt              → Encryption operations
+├── kms:GenerateDataKey      → Data key generation
+├── kms:DisableKey           → Key disabled
+├── kms:ScheduleKeyDeletion  → Key scheduled for deletion
+├── kms:PutKeyPolicy         → Key policy changed
+├── kms:CreateGrant          → New grant created
+└── kms:DisableKeyRotation   → Rotation disabled (high risk)
+```
+
+### Common Misconfigurations
+
+| Misconfiguration | Risk | Fix |
+|---|---|---|
+| No root delegation in key policy | Locked out of key | Always include root delegation statement |
+| Deleting key without checking usage | Permanent data loss | Check CloudTrail, use 30-day deletion window |
+| Disabling key rotation | Keys never rotate | Enable auto-rotation on all CMKs |
+| Overly permissive key policy | Unauthorized access | Use least privilege, specific principals |
+| No encryption context | Weaker authentication | Always use encryption context |
+| Cross-account without both policies | Access denied | Both key policy AND IAM policy required |
+| Using AWS managed key for cross-account | Cannot share | Use CMK for cross-account scenarios |
+
+### Compliance Relevance
+
+| Framework | KMS Relevance |
+|---|---|
+| **PCI DSS** | Encryption of cardholder data, key management |
+| **HIPAA** | PHI encryption at rest |
+| **ISO 27001** | Cryptographic controls |
+| **NIST 800-53** | SC-12 (Key Management), SC-28 (Data at Rest) |
+| **FedRAMP** | FIPS 140-2 validated encryption |
+
+---
+
+## 1.6 Integration Patterns
+
+### S3 SSE-KMS
+```
+Upload to S3:
+  App ──▶ S3 ──▶ KMS GenerateDataKey ──▶ Encrypt object
+                                           Store encrypted data key with object
+
+Download from S3:
+  App ──▶ S3 ──▶ KMS Decrypt(encrypted data key) ──▶ S3 decrypts object
+```
+
+### EBS Encryption
+```
+Create encrypted EBS volume:
+  KMS CMK ──▶ EBS generates data key ──▶ Volume encrypted at rest
+  EC2 start ──▶ KMS grant allows EC2 to decrypt ──▶ Volume mounted
+```
+
+### Secrets Manager
+```
+Store secret:
+  Secrets Manager ──▶ KMS Encrypt ──▶ Encrypted secret stored
+Retrieve secret:
+  App ──▶ Secrets Manager ──▶ KMS Decrypt ──▶ Plaintext secret returned
+```
+
+### Lambda with KMS
+```python
+import boto3
+import base64
+import os
+
+kms = boto3.client('kms')
+
+def encrypt_value(plaintext):
+    response = kms.encrypt(
+        KeyId='alias/my-app-key',
+        Plaintext=plaintext.encode(),
+        EncryptionContext={
+            'App': 'MyLambda',
+            'Env': os.environ['ENVIRONMENT']
+        }
+    )
+    return base64.b64encode(
+        response['CiphertextBlob']
+    ).decode()
+
+def decrypt_value(ciphertext_b64):
+    response = kms.decrypt(
+        CiphertextBlob=base64.b64decode(ciphertext_b64),
+        EncryptionContext={
+            'App': 'MyLambda',
+            'Env': os.environ['ENVIRONMENT']
+        }
+    )
+    return response['Plaintext'].decode()
+```
+
+---
+
+Section 1 complete Pradeep! Shall I move straight to **Section 2 — Exam Deep Dive**? 🎯
+
+----------------------------------------------------------------------------------------------------------------
+
+
+# 📅 Day 34 — Section 2: Exam Deep Dive
+
+---
+
+## 2.1 Scenario-Based Q&A (20 Questions)
+
+---
+
+### Question 1
+**A company stores sensitive financial data in S3. They want full control over encryption keys including the ability to audit every decryption operation, rotate keys annually, and immediately revoke access if needed. Which encryption option should they use?**
+
+A) SSE-S3 (AWS owned keys)
+B) SSE-KMS with AWS managed key (aws/s3)
+C) SSE-KMS with Customer Managed Key (CMK)
+D) Client-side encryption with locally stored keys
+
+**Answer: C**
+
+**Explanation:**
+- CMK gives full control — key policy, rotation, disable, delete
+- Every decrypt operation logged in CloudTrail
+- Can disable key immediately to revoke all access
+- SSE-S3 uses AWS owned keys — no audit trail, no control
+- AWS managed key (aws/s3) — CloudTrail logs but no control over policy or rotation schedule
+- Client-side with local keys — no CloudTrail, key management burden on you
+
+---
+
+### Question 2
+**A security engineer discovers that a KMS key policy does not contain the default root delegation statement. An IAM administrator tries to add themselves to the key policy but gets access denied. What is the correct way to regain access?**
+
+A) Contact AWS Support to reset the key policy
+B) Use the IAM root user of the account to update the key policy
+C) Delete the key and create a new one
+D) Use AWS Config to revert the key policy
+
+**Answer: B**
+
+**Explanation:**
+- When root delegation statement is missing, **only the account root user** can update the key policy
+- Root user bypasses IAM policies and can always access key policies
+- AWS Support cannot modify your key policies — this is by design
+- Deleting the key destroys all encrypted data — never the right answer
+- AWS Config can detect but not fix key policy issues
+- This is why the root delegation statement is critical — always include it
+
+---
+
+### Question 3
+**An application needs to encrypt a 500MB file using KMS. The developer calls kms:Encrypt directly with the file content but gets an error. What is the correct approach?**
+
+A) Split the file into 4KB chunks and call kms:Encrypt on each
+B) Use envelope encryption — call GenerateDataKey, encrypt locally with the data key
+C) Increase the KMS payload limit via service quotas
+D) Use SSE-S3 instead of KMS for large files
+
+**Answer: B**
+
+**Explanation:**
+- KMS Encrypt API has a **4KB size limit** — 500MB far exceeds it
+- Envelope encryption is the correct pattern for large data
+- GenerateDataKey returns plaintext + encrypted data key
+- Use plaintext data key locally (AES-256) to encrypt 500MB
+- Store encrypted data key alongside encrypted file
+- Cannot increase the 4KB limit — it's a hard architectural limit
+- SSE-S3 doesn't use CMKs — doesn't meet the requirement
+
+---
+
+### Question 4
+**A CMK has automatic key rotation enabled. After 365 days the key rotates. Which statements are TRUE? (Select TWO)**
+
+A) The key ID and ARN change after rotation
+B) The key ID and ARN remain the same after rotation
+C) Data encrypted with the old key material cannot be decrypted after rotation
+D) Old key material is retained to decrypt previously encrypted data
+E) Applications must be updated with the new key ARN
+
+**Answer: B and D**
+
+**Explanation:**
+- Key ID, ARN, and aliases **never change** during automatic rotation
+- Old key material is **retained** so historical data can still be decrypted
+- KMS automatically uses the correct backing key for each decryption
+- Applications need zero changes — completely transparent rotation
+- This is the primary advantage of automatic vs manual rotation
+
+---
+
+### Question 5
+**Account A owns a KMS CMK. Account B needs to use this key to encrypt data in their S3 bucket. Account A has added Account B's root to the key policy. A developer in Account B still gets access denied when trying to use the key. What is missing?**
+
+A) Account A needs to add the specific IAM role to the key policy
+B) Account B needs an IAM policy allowing the role to use the Account A key
+C) The key needs to be shared via AWS RAM
+D) Account B needs to create a copy of the key in their account
+
+**Answer: B**
+
+**Explanation:**
+- Cross-account KMS access requires **TWO steps**
+- Step 1: Key policy in Account A allows Account B (done)
+- Step 2: IAM policy in Account B allows the role to use the key (missing)
+- Both are required — key policy alone is not sufficient
+- KMS keys cannot be shared via RAM — they use key policies
+- Copying the key defeats the purpose of centralized key management
+
+---
+
+### Question 6
+**A company needs to encrypt data with KMS but wants to ensure that decryption can ONLY occur when the request comes from their production environment. Which KMS feature enables this?**
+
+A) Key policy conditions using aws:SourceVpc
+B) Encryption context with environment-specific key-value pairs
+C) KMS grants restricted to production IAM roles
+D) VPC endpoint policy for KMS
+
+**Answer: B**
+
+**Explanation:**
+- Encryption context binds the encrypted data to specific context
+- Encrypt with context: `{"Environment": "Production"}`
+- Decrypt MUST provide the same context — otherwise fails
+- Key policy can enforce context via `kms:EncryptionContext:Environment` condition
+- Even if attacker gets the ciphertext, they need correct context to decrypt
+- Grants and VPC policies control WHO not WHAT CONTEXT
+
+---
+
+### Question 7
+**A developer accidentally schedules a KMS CMK for deletion with a 7-day waiting period. Several critical production applications use this key for data encryption. What should they do immediately?**
+
+A) Restore the key from the most recent backup
+B) Call kms:CancelKeyDeletion before the 7-day window expires
+C) Contact AWS Support to restore the key after deletion
+D) Re-encrypt all data with a new key before the deadline
+
+**Answer: B**
+
+**Explanation:**
+- `kms:CancelKeyDeletion` immediately cancels scheduled deletion
+- Key returns to **Disabled** state after cancellation — must then be re-enabled
+- There are NO backups of KMS keys — once deleted, permanently gone
+- AWS Support cannot restore deleted KMS keys
+- Re-encryption is a valid parallel activity but cancellation is the immediate fix
+- This is why the minimum 7-day (maximum 30-day) window exists — to catch mistakes
+
+---
+
+### Question 8
+**Which KMS key type does NOT support automatic key rotation?**
+
+A) Symmetric CMK with AWS_KMS origin
+B) Symmetric CMK with EXTERNAL origin (imported key material)
+C) AWS managed key (aws/s3)
+D) Symmetric CMK created via CloudFormation
+
+**Answer: B**
+
+**Explanation:**
+- Keys with EXTERNAL origin (imported material) do NOT support automatic rotation
+- You imported the key material — AWS cannot rotate what it didn't generate
+- Manual rotation required: create new key, import new material, update alias
+- Symmetric CMKs with AWS_KMS origin support auto-rotation
+- AWS managed keys auto-rotate every 3 years
+- CloudFormation-created CMKs support auto-rotation if symmetric
+
+---
+
+### Question 9
+**An AWS Lambda function needs to decrypt a secret stored in Secrets Manager. The Lambda execution role has SecretsManagerReadWrite IAM policy but decryption fails. The secret is encrypted with a CMK. What is missing?**
+
+A) Lambda needs the AWSLambdaKMSExecutionRole policy
+B) The CMK key policy must allow the Lambda execution role to use kms:Decrypt
+C) Secrets Manager needs permission to access Lambda
+D) The Lambda function needs to be in the same VPC as KMS
+
+**Answer: B**
+
+**Explanation:**
+- Secrets Manager decrypts the secret on behalf of the caller
+- The caller's identity (Lambda execution role) must be allowed to use the CMK
+- Key policy must include the Lambda execution role for `kms:Decrypt`
+- SecretsManagerReadWrite gives Secrets Manager API access but not KMS access
+- KMS is not VPC-bound — accessible via public endpoint or VPC endpoint
+- There is no AWSLambdaKMSExecutionRole policy — this is a distractor
+
+---
+
+### Question 10
+**A company uses a CMK to encrypt EBS volumes. A security engineer wants to ensure that only EC2 instances in the production account can decrypt these volumes, even if someone has the encrypted data key. Which is the MOST effective control?**
+
+A) Set a restrictive IAM policy on all users
+B) Use encryption context tied to the instance ID in the key policy condition
+C) Restrict key policy to only allow EC2 service principal with condition on account
+D) Enable key rotation
+
+**Answer: C**
+
+**Explanation:**
+- Restricting key policy to EC2 service principal with account condition ensures only EC2 in that account can use the key
+- Encryption context adds authentication binding
+- IAM policies alone are insufficient — key policy is the primary control
+- Key rotation doesn't control who can decrypt
+- Best approach: key policy restricts to specific principals + encryption context for additional binding
+
+---
+
+### Question 11
+**What is the minimum and maximum waiting period when scheduling a KMS key for deletion?**
+
+A) Minimum 1 day, Maximum 7 days
+B) Minimum 7 days, Maximum 30 days
+C) Minimum 7 days, Maximum 365 days
+D) Minimum 24 hours, Maximum 90 days
+
+**Answer: B**
+
+**Explanation:**
+- Minimum: **7 days** — cannot be reduced below this
+- Maximum: **30 days** — recommended for production keys
+- AWS recommends 30 days to give time to discover any data still using the key
+- During waiting period: key is in Pending Deletion state
+- No cryptographic operations possible during waiting period
+- Can be cancelled any time before the deletion date
+
+---
+
+### Question 12
+**A company needs FIPS 140-2 Level 3 compliance for their cryptographic key storage. AWS KMS achieves FIPS 140-2 Level 2. Which AWS service should they use instead?**
+
+A) AWS Secrets Manager with CMK encryption
+B) AWS CloudHSM
+C) AWS Certificate Manager
+D) AWS KMS with imported key material
+
+**Answer: B**
+
+**Explanation:**
+- AWS CloudHSM provides **FIPS 140-2 Level 3** validated HSMs
+- AWS KMS is **FIPS 140-2 Level 2**
+- CloudHSM gives dedicated HSM hardware — single tenant
+- Secrets Manager and ACM use KMS underneath — still Level 2
+- Importing key material into KMS doesn't change the HSM compliance level
+- Level 3 requirement = CloudHSM always
+
+---
+
+### Question 13
+**A KMS grant is created for an IAM role to perform Decrypt operations. The grant has an EncryptionContextSubset constraint requiring {"App": "PaymentService"}. The role tries to decrypt data that was encrypted with context {"App": "PaymentService", "Env": "Prod"}. What happens?**
+
+A) Decryption fails — context must match exactly
+B) Decryption succeeds — EncryptionContextSubset only requires the subset to be present
+C) Decryption fails — grants cannot have context constraints
+D) Decryption succeeds only if Env=Prod is added to the grant
+
+**Answer: B**
+
+**Explanation:**
+- `EncryptionContextSubset` requires the specified pairs to be **present** in the context
+- The actual encryption context `{"App": "PaymentService", "Env": "Prod"}` contains `{"App": "PaymentService"}`
+- Subset check passes → decryption succeeds
+- `EncryptionContextEquals` requires EXACT match (would fail here)
+- This is a subtle but frequently tested distinction between Equals and Subset
+
+---
+
+### Question 14
+**An application encrypts data using GenerateDataKey. The plaintext data key is used to encrypt the data locally. The encrypted data key is stored in DynamoDB alongside the encrypted data. Later, the KMS CMK is disabled. What happens when the application tries to decrypt the data?**
+
+A) Decryption succeeds because the data key is cached
+B) Decryption fails — KMS cannot decrypt the encrypted data key when CMK is disabled
+C) Decryption succeeds because DynamoDB stores the plaintext key
+D) Decryption automatically uses a backup key
+
+**Answer: B**
+
+**Explanation:**
+- To decrypt: app retrieves encrypted data key → calls KMS Decrypt to get plaintext key
+- KMS Decrypt requires the CMK to be in **Enabled** state
+- Disabled CMK = KMS refuses all cryptographic operations
+- Even though data itself wasn't encrypted by KMS, the data key WAS
+- DynamoDB stores the encrypted data key — NOT the plaintext key (that was discarded)
+- No backup key exists unless explicitly configured
+- Re-enable the CMK to restore decryption ability
+
+---
+
+### Question 15
+**A company wants to use the same KMS CMK across multiple AWS accounts for encrypting S3 objects. Account A owns the key. Which combination is required for Account B to use SSE-KMS with Account A's key on their S3 bucket?**
+
+A) Key policy in Account A + S3 bucket policy in Account B
+B) Key policy in Account A + IAM policy in Account B
+C) Only key policy in Account A
+D) AWS RAM share of the KMS key
+
+**Answer: B**
+
+**Explanation:**
+- Cross-account KMS = key policy (Account A) + IAM policy (Account B)
+- S3 bucket policy is not part of KMS access control
+- Key policy alone is insufficient — IAM policy in Account B is required
+- KMS keys cannot be shared via AWS RAM
+- Account B IAM policy must reference the full ARN of Account A's key
+
+---
+
+### Question 16
+**A security team wants to detect any attempt to disable key rotation on a production CMK. Which combination of services achieves real-time alerting?**
+
+A) AWS Config + SNS
+B) CloudTrail + EventBridge + SNS
+C) CloudWatch Metrics + Alarms
+D) AWS Security Hub only
+
+**Answer: B**
+
+**Explanation:**
+- `kms:DisableKeyRotation` is a CloudTrail API event
+- EventBridge rule matches the CloudTrail event in real-time
+- SNS topic sends immediate alert to security team
+- AWS Config detects drift but is not real-time
+- CloudWatch Metrics don't capture KMS API calls directly
+- Security Hub aggregates findings but is not the alerting mechanism itself
+
+---
+
+### Question 17
+**Which of the following operations can be performed with an ASYMMETRIC KMS key that CANNOT be done with a SYMMETRIC key?**
+
+A) GenerateDataKey
+B) Encrypt large files via envelope encryption
+C) Sign a document and verify the signature
+D) Cross-account encryption
+
+**Answer: C**
+
+**Explanation:**
+- Asymmetric keys support **Sign** and **Verify** operations — symmetric keys do not
+- GenerateDataKey is only for symmetric keys
+- Envelope encryption uses symmetric data keys (generated by CMK)
+- Cross-account works for both symmetric and asymmetric
+- Asymmetric keys are used for digital signatures, certificate operations, and asymmetric encryption
+
+---
+
+### Question 18
+**A company wants to import their own key material into KMS for compliance reasons. They generate the key material on-premises. Which statement about imported key material is TRUE?**
+
+A) AWS can help recover imported key material if lost
+B) Automatic key rotation is supported for imported keys
+C) If the imported key material is deleted, data encrypted with it is permanently unrecoverable
+D) Imported keys cost the same as KMS-generated keys
+
+**Answer: C**
+
+**Explanation:**
+- Imported key material — **you own it, you're responsible for it**
+- AWS does NOT store a copy of your imported key material
+- If deleted from KMS and you don't have a copy → data permanently unrecoverable
+- Auto-rotation NOT supported (AWS can't rotate what it didn't generate)
+- Imported keys cost the same as KMS-generated keys ($1/month)
+- Always maintain a secure backup of imported key material on-premises
+
+---
+
+### Question 19
+**An EBS volume encrypted with a CMK is snaphotted and shared with another AWS account. The target account tries to create a volume from the snapshot but gets an error. What is the most likely cause?**
+
+A) EBS snapshots cannot be shared across accounts
+B) The CMK used to encrypt the snapshot is not accessible to the target account
+C) The target account needs to be in the same region
+D) Encrypted snapshots cannot be copied across accounts
+
+**Answer: B**
+
+**Explanation:**
+- Encrypted EBS snapshots CAN be shared across accounts
+- But the target account must have access to the **CMK** used for encryption
+- Key policy in source account must allow target account to use the key
+- Target account IAM policy must allow KMS operations
+- If using AWS managed key (aws/ebs), it CANNOT be shared — only CMKs can
+- Region: snapshot must be copied to target region first, but that's separate from this error
+
+---
+
+### Question 20
+**A company's security policy requires that all KMS API calls from EC2 instances must stay within the AWS network and never traverse the public internet. Which service achieves this?**
+
+A) NAT Gateway with KMS whitelist
+B) AWS PrivateLink VPC Endpoint for KMS
+C) Security Group rules blocking outbound internet
+D) KMS key policy restricting to VPC CIDR
+
+**Answer: B**
+
+**Explanation:**
+- VPC Endpoint for KMS (AWS PrivateLink) routes all KMS API calls through the AWS private network
+- Traffic never leaves AWS backbone — never touches public internet
+- NAT Gateway still routes traffic over the internet to reach KMS
+- Security Groups control traffic but don't create private routing
+- Key policy can restrict to VPC endpoint but the endpoint itself is what keeps traffic private
+- VPC Endpoint policy can additionally restrict which keys/principals can be used
+
+---
+
+## 2.2 Common Exam Traps & Distractors
+
+### Trap 1: AWS Managed Keys Can Be Used Cross-Account
+> ❌ **Wrong:** "Use aws/s3 key to encrypt data shared with another account"
+> ✅ **Right:** AWS managed keys CANNOT be used cross-account — only CMKs
+
+### Trap 2: Key Policy Alone is Sufficient for Cross-Account
+> ❌ **Wrong:** "Add Account B to key policy — Account B can now use the key"
+> ✅ **Right:** Key policy (Account A) + IAM policy (Account B) — BOTH required
+
+### Trap 3: Automatic Rotation Changes Key ID
+> ❌ **Wrong:** "After rotation, update all applications with the new key ARN"
+> ✅ **Right:** Key ID, ARN, aliases never change — zero application updates needed
+
+### Trap 4: KMS Can Encrypt Files Larger Than 4KB Directly
+> ❌ **Wrong:** "Call kms:Encrypt on a 100MB file"
+> ✅ **Right:** 4KB hard limit — use envelope encryption for larger data
+
+### Trap 5: Deleted KMS Keys Can Be Recovered
+> ❌ **Wrong:** "Contact AWS Support to recover the deleted key"
+> ✅ **Right:** Deleted KMS keys are permanently gone — unrecoverable by anyone
+
+### Trap 6: Disabling a Key Destroys Encrypted Data
+> ❌ **Wrong:** "Disabled key = data is lost"
+> ✅ **Right:** Disabling is reversible — data is safe, just temporarily inaccessible
+
+### Trap 7: Imported Key Material Supports Auto-Rotation
+> ❌ **Wrong:** "Enable auto-rotation on key with EXTERNAL origin"
+> ✅ **Right:** Auto-rotation NOT supported for imported keys — manual only
+
+### Trap 8: EncryptionContextSubset Requires Exact Match
+> ❌ **Wrong:** "EncryptionContextSubset fails if extra context pairs are present"
+> ✅ **Right:** Subset only requires specified pairs to be PRESENT — extra pairs OK
+
+### Trap 9: AWS KMS is FIPS 140-2 Level 3
+> ❌ **Wrong:** "KMS meets FIPS 140-2 Level 3 requirements"
+> ✅ **Right:** KMS is Level 2 — CloudHSM is Level 3
+
+### Trap 10: Root User Cannot Access Keys Without Key Policy
+> ❌ **Wrong:** "Root user can always use any KMS key"
+> ✅ **Right:** Root user can only UPDATE key policy when locked out — needs key policy like everyone else for cryptographic operations. Root delegation statement enables IAM to work.
+
+---
+
+## 2.3 Key Facts Cheat Sheet
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│               AWS KMS — EXAM CHEAT SHEET                       │
+├─────────────────────────────────┬──────────────────────────────┤
+│ KMS Encrypt API limit           │ 4KB maximum                  │
+│ CMK auto-rotation frequency     │ Every 365 days (1 year)      │
+│ AWS managed key rotation        │ Every 3 years                │
+│ Key deletion minimum window     │ 7 days                       │
+│ Key deletion maximum window     │ 30 days                      │
+│ KMS FIPS level                  │ 140-2 Level 2                │
+│ CloudHSM FIPS level             │ 140-2 Level 3                │
+│ CMK monthly cost                │ $1.00 per key                │
+│ KMS API call cost               │ $0.03 per 10,000 calls       │
+│ Cross-account requirement       │ Key policy + IAM policy      │
+│ Auto-rotation: EXTERNAL origin  │ ❌ Not supported             │
+│ Auto-rotation: Asymmetric       │ ❌ Not supported             │
+│ Auto-rotation: AWS managed      │ ✅ Every 3 years             │
+│ Key ID after rotation           │ Unchanged                    │
+│ Old key material after rotation │ Retained for decryption      │
+│ Envelope encryption protocol    │ GenerateDataKey → local AES  │
+│ Sign/Verify operations          │ Asymmetric keys only         │
+│ GenerateDataKey                 │ Symmetric keys only          │
+│ Cross-account: AWS managed key  │ ❌ Not supported             │
+│ Cross-account: CMK              │ ✅ Supported                 │
+│ Key policy + no root delegation │ Only root can fix            │
+│ EncryptionContextEquals         │ Exact match required         │
+│ EncryptionContextSubset         │ Specified pairs must exist   │
+│ Pending Deletion crypto ops     │ ❌ Not allowed               │
+│ Disabled key crypto ops         │ ❌ Not allowed               │
+│ KMS VPC endpoint type           │ AWS PrivateLink              │
+│ CloudTrail logging              │ Every KMS API call           │
+└─────────────────────────────────┴──────────────────────────────┘
+```
+
+---
+
+## 2.4 Elimination Strategies
+
+### Strategy 1: Large Data + KMS = Envelope Encryption
+Any scenario with data **larger than 4KB** needing KMS encryption → eliminate direct kms:Encrypt → GenerateDataKey + local encryption
+
+### Strategy 2: Cross-Account = CMK Only
+Cross-account encryption scenario → eliminate AWS managed keys immediately → CMK required
+
+### Strategy 3: FIPS Level 3 = CloudHSM
+**FIPS 140-2 Level 3** requirement → eliminate KMS → CloudHSM only
+
+### Strategy 4: Rotation + Key ID Changes = Manual Rotation
+If question says key ID changes after rotation → describing **manual** rotation (new key created)
+If question says key ID stays same → describing **automatic** rotation
+
+### Strategy 5: Locked Out of Key = Root User
+Key policy missing root delegation, locked out → only **root user** can fix
+
+### Strategy 6: Imported Key + Rotation = Manual Only
+EXTERNAL origin key + rotation requirement → auto-rotation not supported → manual rotation only
+
+### Strategy 7: Real-Time KMS Alerting = CloudTrail + EventBridge
+Detect KMS API events in real-time → CloudTrail (captures event) + EventBridge (triggers alert) + SNS (notifies)
+
+### Strategy 8: Private KMS Traffic = VPC Endpoint
+Keep KMS traffic off public internet → VPC Endpoint (PrivateLink) — not NAT Gateway, not Security Groups
+
+### Strategy 9: Disabled vs Deleted
+**Disabled** = reversible, data safe, key can be re-enabled
+**Deleted** = permanent, data unrecoverable, no reversal
+
+### Strategy 10: Context Equals vs Subset
+**Equals** = every pair must match exactly
+**Subset** = specified pairs must be present (extra pairs allowed)
+
+---
+
+Section 2 complete Pradeep! 20 questions, 10 traps, full cheat sheet and elimination strategies all locked in. ✅
+
+Ready for **Section 3 — Lab 99**? 🧪

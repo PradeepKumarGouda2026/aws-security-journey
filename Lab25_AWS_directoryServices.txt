@@ -1,0 +1,1095 @@
+# 📅 Day 33 — Section 3: Lab 98
+## AWS Directory Services — Full Exploration
+
+---
+
+## 🎯 Lab Objective
+In this lab you will:
+- Explore existing Directory Service configurations
+- Create and inspect a Simple AD (lowest cost, safe for lab)
+- Explore Managed AD configuration options
+- Test EC2 domain join via SSM
+- Configure CloudWatch log forwarding
+- Audit Directory Service via CloudTrail
+- Cleanup all resources
+
+---
+
+## Prerequisites Check
+
+```bash
+#!/bin/bash
+# Lab 98 - Prerequisites Check
+# Day 33 - AWS Security Specialist Study Plan
+
+echo "================================================"
+echo "  Lab 98: AWS Directory Services - Prerequisites"
+echo "================================================"
+
+# Step 1: Verify identity
+echo ""
+echo "[1] Verifying AWS identity..."
+aws sts get-caller-identity --output table
+
+# Step 2: Check region
+echo ""
+echo "[2] Checking region..."
+REGION=$(aws configure get region)
+echo "Current region: $REGION"
+echo "Note: Directory Service is region-specific"
+
+# Step 3: Check VPC availability
+echo ""
+echo "[3] Checking available VPCs..."
+aws ec2 describe-vpcs \
+  --query 'Vpcs[*].{
+    VpcId:VpcId,
+    CidrBlock:CidrBlock,
+    IsDefault:IsDefault,
+    Name:Tags[?Key==`Name`].Value|[0]
+  }' \
+  --output table
+
+# Step 4: Check subnets (need 2 in different AZs for directory)
+echo ""
+echo "[4] Checking subnets across AZs..."
+aws ec2 describe-subnets \
+  --query 'Subnets[*].{
+    SubnetId:SubnetId,
+    AZ:AvailabilityZone,
+    CidrBlock:CidrBlock,
+    VpcId:VpcId
+  }' \
+  --output table
+
+# Step 5: Check existing directories
+echo ""
+echo "[5] Checking existing Directory Service deployments..."
+aws ds describe-directories \
+  --query 'DirectoryDescriptions[*].{
+    DirectoryId:DirectoryId,
+    Name:Name,
+    Type:Type,
+    Size:Size,
+    Stage:Stage
+  }' \
+  --output table 2>/dev/null || echo "No existing directories found"
+
+# Step 6: Capture VPC and subnet info for lab
+DEFAULT_VPC=$(aws ec2 describe-vpcs \
+  --filters "Name=isDefault,Values=true" \
+  --query 'Vpcs[0].VpcId' \
+  --output text)
+
+SUBNET_AZ_A=$(aws ec2 describe-subnets \
+  --filters "Name=vpc-id,Values=$DEFAULT_VPC" \
+  --query 'Subnets[0].SubnetId' \
+  --output text)
+
+SUBNET_AZ_B=$(aws ec2 describe-subnets \
+  --filters "Name=vpc-id,Values=$DEFAULT_VPC" \
+  --query 'Subnets[1].SubnetId' \
+  --output text)
+
+# Save to env file
+cat > /tmp/lab98-env.sh << EOF
+export DEFAULT_VPC="$DEFAULT_VPC"
+export SUBNET_AZ_A="$SUBNET_AZ_A"
+export SUBNET_AZ_B="$SUBNET_AZ_B"
+export REGION="$REGION"
+EOF
+
+echo ""
+echo "------------------------------------------------"
+echo "Captured environment:"
+echo "  DEFAULT_VPC:  $DEFAULT_VPC"
+echo "  SUBNET_AZ_A:  $SUBNET_AZ_A"
+echo "  SUBNET_AZ_B:  $SUBNET_AZ_B"
+echo "  REGION:       $REGION"
+echo "------------------------------------------------"
+
+echo ""
+echo "================================================"
+echo "Prerequisites check complete!"
+echo "================================================"
+```
+
+---
+
+## Part 1 — Explore Directory Service Options & Limits
+
+```bash
+#!/bin/bash
+# Lab 98 - Part 1: Explore Directory Options
+# Day 33 - AWS Security Specialist Study Plan
+
+source /tmp/lab98-env.sh
+
+echo "================================================"
+echo "  Part 1: Directory Service Options & Limits"
+echo "================================================"
+
+# Step 1: List all directory types available
+echo ""
+echo "[1] Available Directory Service types..."
+cat << 'EOF'
+┌─────────────────────────────────────────────────────────────┐
+│              AWS Directory Service Types                     │
+├──────────────────┬──────────────────────────────────────────┤
+│ Type             │ Description                              │
+├──────────────────┼──────────────────────────────────────────┤
+│ MicrosoftAD      │ AWS Managed Microsoft AD (Standard/Ent)  │
+│ ADConnector      │ Proxy to on-premises AD                  │
+│ SimpleAD         │ Samba 4 based (Small/Large)              │
+│ SharedMicrosoftAD│ Shared Managed AD (cross-account)        │
+└──────────────────┴──────────────────────────────────────────┘
+EOF
+
+# Step 2: Check service limits
+echo ""
+echo "[2] Directory Service limits per region..."
+cat << 'EOF'
+┌──────────────────────────────────────────────────────────────┐
+│           Directory Service Default Limits                    │
+├────────────────────────────────┬─────────────────────────────┤
+│ Resource                       │ Default Limit               │
+├────────────────────────────────┼─────────────────────────────┤
+│ Managed AD directories         │ 10 per region               │
+│ AD Connectors                  │ 10 per region               │
+│ Simple AD directories          │ 10 per region               │
+│ Manual snapshots per directory │ 5                           │
+│ Trusts per Managed AD          │ 25                          │
+│ Managed AD Standard objects    │ 30,000                      │
+│ Managed AD Enterprise objects  │ 500,000                     │
+│ Simple AD Small objects        │ 500                         │
+│ Simple AD Large objects        │ 5,000                       │
+└────────────────────────────────┴─────────────────────────────┘
+EOF
+
+# Step 3: Check IAM permissions needed
+echo ""
+echo "[3] Checking current IAM permissions for Directory Service..."
+aws iam simulate-principal-policy \
+  --policy-source-arn $(aws sts get-caller-identity --query Arn --output text) \
+  --action-names ds:DescribeDirectories ds:CreateDirectory \
+  --query 'EvaluationResults[*].{Action:EvalActionName, Decision:EvalDecision}' \
+  --output table 2>/dev/null || echo "IAM simulation not available with current credentials"
+
+# Step 4: Describe any existing directories in detail
+echo ""
+echo "[4] Describing existing directories in detail..."
+aws ds describe-directories \
+  --output json 2>/dev/null | python3 -m json.tool || \
+  echo "No existing directories to describe"
+
+echo ""
+echo "================================================"
+echo "Part 1 Complete!"
+echo "================================================"
+```
+
+---
+
+## Part 2 — Create Simple AD
+
+```bash
+#!/bin/bash
+# Lab 98 - Part 2: Create Simple AD
+# Day 33 - AWS Security Specialist Study Plan
+# Note: Simple AD is cheapest option for lab (~$0.05/hr)
+# Remember to delete after lab!
+
+source /tmp/lab98-env.sh
+
+echo "================================================"
+echo "  Part 2: Create Simple AD"
+echo "================================================"
+
+# Step 1: Validate subnets are in different AZs
+echo ""
+echo "[1] Validating subnets are in different AZs..."
+AZ_A=$(aws ec2 describe-subnets \
+  --subnet-ids $SUBNET_AZ_A \
+  --query 'Subnets[0].AvailabilityZone' \
+  --output text)
+
+AZ_B=$(aws ec2 describe-subnets \
+  --subnet-ids $SUBNET_AZ_B \
+  --query 'Subnets[0].AvailabilityZone' \
+  --output text)
+
+echo "Subnet A: $SUBNET_AZ_A in $AZ_A"
+echo "Subnet B: $SUBNET_AZ_B in $AZ_B"
+
+if [ "$AZ_A" == "$AZ_B" ]; then
+  echo "❌ Both subnets in same AZ — need subnets in different AZs"
+  echo "   Fetching correct subnets..."
+  SUBNETS=($(aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=$DEFAULT_VPC" \
+    --query 'Subnets[*].SubnetId' \
+    --output text))
+  SUBNET_AZ_A=${SUBNETS[0]}
+  SUBNET_AZ_B=${SUBNETS[1]}
+  echo "   Using: $SUBNET_AZ_A and $SUBNET_AZ_B"
+else
+  echo "✅ Subnets are in different AZs — good to proceed"
+fi
+
+# Step 2: Create Simple AD
+echo ""
+echo "[2] Creating Simple AD (Small)..."
+echo "    Domain: lab98.example.com"
+echo "    Size: Small (up to 500 objects)"
+echo "    Note: Takes 10-15 minutes to create..."
+
+DIRECTORY_ID=$(aws ds create-directory \
+  --name "lab98.example.com" \
+  --short-name "LAB98" \
+  --password "Lab98@Password123!" \
+  --size "Small" \
+  --vpc-settings "VpcId=$DEFAULT_VPC,SubnetIds=$SUBNET_AZ_A,$SUBNET_AZ_B" \
+  --description "Lab 98 Simple AD - Day 33 AWS Security Study" \
+  --query 'DirectoryId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$DIRECTORY_ID" ] && [ "$DIRECTORY_ID" != "None" ]; then
+  echo "✅ Simple AD creation initiated"
+  echo "   Directory ID: $DIRECTORY_ID"
+  echo "export DIRECTORY_ID=\"$DIRECTORY_ID\"" >> /tmp/lab98-env.sh
+else
+  echo "⚠️  Could not create directory"
+  echo "   Possible reasons:"
+  echo "   ├── Insufficient IAM permissions"
+  echo "   ├── Subnets not in different AZs"
+  echo "   └── Service limit reached"
+fi
+
+# Step 3: Wait for directory to become active
+echo ""
+echo "[3] Waiting for directory to become Active..."
+echo "    This typically takes 10-15 minutes..."
+echo "    Polling every 60 seconds..."
+
+MAX_WAIT=20
+COUNTER=0
+while [ $COUNTER -lt $MAX_WAIT ]; do
+  STATUS=$(aws ds describe-directories \
+    --directory-ids $DIRECTORY_ID \
+    --query 'DirectoryDescriptions[0].Stage' \
+    --output text 2>/dev/null)
+
+  echo "    Status: $STATUS (attempt $((COUNTER+1))/$MAX_WAIT)"
+
+  if [ "$STATUS" == "Active" ]; then
+    echo "✅ Directory is Active!"
+    break
+  elif [ "$STATUS" == "Failed" ]; then
+    echo "❌ Directory creation failed"
+    break
+  fi
+
+  sleep 60
+  COUNTER=$((COUNTER+1))
+done
+
+# Step 4: Describe the created directory
+echo ""
+echo "[4] Describing created Simple AD..."
+aws ds describe-directories \
+  --directory-ids $DIRECTORY_ID \
+  --query 'DirectoryDescriptions[0].{
+    DirectoryId:DirectoryId,
+    Name:Name,
+    ShortName:ShortName,
+    Size:Size,
+    Type:Type,
+    Stage:Stage,
+    DnsIp1:DnsIpAddrs[0],
+    DnsIp2:DnsIpAddrs[1],
+    VpcId:VpcSettings.VpcId
+  }' \
+  --output table 2>/dev/null
+
+echo ""
+echo "================================================"
+echo "Part 2 Complete!"
+echo "Key outputs:"
+echo "  Directory ID: $DIRECTORY_ID"
+echo "  Domain:       lab98.example.com"
+echo "  DNS IPs:      Will be shown above"
+echo "================================================"
+```
+
+---
+
+## Part 3 — Explore Directory Details & Security Config
+
+```bash
+#!/bin/bash
+# Lab 98 - Part 3: Directory Details & Security
+# Day 33 - AWS Security Specialist Study Plan
+
+source /tmp/lab98-env.sh
+
+echo "================================================"
+echo "  Part 3: Directory Details & Security Config"
+echo "================================================"
+
+# Step 1: Get full directory details
+echo ""
+echo "[1] Full directory details..."
+aws ds describe-directories \
+  --directory-ids $DIRECTORY_ID \
+  --output json | python3 -m json.tool 2>/dev/null
+
+# Step 2: Check directory snapshots
+echo ""
+echo "[2] Checking directory snapshots..."
+aws ds describe-snapshots \
+  --directory-id $DIRECTORY_ID \
+  --query 'Snapshots[*].{
+    SnapshotId:SnapshotId,
+    Name:Name,
+    Type:Type,
+    Status:Status,
+    StartTime:StartTime
+  }' \
+  --output table 2>/dev/null || echo "No snapshots yet (automatic snapshots created daily)"
+
+# Step 3: Create a manual snapshot
+echo ""
+echo "[3] Creating manual snapshot..."
+SNAPSHOT_ID=$(aws ds create-snapshot \
+  --directory-id $DIRECTORY_ID \
+  --name "lab98-manual-snapshot-$(date +%Y%m%d)" \
+  --query 'SnapshotId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$SNAPSHOT_ID" ] && [ "$SNAPSHOT_ID" != "None" ]; then
+  echo "✅ Snapshot initiated: $SNAPSHOT_ID"
+  echo "export SNAPSHOT_ID=\"$SNAPSHOT_ID\"" >> /tmp/lab98-env.sh
+else
+  echo "⚠️  Could not create snapshot"
+fi
+
+# Step 4: Check event topics (SNS notifications)
+echo ""
+echo "[4] Checking directory event topics (SNS)..."
+aws ds describe-event-topics \
+  --directory-id $DIRECTORY_ID \
+  --query 'EventTopics[*].{
+    TopicName:TopicName,
+    TopicArn:TopicArn,
+    Status:Status
+  }' \
+  --output table 2>/dev/null || echo "No event topics configured"
+
+# Step 5: Register SNS topic for directory events
+echo ""
+echo "[5] Creating SNS topic for directory event notifications..."
+TOPIC_ARN=$(aws sns create-topic \
+  --name "lab98-directory-events" \
+  --query 'TopicArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$TOPIC_ARN" ]; then
+  echo "✅ SNS Topic created: $TOPIC_ARN"
+
+  aws ds add-tags-to-resource \
+    --resource-id $DIRECTORY_ID \
+    --tags "Key=Lab,Value=Lab98" \
+           "Key=Day,Value=Day33" 2>/dev/null && \
+    echo "✅ Tags added to directory"
+
+  aws ds register-event-topic \
+    --directory-id $DIRECTORY_ID \
+    --topic-name "lab98-directory-events" 2>/dev/null && \
+    echo "✅ SNS topic registered for directory events" || \
+    echo "⚠️  Could not register event topic"
+fi
+
+# Step 6: Enable CloudWatch log forwarding
+echo ""
+echo "[6] Enabling CloudWatch log forwarding..."
+
+# Create log group first
+aws logs create-log-group \
+  --log-group-name "/aws/directoryservice/$DIRECTORY_ID" 2>/dev/null && \
+  echo "✅ CloudWatch log group created"
+
+# Create resource policy to allow Directory Service to write logs
+cat > /tmp/ds-log-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ds.amazonaws.com"
+      },
+      "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:$REGION:$(aws sts get-caller-identity --query Account --output text):log-group:/aws/directoryservice/$DIRECTORY_ID:*"
+    }
+  ]
+}
+EOF
+
+aws logs put-resource-policy \
+  --policy-name "DirectoryService-$DIRECTORY_ID" \
+  --policy-document file:///tmp/ds-log-policy.json 2>/dev/null && \
+  echo "✅ CloudWatch resource policy created"
+
+# Enable log forwarding
+aws ds enable-log-subscription \
+  --directory-id $DIRECTORY_ID \
+  --log-group-name "/aws/directoryservice/$DIRECTORY_ID" 2>/dev/null && \
+  echo "✅ Log forwarding enabled to CloudWatch" || \
+  echo "⚠️  Log forwarding not supported for Simple AD (supported for Managed AD)"
+
+echo ""
+echo "================================================"
+echo "Part 3 Complete!"
+echo "Directory security configuration explored."
+echo "================================================"
+```
+
+---
+
+## Part 4 — Simulate Managed AD Configuration (Reference)
+
+```bash
+#!/bin/bash
+# Lab 98 - Part 4: Managed AD Reference Configuration
+# Day 33 - AWS Security Specialist Study Plan
+# Note: This part shows what Managed AD creation looks like
+# We use --dry-run style comments to avoid charges
+# Managed AD costs ~$0.16/hr — significant for a lab
+
+source /tmp/lab98-env.sh
+
+echo "================================================"
+echo "  Part 4: Managed AD Reference Configuration"
+echo "  (Reference only — shows actual commands)"
+echo "================================================"
+
+echo ""
+echo "[1] Managed AD creation command (Standard Edition)..."
+cat << 'EOF'
+# Create AWS Managed Microsoft AD - Standard Edition
+aws ds create-microsoft-ad \
+  --name "corp.example.com" \
+  --short-name "CORP" \
+  --password "ManagedAD@Password123!" \
+  --description "Production Managed AD" \
+  --vpc-settings "VpcId=vpc-12345678,SubnetIds=subnet-aaa,subnet-bbb" \
+  --edition "Standard"
+
+# Expected output:
+# {
+#   "DirectoryId": "d-1234567890"
+# }
+EOF
+
+echo ""
+echo "[2] Managed AD creation command (Enterprise Edition)..."
+cat << 'EOF'
+# Create AWS Managed Microsoft AD - Enterprise Edition
+aws ds create-microsoft-ad \
+  --name "corp.example.com" \
+  --short-name "CORP" \
+  --password "ManagedAD@Password123!" \
+  --description "Enterprise Managed AD with multi-region support" \
+  --vpc-settings "VpcId=vpc-12345678,SubnetIds=subnet-aaa,subnet-bbb" \
+  --edition "Enterprise"
+EOF
+
+echo ""
+echo "[3] AD Connector creation command..."
+cat << 'EOF'
+# Create AD Connector pointing to on-premises AD
+aws ds connect-directory \
+  --name "corp.onprem.com" \
+  --short-name "CORP" \
+  --password "ConnectorPassword123!" \
+  --description "AD Connector to on-premises AD" \
+  --size "Small" \
+  --connect-settings '{
+    "VpcId": "vpc-12345678",
+    "SubnetIds": ["subnet-aaa", "subnet-bbb"],
+    "CustomerDnsIps": ["192.168.1.10", "192.168.1.11"],
+    "CustomerUserName": "connector-account"
+  }'
+
+# CustomerDnsIps = IP addresses of on-premises DCs
+# CustomerUserName = AD service account for connector
+EOF
+
+echo ""
+echo "[4] Trust relationship creation (Managed AD only)..."
+cat << 'EOF'
+# Create one-way trust (on-prem trusts AWS)
+aws ds create-trust \
+  --directory-id d-1234567890 \
+  --remote-domain-name "onprem.corp.com" \
+  --trust-password "TrustPassword123!" \
+  --trust-direction "One-Way: Outgoing" \
+  --trust-type "Forest"
+
+# Trust directions:
+# "One-Way: Outgoing" → AWS trusts on-prem (on-prem users access AWS)
+# "One-Way: Incoming" → On-prem trusts AWS (AWS users access on-prem)
+# "Two-Way"           → Both trust each other
+EOF
+
+echo ""
+echo "[5] Multi-region replication (Enterprise only)..."
+cat << 'EOF'
+# Add secondary region replica
+aws ds add-region \
+  --directory-id d-1234567890 \
+  --region-name us-east-1 \
+  --vpc-settings "VpcId=vpc-us-east-1,SubnetIds=subnet-us-1a,subnet-us-1b"
+
+# Remove secondary region
+aws ds remove-region \
+  --directory-id d-1234567890
+EOF
+
+echo ""
+echo "[6] RADIUS MFA configuration (Managed AD)..."
+cat << 'EOF'
+# Configure RADIUS MFA for Managed AD
+aws ds enable-radius \
+  --directory-id d-1234567890 \
+  --radius-settings '{
+    "RadiusServers": ["192.168.1.20"],
+    "RadiusPort": 1812,
+    "RadiusSecret": "RadiusSharedSecret123!",
+    "RadiusRetries": 3,
+    "RadiusTimeout": 30,
+    "AuthenticationProtocol": "MS-CHAPv2",
+    "DisplayLabel": "MFA Code",
+    "UseSameUsername": false
+  }'
+
+# Verify RADIUS status
+aws ds describe-directories \
+  --directory-ids d-1234567890 \
+  --query 'DirectoryDescriptions[0].RadiusSettings'
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 4 Complete!"
+echo "Reference commands documented for all directory"
+echo "types — use these in production/exam scenarios."
+echo "================================================"
+```
+
+---
+
+## Part 5 — EC2 Domain Join via SSM
+
+```bash
+#!/bin/bash
+# Lab 98 - Part 5: EC2 Domain Join Reference
+# Day 33 - AWS Security Specialist Study Plan
+
+source /tmp/lab98-env.sh
+
+echo "================================================"
+echo "  Part 5: EC2 Domain Join via SSM"
+echo "================================================"
+
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Step 1: Create IAM role for domain-joined EC2
+echo ""
+echo "[1] Creating IAM role for domain-joined EC2..."
+
+# Trust policy for EC2
+cat > /tmp/ec2-trust-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+# Create role
+aws iam create-role \
+  --role-name "Lab98-EC2-DomainJoin-Role" \
+  --assume-role-policy-document file:///tmp/ec2-trust-policy.json \
+  --description "Role for EC2 instances to join directory" 2>/dev/null && \
+  echo "✅ IAM role created" || echo "⚠️  Role may already exist"
+
+# Attach required policies
+aws iam attach-role-policy \
+  --role-name "Lab98-EC2-DomainJoin-Role" \
+  --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null && \
+  echo "✅ SSM policy attached"
+
+aws iam attach-role-policy \
+  --role-name "Lab98-EC2-DomainJoin-Role" \
+  --policy-arn "arn:aws:iam::aws:policy/AmazonSSMDirectoryServiceAccess" 2>/dev/null && \
+  echo "✅ Directory Service access policy attached"
+
+# Create instance profile
+aws iam create-instance-profile \
+  --instance-profile-name "Lab98-EC2-DomainJoin-Profile" 2>/dev/null && \
+  echo "✅ Instance profile created"
+
+aws iam add-role-to-instance-profile \
+  --instance-profile-name "Lab98-EC2-DomainJoin-Profile" \
+  --role-name "Lab98-EC2-DomainJoin-Role" 2>/dev/null && \
+  echo "✅ Role added to instance profile"
+
+# Step 2: Show SSM domain join document usage
+echo ""
+echo "[2] SSM Document for domain join..."
+cat << 'EOF'
+# Domain join using SSM document
+# This runs automatically when EC2 launches with the right profile
+
+aws ssm create-association \
+  --name "AWS-JoinDirectoryServiceDomain" \
+  --targets "Key=instanceids,Values=i-1234567890abcdef0" \
+  --parameters '{
+    "directoryId": ["'"$DIRECTORY_ID"'"],
+    "directoryName": ["lab98.example.com"],
+    "dnsIpAddresses": ["<DNS_IP_1>", "<DNS_IP_2>"]
+  }' \
+  --association-name "Lab98-DomainJoin"
+EOF
+
+# Step 3: Show launch template with seamless domain join
+echo ""
+echo "[3] Launch template with automatic domain join..."
+cat << EOF
+# Create launch template that auto-joins domain at launch
+aws ec2 create-launch-template \\
+  --launch-template-name "Lab98-DomainJoined-Template" \\
+  --launch-template-data '{
+    "ImageId": "ami-0abcdef1234567890",
+    "InstanceType": "t3.micro",
+    "IamInstanceProfile": {
+      "Name": "Lab98-EC2-DomainJoin-Profile"
+    },
+    "TagSpecifications": [
+      {
+        "ResourceType": "instance",
+        "Tags": [
+          {"Key": "Name", "Value": "Lab98-DomainJoined"},
+          {"Key": "aws:ds:id", "Value": "$DIRECTORY_ID"}
+        ]
+      }
+    ]
+  }'
+EOF
+
+# Step 4: Show Linux domain join commands
+echo ""
+echo "[4] Linux EC2 domain join commands..."
+cat << 'EOF'
+#!/bin/bash
+# Run on Linux EC2 to join Simple AD / Managed AD
+
+# Install required packages (Amazon Linux 2)
+sudo yum install -y \
+  sssd \
+  realmd \
+  krb5-workstation \
+  samba-common-tools \
+  oddjob \
+  oddjob-mkhomedir \
+  adcli
+
+# Discover the domain
+sudo realm discover lab98.example.com
+
+# Join the domain (prompts for admin password)
+sudo realm join \
+  --user=Administrator \
+  lab98.example.com
+
+# Verify domain join
+realm list
+
+# Allow all domain users to login (or restrict to specific groups)
+sudo realm permit --all
+# OR restrict to specific group:
+# sudo realm permit -g "AWS Admins"@lab98.example.com
+
+# Enable home directory creation on login
+sudo authconfig --enablemkhomedir --update
+
+# Verify SSSD is running
+sudo systemctl status sssd
+
+# Test AD user lookup
+id "Administrator@lab98.example.com"
+EOF
+
+# Step 5: Verify SSM associations
+echo ""
+echo "[5] Checking SSM associations..."
+aws ssm list-associations \
+  --association-filter-list \
+    "key=Name,value=AWS-JoinDirectoryServiceDomain" \
+  --query 'Associations[*].{
+    Name:Name,
+    AssociationId:AssociationId,
+    LastExecutionDate:LastExecutionDate
+  }' \
+  --output table 2>/dev/null || echo "No domain join associations found"
+
+echo ""
+echo "================================================"
+echo "Part 5 Complete!"
+echo "Key takeaways:"
+echo "  1. EC2 needs SSM + Directory Service IAM policies"
+echo "  2. SSM document handles automated domain join"
+echo "  3. Linux uses realm/sssd for domain join"
+echo "  4. Seamless join uses EC2 tags at launch"
+echo "================================================"
+```
+
+---
+
+## Part 6 — CloudTrail Audit for Directory Service
+
+```bash
+#!/bin/bash
+# Lab 98 - Part 6: CloudTrail Audit
+# Day 33 - AWS Security Specialist Study Plan
+
+source /tmp/lab98-env.sh
+
+echo "================================================"
+echo "  Part 6: CloudTrail Audit — Directory Service"
+echo "================================================"
+
+# Step 1: Search for directory creation events
+echo ""
+echo "[1] Searching CloudTrail for directory events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventSource,AttributeValue=ds.amazonaws.com \
+  --max-results 20 \
+  --query 'Events[*].{
+    Time:EventTime,
+    Event:EventName,
+    User:Username,
+    Region:AwsRegion
+  }' \
+  --output table 2>/dev/null || echo "No recent Directory Service events found"
+
+# Step 2: Specific event searches
+echo ""
+echo "[2] Searching for directory creation events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes AttributeKey=EventName,AttributeValue=CreateDirectory \
+  --query 'Events[*].{
+    Time:EventTime,
+    Event:EventName,
+    User:Username
+  }' \
+  --output table 2>/dev/null
+
+# Step 3: Create EventBridge rule for directory monitoring
+echo ""
+echo "[3] Creating EventBridge rule for directory monitoring..."
+aws events put-rule \
+  --name "Lab98-DirectoryService-Monitor" \
+  --event-pattern '{
+    "source": ["aws.ds"],
+    "detail-type": ["AWS API Call via CloudTrail"],
+    "detail": {
+      "eventSource": ["ds.amazonaws.com"],
+      "eventName": [
+        "CreateDirectory",
+        "DeleteDirectory",
+        "CreateTrust",
+        "DeleteTrust",
+        "EnableRadius",
+        "DisableRadius",
+        "CreateSnapshot",
+        "DeleteSnapshot"
+      ]
+    }
+  }' \
+  --state ENABLED \
+  --description "Monitor critical Directory Service changes" \
+  --output table 2>/dev/null && \
+  echo "✅ EventBridge monitoring rule created" || \
+  echo "⚠️  Could not create rule"
+
+# Step 4: Summary of key audit events
+echo ""
+echo "[4] Key Directory Service CloudTrail events to monitor..."
+cat << 'EOF'
+┌────────────────────────────────┬───────────────────────────────────┐
+│ CloudTrail Event               │ Security Significance             │
+├────────────────────────────────┼───────────────────────────────────┤
+│ CreateDirectory                │ New directory deployed            │
+│ DeleteDirectory                │ Directory removed                 │
+│ CreateTrust                    │ Trust relationship established    │
+│ DeleteTrust                    │ Trust relationship removed        │
+│ EnableRadius                   │ MFA enabled on directory          │
+│ DisableRadius                  │ MFA disabled — high risk          │
+│ CreateSnapshot                 │ Manual backup created             │
+│ DeleteSnapshot                 │ Backup deleted                    │
+│ EnableSso                      │ SSO enabled for directory         │
+│ DisableSso                     │ SSO disabled                      │
+│ RegisterEventTopic             │ SNS notification configured       │
+│ EnableLogSubscription          │ CloudWatch logging enabled        │
+│ DisableLogSubscription         │ Logging disabled — investigate    │
+└────────────────────────────────┴───────────────────────────────────┘
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 6 Complete!"
+echo "All critical directory events are now monitored"
+echo "via CloudTrail + EventBridge."
+echo "================================================"
+```
+
+---
+
+## Part 7 — Cleanup
+
+```bash
+#!/bin/bash
+# Lab 98 - Part 7: Cleanup
+# Day 33 - AWS Security Specialist Study Plan
+# IMPORTANT: Delete directory to avoid ongoing charges!
+
+source /tmp/lab98-env.sh
+
+echo "================================================"
+echo "  Part 7: Lab Cleanup"
+echo "  ⚠️  IMPORTANT: Directory costs ~$0.05/hr"
+echo "  Delete promptly after lab!"
+echo "================================================"
+
+# Step 1: Deregister SNS event topic
+echo ""
+echo "[1] Deregistering SNS event topic..."
+aws ds deregister-event-topic \
+  --directory-id $DIRECTORY_ID \
+  --topic-name "lab98-directory-events" 2>/dev/null && \
+  echo "✅ Event topic deregistered" || \
+  echo "⚠️  No event topic to deregister"
+
+# Step 2: Delete SNS topic
+echo ""
+echo "[2] Deleting SNS topic..."
+TOPIC_ARN=$(aws sns list-topics \
+  --query 'Topics[?contains(TopicArn,`lab98-directory-events`)].TopicArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$TOPIC_ARN" ]; then
+  aws sns delete-topic --topic-arn $TOPIC_ARN 2>/dev/null && \
+    echo "✅ SNS topic deleted"
+fi
+
+# Step 3: Disable log subscription
+echo ""
+echo "[3] Disabling CloudWatch log subscription..."
+aws ds disable-log-subscription \
+  --directory-id $DIRECTORY_ID 2>/dev/null && \
+  echo "✅ Log subscription disabled" || \
+  echo "⚠️  No log subscription to disable"
+
+# Step 4: Delete CloudWatch log group
+echo ""
+echo "[4] Deleting CloudWatch log group..."
+aws logs delete-log-group \
+  --log-group-name "/aws/directoryservice/$DIRECTORY_ID" 2>/dev/null && \
+  echo "✅ Log group deleted" || \
+  echo "⚠️  No log group to delete"
+
+# Step 5: Delete snapshot
+echo ""
+echo "[5] Deleting manual snapshot..."
+if [ ! -z "$SNAPSHOT_ID" ]; then
+  aws ds delete-snapshot \
+    --snapshot-id $SNAPSHOT_ID 2>/dev/null && \
+    echo "✅ Snapshot deleted" || \
+    echo "⚠️  Could not delete snapshot"
+fi
+
+# Step 6: Delete the directory
+echo ""
+echo "[6] Deleting Simple AD directory..."
+echo "    ⚠️  This is irreversible!"
+aws ds delete-directory \
+  --directory-id $DIRECTORY_ID 2>/dev/null && \
+  echo "✅ Directory deletion initiated" || \
+  echo "⚠️  Could not delete directory"
+
+echo ""
+echo "    Waiting for deletion to complete..."
+MAX_WAIT=10
+COUNTER=0
+while [ $COUNTER -lt $MAX_WAIT ]; do
+  STATUS=$(aws ds describe-directories \
+    --directory-ids $DIRECTORY_ID \
+    --query 'DirectoryDescriptions[0].Stage' \
+    --output text 2>/dev/null)
+
+  if [ -z "$STATUS" ] || [ "$STATUS" == "Deleted" ] || \
+     [ "$STATUS" == "None" ]; then
+    echo "✅ Directory deleted successfully!"
+    break
+  fi
+
+  echo "    Status: $STATUS (attempt $((COUNTER+1))/$MAX_WAIT)"
+  sleep 30
+  COUNTER=$((COUNTER+1))
+done
+
+# Step 7: Delete IAM resources
+echo ""
+echo "[7] Cleaning up IAM resources..."
+aws iam remove-role-from-instance-profile \
+  --instance-profile-name "Lab98-EC2-DomainJoin-Profile" \
+  --role-name "Lab98-EC2-DomainJoin-Role" 2>/dev/null
+
+aws iam delete-instance-profile \
+  --instance-profile-name "Lab98-EC2-DomainJoin-Profile" 2>/dev/null && \
+  echo "✅ Instance profile deleted"
+
+aws iam detach-role-policy \
+  --role-name "Lab98-EC2-DomainJoin-Role" \
+  --policy-arn "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" 2>/dev/null
+
+aws iam detach-role-policy \
+  --role-name "Lab98-EC2-DomainJoin-Role" \
+  --policy-arn "arn:aws:iam::aws:policy/AmazonSSMDirectoryServiceAccess" 2>/dev/null
+
+aws iam delete-role \
+  --role-name "Lab98-EC2-DomainJoin-Role" 2>/dev/null && \
+  echo "✅ IAM role deleted"
+
+# Step 8: Delete EventBridge rule
+echo ""
+echo "[8] Deleting EventBridge rule..."
+aws events delete-rule \
+  --name "Lab98-DirectoryService-Monitor" \
+  --force 2>/dev/null && \
+  echo "✅ EventBridge rule deleted"
+
+# Step 9: Cleanup temp files
+echo ""
+echo "[9] Cleaning up temp files..."
+rm -f /tmp/lab98-env.sh
+rm -f /tmp/ec2-trust-policy.json
+rm -f /tmp/ds-log-policy.json
+echo "✅ Temp files cleaned"
+
+echo ""
+echo "================================================"
+echo "Lab 98 Cleanup Complete!"
+echo "All resources deleted — no ongoing charges."
+echo "================================================"
+```
+
+---
+
+## ✅ Lab 98 Verification Checklist
+
+```
+Lab 98 — Completion Checklist
+│
+├── Prerequisites
+│     ├── [ ] Verified AWS identity
+│     ├── [ ] Identified VPC and subnets in different AZs
+│     └── [ ] Checked existing directories
+│
+├── Part 1: Options & Limits
+│     ├── [ ] Understood all 4 directory types
+│     └── [ ] Know key limits per directory type
+│
+├── Part 2: Simple AD Creation
+│     ├── [ ] Created Simple AD in 2 AZs
+│     ├── [ ] Captured Directory ID and DNS IPs
+│     └── [ ] Waited for Active status
+│
+├── Part 3: Security Configuration
+│     ├── [ ] Created manual snapshot
+│     ├── [ ] Configured SNS event notifications
+│     └── [ ] Attempted CloudWatch log forwarding
+│
+├── Part 4: Managed AD Reference
+│     ├── [ ] Know Managed AD creation command
+│     ├── [ ] Know AD Connector creation command
+│     ├── [ ] Know trust creation command
+│     └── [ ] Know RADIUS MFA configuration
+│
+├── Part 5: EC2 Domain Join
+│     ├── [ ] Created IAM role with SSM policies
+│     ├── [ ] Know SSM document for domain join
+│     ├── [ ] Know Linux realm/sssd commands
+│     └── [ ] Know seamless join via launch template
+│
+├── Part 6: CloudTrail Audit
+│     ├── [ ] Searched directory events in CloudTrail
+│     ├── [ ] Created EventBridge monitoring rule
+│     └── [ ] Know all critical events to monitor
+│
+└── Part 7: Cleanup
+      └── [ ] All resources deleted
+```
+
+---
+
+## 🔑 Lab 98 Key Takeaways
+
+| Concept | What You Practiced |
+|---|---|
+| Directory types | Compared all 4 types hands-on |
+| Simple AD creation | 2 subnets in different AZs required |
+| Snapshots | Manual + automatic (daily) available |
+| SNS notifications | Directory events → SNS → alerts |
+| Log forwarding | Security events → CloudWatch Logs |
+| EC2 domain join | SSM document = recommended method |
+| Linux domain join | realm + sssd = standard approach |
+| CloudTrail audit | All DS API calls logged |
+| EventBridge | Real-time alerting on critical changes |
+| Cost awareness | Delete directory promptly after lab |
+
+---
+
+# 🎉 Day 33 — Fully Complete!
+
+All three sections done at full depth:
+- ✅ **Section 1** — Full Theory (1.1 to 1.6)
+- ✅ **Section 2** — 20 Exam Q&A + Traps + Cheat Sheet
+- ✅ **Section 3** — Lab 98 (7 parts, full scripts)
+
+---
+
+## 📅 Day 34 Preview
+```
+Day 34: AWS KMS — Key Management Service (3 hours)
+├── KMS key types (CMK, AWS managed, data keys)
+├── Key policies vs IAM policies
+├── Envelope encryption
+├── Key rotation
+├── Cross-account key usage
+├── KMS grants
+└── Lab 99: KMS key creation and encryption operations
+```
+
+Ready when you are Pradeep! 💪
