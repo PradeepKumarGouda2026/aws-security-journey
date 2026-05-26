@@ -507,7 +507,7 @@ echo ""
 source /tmp/lab94-vars.sh
 
 echo "╔═══════════════════════════════════════════════════════════╗"
-echo "║     SCENARIO 3: EXPLICIT DENY & BOUNDARIES              ║"
+echo "║     SCENARIO 3: EXPLICIT DENY & BOUNDARIES                ║"
 echo "╚═══════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -1062,7 +1062,8 @@ You now understand:
 ✅ How to troubleshoot with simulator
 ✅ Real-world policy patterns
 
-NEXT: Day 30 - IAM Roles & Cross-Account Access
+NEXT: Day 30 - IA
+ Roles & Cross-Account Access
 ```
 
 ---

@@ -108,7 +108,8 @@ Root SCP (Deny CloudTrail delete)
                     └── Account A  ← inherits both Root + Production + Finance SCPs
 ```
 
-Even if Finance OU has no SCP attached, Account A is still governed by Root and Production SCPs.
+Even if Finance OU has no SCP attache
+d, Account A is still governed by Root and Production SCPs.
 
 ---
 
