@@ -55,7 +55,7 @@ AWS Directory Service
 ```
 
 ### When to Use Which
-| Scenario | Recommended Option |
+| Scenario ---------------------------------| Recommended Option |
 |-------------------------------------------|---------------------------|
 | Full AD features in AWS, enterprise scale | AWS Managed Microsoft AD |
 | Keep all data on-premises, just need AWS auth | AD Connector |
@@ -536,8 +536,8 @@ aws fsx create-file-system \
 ### Full Directory Service Comparison
 
 | Feature | Managed Microsoft AD | AD Connector | Simple AD | Cloud Directory |
-|---|---|---|---|---|
-| **Type** | Full Microsoft AD | Proxy | Samba 4 | Custom hierarchical |
+|---------|-----------------------|-------------|-----------|-------------|
+| **Type** | Full Microsoft AD ---| Proxy ------| Samba 4-- | Custom hierarchical |
 | **Data stored in AWS** | ✅ Yes | ❌ No | ✅ Yes | ✅ Yes |
 | **On-prem AD required** | Optional | ✅ Required | ❌ No | ❌ No |
 | **AD trusts** | ✅ Yes | ❌ No | ❌ No | ❌ No |
