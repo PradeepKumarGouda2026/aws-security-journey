@@ -1,0 +1,1240 @@
+# 📅 Day 36 — AWS Certificate Manager (ACM) & PKI
+
+---
+
+# SECTION 1 — THEORY BLOCK
+
+---
+
+## 1.1 Service Overview & Purpose
+
+### What is AWS Certificate Manager (ACM)?
+AWS Certificate Manager is a fully managed service that lets you **provision, manage, and deploy SSL/TLS certificates** for use with AWS services and your internal connected resources. It handles the complexity of certificate lifecycle management including **issuance, renewal, and deployment**.
+
+Think of ACM as your **certificate authority and lifecycle manager** — it removes the pain of manually purchasing, installing, tracking expiry dates, and renewing certificates across your infrastructure.
+
+### What is ACM Private Certificate Authority (ACM Private CA)?
+ACM Private CA is a **managed private certificate authority service** that lets you create your own CA hierarchy to issue **private certificates** for internal resources — servers, applications, users, and devices — without needing to run your own CA infrastructure.
+
+Think of it as your **private PKI as a service** — all the power of an enterprise CA hierarchy without managing hardware, software, or HSMs.
+
+### Why Do They Exist? (Problems They Solve)
+```
+Without ACM:
+├── Buy certificates from public CAs ($100-$1000/year each)
+├── Manually generate CSRs (Certificate Signing Requests)
+├── Track expiry dates in spreadsheets
+├── Manually renew before expiry
+├── Manually install on every load balancer/server
+├── Handle private key storage securely
+├── Manage revocation (CRL, OCSP)
+└── Expired certificate = outage (very common!)
+
+Without ACM Private CA:
+├── Run your own CA servers (Windows CA or OpenSSL)
+├── Manage CA hardware/HSMs
+├── Handle CRL distribution manually
+├── Complex PKI hierarchy setup
+└── Significant operational overhead
+```
+
+```
+With ACM:
+├── Free public certificates for AWS services
+├── Automatic renewal (no expiry surprises)
+├── One-click deployment to ALB, CloudFront, API GW
+├── Private key never leaves AWS
+├── Integrated with Route 53 for DNS validation
+└── Centralized certificate inventory
+
+With ACM Private CA:
+├── Managed CA hierarchy (root + subordinate CAs)
+├── Issue certificates for internal resources
+├── Automated certificate renewal via ACM
+├── FIPS 140-2 Level 3 HSM backing
+├── CRL and OCSP managed automatically
+└── Audit trail via CloudTrail
+```
+
+### Exam Weight & Importance
+- Appears in **Domain 3: Infrastructure Security** (22% of exam)
+- Expect **3–5 questions** involving ACM and PKI concepts
+- Commonly tested: validation methods, renewal behavior, Private CA use cases, integration patterns
+
+---
+
+## 1.2 Core Architecture
+
+### ACM Public Certificate Architecture
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    AWS Certificate Manager                    │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │              Certificate Request Flow                 │   │
+│  │                                                       │   │
+│  │  You request cert for domain.com                      │   │
+│  │           │                                           │   │
+│  │           ▼                                           │   │
+│  │  ACM validates domain ownership                       │   │
+│  │  ├── DNS validation (add CNAME to Route 53)          │   │
+│  │  └── Email validation (email to domain contacts)     │   │
+│  │           │                                           │   │
+│  │           ▼                                           │   │
+│  │  Certificate issued by Amazon Trust Services          │   │
+│  │  (ACM is a public CA trusted by browsers)            │   │
+│  │           │                                           │   │
+│  │           ▼                                           │   │
+│  │  Deploy to AWS service (ALB/CF/API GW)               │   │
+│  │           │                                           │   │
+│  │           ▼                                           │   │
+│  │  ACM auto-renews 60 days before expiry               │   │
+│  └──────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### ACM Private CA Architecture
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    ACM Private CA                            │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │              CA Hierarchy                            │    │
+│  │                                                      │    │
+│  │  Root CA (self-signed)                               │    │
+│  │  ├── Only used to sign Subordinate CA certs         │    │
+│  │  └── Keep DISABLED when not in use (security)       │    │
+│  │           │                                          │    │
+│  │           ▼                                          │    │
+│  │  Subordinate CA (Intermediate CA)                    │    │
+│  │  ├── Signs end-entity certificates                  │    │
+│  │  ├── Active daily operations                        │    │
+│  │  └── Multiple subordinates per root                 │    │
+│  │           │                                          │    │
+│  │           ▼                                          │    │
+│  │  End-Entity Certificates                             │    │
+│  │  ├── Server certificates (internal APIs)            │    │
+│  │  ├── Client certificates (mTLS)                     │    │
+│  │  └── Code signing certificates                      │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │         Certificate Revocation                       │    │
+│  │  ├── CRL (Certificate Revocation List)              │    │
+│  │  │     Published to S3 bucket                       │    │
+│  │  └── OCSP (Online Certificate Status Protocol)      │    │
+│  │        Managed endpoint by AWS                      │    │
+│  └─────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Certificate Trust Chain
+```
+Browser/Client trusts:
+Root CA (in OS/browser trust store)
+        │
+        │ signed by
+        ▼
+Subordinate CA (intermediate)
+        │
+        │ signed by
+        ▼
+End-Entity Certificate (your domain)
+        │
+        │ presented by
+        ▼
+Your Server/Load Balancer
+```
+
+---
+
+## 1.3 Deep Dive — Every Sub-Topic
+
+### A. ACM Certificate Types
+
+#### Type 1: ACM Public Certificates
+```
+Characteristics:
+├── FREE — no cost for the certificate itself
+├── Issued by Amazon Trust Services (public CA)
+├── Trusted by all major browsers/OS natively
+├── Valid for 13 months
+├── Automatic renewal (ACM manages it)
+├── Private key generated and stored in ACM
+│     └── You NEVER see the private key
+├── Cannot be exported (private key stays in ACM)
+└── Can only be used with:
+      ├── Elastic Load Balancer (ALB, NLB, CLB)
+      ├── Amazon CloudFront
+      ├── AWS API Gateway
+      ├── AWS Elastic Beanstalk
+      ├── AWS App Runner
+      ├── AWS Amplify
+      └── AWS CloudFormation (for above services)
+```
+
+> ⚠️ **Critical exam point:** ACM public certificates **cannot be used with EC2 directly**. They can ONLY be used with integrated AWS services. For EC2, import a certificate or use ACM Private CA.
+
+#### Type 2: Imported Certificates
+```
+Characteristics:
+├── You provide: certificate + private key + chain
+├── From any CA (DigiCert, Let's Encrypt, etc.)
+├── ACM stores and manages deployment
+├── NO automatic renewal (you manage renewal)
+├── ACM sends expiry notifications (45, 30, 15, 7, 1 days)
+├── Can be used with same services as public certs
+└── Private key stored encrypted in ACM
+```
+
+> ⚠️ **Exam trap:** Imported certificates do NOT auto-renew. ACM only auto-renews certificates it issued. You must manually reimport renewed certificates.
+
+#### Type 3: ACM Private CA Certificates
+```
+Characteristics:
+├── Issued by YOUR private CA (ACM Private CA)
+├── Not trusted by public browsers (private trust chain)
+├── Used for internal resources:
+│     ├── Internal APIs and microservices
+│     ├── mTLS between services
+│     ├── IoT device certificates
+│     └── VPN client certificates
+├── Can be exported (unlike public certs)
+├── Automatic renewal via ACM integration
+├── Private CA costs: $400/month per CA
+└── Certificate costs: $0.75/certificate (first 1000/month)
+```
+
+---
+
+### B. Certificate Validation Methods
+
+#### Method 1: DNS Validation (Recommended)
+```
+Process:
+Step 1: Request certificate for domain.com
+Step 2: ACM generates a unique CNAME record:
+        _abc123.domain.com → _xyz789.acm-validations.aws
+Step 3: Add CNAME to your DNS (Route 53 or external)
+Step 4: ACM checks DNS for CNAME periodically
+Step 5: Once verified → certificate issued
+Step 6: CNAME stays in DNS → enables AUTO-RENEWAL
+
+Key benefits:
+├── Automated with Route 53 (one-click)
+├── Supports automatic renewal
+├── Works for wildcard certificates
+└── No email dependency
+```
+
+> ⚠️ **Critical for auto-renewal:** DNS validation CNAME must remain in DNS permanently. If you remove the CNAME, auto-renewal fails.
+
+#### Method 2: Email Validation
+```
+Process:
+Step 1: Request certificate for domain.com
+Step 2: ACM sends validation email to:
+        ├── admin@domain.com
+        ├── administrator@domain.com
+        ├── hostmaster@domain.com
+        ├── postmaster@domain.com
+        └── webmaster@domain.com
+        Also to domain registrant if different
+Step 3: Someone clicks approval link in email
+Step 4: Certificate issued
+
+Key limitations:
+├── Manual process — someone must click the link
+├── Requires working email for those addresses
+├── Does NOT support automatic renewal
+│     (must manually re-validate each renewal)
+├── Link expires after 72 hours
+└── Cannot automate — not recommended for production
+```
+
+> ⚠️ **Exam point:** Email validation does NOT support automatic renewal. DNS validation is strongly preferred for production.
+
+#### DNS vs Email Validation Comparison
+
+| Feature | DNS Validation | Email Validation |
+|---|---|---|
+| **Auto-renewal** | ✅ Yes (CNAME stays) | ❌ No (manual) |
+| **Automation** | ✅ Fully automatable | ❌ Manual approval |
+| **Route 53 integration** | ✅ One-click | N/A |
+| **Wildcard certs** | ✅ Yes | ✅ Yes |
+| **Requirements** | DNS control | Email access |
+| **Recommended** | ✅ Production | Dev/test only |
+
+---
+
+### C. Certificate Renewal (Exam Critical)
+
+#### Automatic Renewal Rules
+```
+ACM automatically renews when ALL of these are true:
+├── Certificate was issued by ACM (not imported)
+├── Certificate is actively associated with AWS service
+├── DNS validation is used (CNAME still in DNS)
+│     OR email validation re-approved in time
+└── Domain is still resolvable
+
+Renewal timeline:
+├── ACM starts renewal attempt 60 days before expiry
+├── Renewed certificate deployed automatically
+├── No downtime — new cert deployed before old expires
+└── No action required from you
+```
+
+#### Renewal Failure Scenarios
+```
+Auto-renewal FAILS when:
+├── DNS validation CNAME removed from DNS
+├── Certificate not associated with any service
+│     (orphaned certificates don't renew)
+├── Email validation timeout (72 hours)
+├── Domain no longer exists or resolves
+└── ACM cannot reach domain for validation
+
+What happens on failure:
+├── ACM sends expiry notifications:
+│     45, 30, 15, 7, 1 days before expiry
+├── EventBridge event: ACMCertificateApproachingExpiry
+├── Certificate remains valid until expiry date
+└── After expiry → service using cert starts failing
+```
+
+#### Certificate Expiry Monitoring
+```bash
+# EventBridge rule for certificate expiry
+{
+  "source": ["aws.acm"],
+  "detail-type": [
+    "ACM Certificate Approaching Expiry"
+  ],
+  "detail": {
+    "DaysToExpiry": [45, 30, 15, 7, 1]
+  }
+}
+```
+
+---
+
+### D. ACM Private CA — Deep Dive
+
+#### CA Hierarchy Design
+```
+Best practice CA hierarchy:
+
+Root CA
+├── Purpose: Sign subordinate CA certs ONLY
+├── Keep DISABLED (inactive) when not signing
+├── Maximum security — compromise = entire PKI compromised
+├── Validity: 10+ years
+└── Cost: $400/month
+
+Subordinate CA (one per use case or environment)
+├── Production-Server-CA → server certificates
+├── Production-Client-CA → mTLS client certs
+├── IoT-Device-CA       → device certificates
+├── Active daily operations
+└── Cost: $400/month each
+```
+
+#### CA Types in ACM Private CA
+```
+ROOT CA:
+├── Self-signed (signs its own certificate)
+├── Top of your PKI hierarchy
+├── Trust anchor — must be distributed to clients
+└── Create first, then use to sign subordinate CAs
+
+SUBORDINATE CA:
+├── Signed by Root CA (or another subordinate)
+├── Issues end-entity certificates
+├── Can be signed by:
+│     ├── ACM Private CA Root (within AWS)
+│     └── External CA (your on-premises Root CA)
+└── Recommended for daily cert issuance operations
+```
+
+#### Certificate Templates
+ACM Private CA uses templates to define certificate types:
+```
+Built-in templates:
+├── EndEntityCertificate/V1
+│     → Standard server/client certificate
+├── CodeSigningCertificate/V1
+│     → For code signing operations
+├── RootCACertificate/V1
+│     → For CA certificates
+├── SubordinateCACertificate_PathLen0/V1
+│     → Subordinate CA that cannot create further CAs
+└── OCSPSigningCertificate/V1
+      → For OCSP response signing
+```
+
+#### Certificate Revocation
+```
+Two methods available:
+
+1. CRL (Certificate Revocation List):
+   ├── List of revoked certificate serial numbers
+   ├── Published to S3 bucket (you configure)
+   ├── Updated when certificates are revoked
+   ├── Clients download and check periodically
+   └── Delay between revocation and client awareness
+
+2. OCSP (Online Certificate Status Protocol):
+   ├── Real-time revocation status check
+   ├── AWS manages OCSP endpoint
+   ├── Clients query endpoint for each connection
+   ├── Faster than CRL
+   └── Requires client support for OCSP
+```
+
+#### Sharing Private CA Across Accounts
+```
+Pattern: Central Security account owns CA
+         Application accounts request certificates
+
+Step 1: Security account creates Private CA
+Step 2: Share CA via AWS RAM with org or specific accounts
+Step 3: Application account requests cert from shared CA
+Step 4: Certificate issued to application account
+Step 5: Application deploys cert to their resources
+
+Benefits:
+├── Centralized CA management
+├── Security team controls CA
+├── Application teams self-serve certificates
+└── Consistent PKI policy across org
+```
+
+---
+
+### E. Certificate Integration Patterns
+
+#### ALB (Application Load Balancer)
+```
+HTTPS Listener on ALB:
+├── Attach ACM certificate to HTTPS listener
+├── ALB terminates TLS (SSL offloading)
+├── Backend targets receive HTTP (or HTTPS for e2e)
+├── Multiple certificates per listener (SNI)
+│     └── SNI = Server Name Indication
+│           Client sends hostname in TLS handshake
+│           ALB selects correct cert for that hostname
+└── Default certificate + additional certs via SNI
+
+Certificate selection by ALB:
+├── Check if SNI hostname matches any cert
+├── Use matching cert
+└── Fall back to default cert if no match
+```
+
+#### CloudFront
+```
+CloudFront certificate requirements:
+├── Certificate must be in us-east-1 (N. Virginia)
+│     Even if distribution serves global traffic
+├── Certificate must cover the CloudFront domain
+├── Can use ACM public cert or imported cert
+└── Default CloudFront domain uses AWS cert (*.cloudfront.net)
+
+Custom domain with CloudFront:
+├── Request/import cert in us-east-1
+├── Associate with CloudFront distribution
+└── Update DNS to point to CloudFront
+```
+
+> ⚠️ **Exam critical:** For CloudFront, ACM certificate MUST be in **us-east-1** regardless of where your origin is.
+
+#### API Gateway
+```
+Custom domain in API Gateway:
+├── Regional endpoint: cert in same region
+├── Edge-optimized endpoint: cert must be in us-east-1
+│     (same as CloudFront — edge-optimized uses CF)
+└── Private endpoint: use ACM Private CA cert
+```
+
+#### mTLS (Mutual TLS) Pattern
+```
+Standard TLS:          mTLS:
+Client                 Client
+  │ verifies server      │ verifies server cert
+  │                      │ AND
+  │                      │ server verifies client cert
+  ▼                      ▼
+Server                 Server
+
+Use cases for mTLS:
+├── API Gateway (built-in mTLS support)
+├── Service-to-service authentication
+├── IoT device authentication
+└── Zero-trust network architecture
+
+ACM Private CA issues:
+├── Server certificates
+└── Client certificates (for mTLS)
+```
+
+---
+
+### F. Certificate Import & Export
+
+#### Importing Certificates to ACM
+```
+Requirements for import:
+├── Certificate: PEM-encoded X.509 cert
+├── Private key: PEM-encoded, unencrypted
+├── Certificate chain: PEM-encoded chain (optional but recommended)
+
+Use cases:
+├── Certificates from external CAs (DigiCert, Comodo)
+├── Let's Encrypt certificates
+├── Wildcard certs purchased commercially
+└── Certificates for legacy systems
+
+Limitations of imported certs:
+├── No automatic renewal
+├── ACM sends expiry notifications only
+└── You must reimport renewed certificate
+```
+
+#### Exporting ACM Private CA Certificates
+```
+ACM Private CA certificates CAN be exported:
+├── Export includes: certificate + private key + chain
+├── Private key exported encrypted with passphrase
+├── Can be installed on:
+│     ├── EC2 instances
+│     ├── On-premises servers
+│     └── Any system needing TLS
+
+ACM Public certificates CANNOT be exported:
+├── Private key never leaves ACM
+├── By design — prevents private key exposure
+└── Use ACM Private CA if export needed
+```
+
+---
+
+### G. ACM Key Security Concepts
+
+#### Private Key Protection
+```
+ACM Public Certificates:
+├── Private key generated inside ACM HSMs
+├── Never exposed to anyone (including AWS employees)
+├── Cannot be exported under any circumstances
+└── Loss of certificate = request a new one
+
+ACM Private CA:
+├── CA private key stored in FIPS 140-2 Level 3 HSMs
+├── CA private key never leaves HSM
+├── End-entity cert private keys generated by requester
+└── ACM manages key generation for integrated services
+```
+
+#### Certificate Transparency Logging
+```
+For ACM public certificates:
+├── All issued certs logged to public CT logs
+├── Enables detection of misissued certificates
+├── Cannot be disabled for public trusted certs
+└── You can monitor CT logs for your domains
+```
+
+---
+
+## 1.4 Comparison Tables
+
+### ACM Public vs Private vs Imported
+
+| Feature | ACM Public | ACM Private CA | Imported |
+|---|---|---|---|
+| **Cost** | Free | $400/mo CA + $0.75/cert | Free (cert cost external) |
+| **Publicly trusted** | ✅ Yes | ❌ No | Depends on CA |
+| **Auto-renewal** | ✅ Yes (DNS) | ✅ Yes (via ACM) | ❌ No |
+| **Export private key** | ❌ Never | ✅ Yes | ✅ Already have it |
+| **Use with EC2** | ❌ No | ✅ Yes | ✅ Yes |
+| **Wildcard support** | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Internal resources** | ❌ | ✅ Yes | ✅ Yes |
+| **mTLS client certs** | ❌ | ✅ Yes | ✅ Yes |
+| **CloudFront** | ✅ us-east-1 | ✅ us-east-1 | ✅ us-east-1 |
+| **Revocation (CRL/OCSP)** | AWS managed | ✅ Configurable | ❌ Manual |
+
+### DNS vs Email Validation
+
+| Feature | DNS Validation | Email Validation |
+|---|---|---|
+| **Auto-renewal** | ✅ Yes | ❌ No |
+| **Route 53 auto** | ✅ Yes | N/A |
+| **Requires** | DNS control | Email access |
+| **Expiry** | Never (CNAME stays) | 72-hour link |
+| **Automation** | ✅ Fully | ❌ Manual click |
+| **Recommended** | ✅ Always | Dev/test only |
+
+---
+
+## 1.5 Security & Compliance Angles
+
+### IAM Permissions for ACM
+
+```
+acm:RequestCertificate       → Request new certificate
+acm:DescribeCertificate      → View certificate details
+acm:ListCertificates         → List all certificates
+acm:DeleteCertificate        → Delete certificate
+acm:ImportCertificate        → Import external cert
+acm:AddTagsToCertificate     → Tag certificates
+acm:GetCertificate           → Download certificate
+
+acm-pca:CreateCertificateAuthority  → Create Private CA
+acm-pca:IssueCertificate            → Issue certificate
+acm-pca:RevokeCertificate           → Revoke certificate
+acm-pca:GetCertificate              → Download certificate
+acm-pca:ExportCertificate           → Export with private key
+```
+
+### Common Misconfigurations
+
+| Misconfiguration | Risk | Fix |
+|---|---|---|
+| Email validation in production | Manual renewal required | Switch to DNS validation |
+| DNS CNAME removed after issuance | Auto-renewal fails → expiry | Keep CNAME in DNS permanently |
+| ACM cert in wrong region for CF | Deployment fails | Request cert in us-east-1 |
+| No expiry monitoring | Silent expiry → outage | EventBridge + SNS for expiry events |
+| Root CA always enabled | Higher compromise risk | Disable Root CA when not actively signing |
+| No CRL/OCSP configured | Cannot revoke compromised certs | Configure CRL to S3 or enable OCSP |
+| Single CA for all environments | Blast radius too large | Separate CAs per environment |
+| Exported private key unprotected | Key compromise | Strong passphrase + secure storage |
+
+### Compliance Relevance
+
+| Framework | ACM/PKI Relevance |
+|---|---|
+| **PCI DSS** | TLS for cardholder data, certificate management |
+| **HIPAA** | Encryption in transit, certificate lifecycle |
+| **ISO 27001** | Cryptographic controls, key management |
+| **NIST 800-53** | SC-8 (Transmission Confidentiality), SC-17 (PKI) |
+| **FedRAMP** | FIPS 140-2 validated crypto, certificate management |
+
+---
+
+## 1.6 Integration Patterns
+
+### Pattern 1: Public Website (ALB + ACM)
+```
+Route 53 (DNS)
+    │
+    │ A record → ALB
+    ▼
+ALB (HTTPS:443)
+    │ ACM cert: domain.com
+    │ Auto-renewed via DNS validation
+    ▼
+EC2 / ECS / Lambda targets
+```
+
+### Pattern 2: Global CDN (CloudFront + ACM)
+```
+Route 53
+    │ CNAME → CloudFront domain
+    ▼
+CloudFront
+    │ ACM cert in us-east-1
+    │ (even if origin is ap-south-1)
+    ▼
+ALB Origin (ap-south-1)
+    │ ACM cert in ap-south-1
+    ▼
+Application
+```
+
+### Pattern 3: Internal Services (Private CA + mTLS)
+```
+ACM Private CA
+    │ Issues certs to both services
+    ▼
+Service A (has server cert + trusts CA)
+    │
+    │ mTLS (both verify each other's cert)
+    ▼
+Service B (has client cert + trusts CA)
+```
+
+### Pattern 4: Multi-Account PKI (RAM sharing)
+```
+Security Account
+    │ Owns Root CA + Subordinate CAs
+    │ Shares via AWS RAM
+    ▼
+Application Account A          Application Account B
+    │ Requests cert from CA         │ Requests cert from CA
+    ▼                               ▼
+Internal API (HTTPS)            Internal Service (HTTPS)
+```
+
+### Pattern 5: Certificate Expiry Alerting
+```
+ACM Certificate approaching expiry (45/30/15/7/1 days)
+    │
+    ▼
+EventBridge rule
+    │
+    ▼
+SNS Topic → Email/Slack/PagerDuty
+    │
+    ▼
+Security team renews/reimports certificate
+```
+
+---
+
+Section 1 complete Pradeep! Full theory at exam depth covering all 6 sub-sections.
+
+Shall I move to **Section 2 — Exam Deep Dive**? 🎯
+
+
+# 📅 Day 36 — Section 2: Exam Deep Dive
+
+---
+
+## 2.1 Scenario-Based Q&A (20 Questions)
+
+---
+
+### Question 1
+**A company hosts a public-facing website on EC2 instances behind an ALB. They want to use an ACM public certificate for HTTPS. A developer requests the certificate and tries to install it directly on the EC2 instances but cannot find the private key. What is the correct approach?**
+
+A) Contact AWS Support to retrieve the private key for EC2 installation
+B) Export the ACM certificate and install it on EC2 instances
+C) Attach the ACM certificate to the ALB HTTPS listener instead of EC2
+D) Generate a new certificate with private key export enabled
+
+**Answer: C**
+
+**Explanation:**
+- ACM public certificates cannot be exported — private key never leaves ACM
+- The correct pattern is to attach the certificate to the ALB listener
+- ALB terminates TLS using the ACM certificate — EC2 instances receive unencrypted traffic (or re-encrypted with a separate cert for end-to-end)
+- AWS Support cannot retrieve private keys — by design
+- There is no "export enabled" option for ACM public certificates
+- For direct EC2 installation, use ACM Private CA (exportable) or import an external certificate
+
+---
+
+### Question 2
+**A company uses ACM public certificates with DNS validation for their ALB. After migrating their DNS from Route 53 to a third-party provider, the certificates stop auto-renewing and expire after 13 months. What is the root cause?**
+
+A) ACM only supports auto-renewal with Route 53
+B) The DNS validation CNAME record was not migrated to the new DNS provider
+C) ACM certificates must be reissued after DNS provider changes
+D) Third-party DNS providers are not supported for ACM validation
+
+**Answer: B**
+
+**Explanation:**
+- DNS validation requires the CNAME record to remain in DNS permanently for auto-renewal
+- When migrating DNS providers, the CNAME record must be explicitly migrated too
+- ACM works with any DNS provider — not limited to Route 53
+- ACM certificates do not need to be reissued after DNS changes
+- The CNAME is the proof of domain ownership — without it, ACM cannot validate renewal
+- Fix: add the same CNAME record to the new DNS provider
+
+---
+
+### Question 3
+**A company needs to deploy a CloudFront distribution with a custom domain api.company.com. They request an ACM certificate in ap-south-1 (Mumbai) where their origin ALB is located. CloudFront rejects the certificate. What is wrong?**
+
+A) CloudFront does not support ACM certificates
+B) The certificate must be requested in us-east-1 (N. Virginia) for CloudFront
+C) The certificate domain must exactly match the CloudFront distribution domain
+D) The certificate must use email validation for CloudFront
+
+**Answer: B**
+
+**Explanation:**
+- CloudFront is a global service that uses us-east-1 as its control plane
+- ACM certificates for CloudFront MUST be requested/imported in us-east-1
+- This is regardless of where the origin (ALB, EC2) is located
+- The ap-south-1 certificate is valid for the ALB origin but not for CloudFront
+- Fix: request a new ACM certificate in us-east-1 for the same domain
+- Certificate validation method doesn't matter for CloudFront — region does
+
+---
+
+### Question 4
+**An organization needs TLS certificates for 500 internal microservices running in EKS. The certificates must be automatically renewed, exportable for use in containers, and the organization must maintain full control of the CA. Which solution is BEST?**
+
+A) Request 500 ACM public certificates with DNS validation
+B) Import 500 commercially purchased certificates into ACM
+C) Use ACM Private CA to issue certificates and integrate with cert-manager in EKS
+D) Generate self-signed certificates using OpenSSL on each pod
+
+**Answer: C**
+
+**Explanation:**
+- ACM Private CA gives full CA control and issues exportable certificates
+- cert-manager (Kubernetes) integrates natively with ACM Private CA
+- Certificates auto-renew via cert-manager + ACM Private CA integration
+- ACM public certificates cannot be exported — cannot be installed in containers directly
+- Importing 500 certs has no auto-renewal — massive operational overhead
+- Self-signed certs have no centralized revocation, no trust hierarchy, no audit trail
+- ACM Private CA + cert-manager is the AWS-recommended pattern for Kubernetes
+
+---
+
+### Question 5
+**A security team discovers that a private key for an internal service's certificate has been compromised. The certificate was issued by ACM Private CA. What is the FASTEST way to prevent the compromised certificate from being used?**
+
+A) Delete the certificate from ACM Private CA
+B) Revoke the certificate using ACM Private CA and ensure CRL/OCSP is configured
+C) Request a new certificate to replace it
+D) Disable the ACM Private CA to stop all certificates from working
+
+**Answer: B**
+
+**Explanation:**
+- Revocation immediately marks the certificate as invalid in CRL/OCSP
+- Clients checking CRL or OCSP will reject the compromised certificate
+- Deleting from ACM doesn't revoke — certificate file still exists and is valid
+- Requesting a new cert is necessary but doesn't invalidate the compromised one
+- Disabling the CA stops NEW issuance but doesn't revoke existing certs — and breaks all valid certs too
+- CRL/OCSP must be configured for revocation to work — this is why it's critical to set up during CA creation
+
+---
+
+### Question 6
+**A company uses email validation for their ACM certificates. They want to enable automatic renewal. What must they do?**
+
+A) Enable auto-renewal in the ACM console settings
+B) Switch to DNS validation — email validation does not support auto-renewal
+C) Configure Route 53 to handle email validation automatically
+D) Set renewal interval to 30 days in the certificate settings
+
+**Answer: B**
+
+**Explanation:**
+- Email validation fundamentally does not support automatic renewal
+- Each renewal cycle requires a human to click an approval link in an email
+- This is a hard limitation — no setting or workaround can enable auto-renewal with email validation
+- Route 53 cannot automate email validation — completely different mechanism
+- There is no renewal interval setting in ACM — ACM always starts renewal 60 days before expiry
+- The only path to auto-renewal is switching to DNS validation
+
+---
+
+### Question 7
+**A company has a Root CA and three Subordinate CAs in ACM Private CA. The Root CA private key is compromised. What is the impact?**
+
+A) Only the Root CA certificates are affected
+B) All certificates issued by the three Subordinate CAs are also compromised
+C) Impact is limited to certificates issued in the last 30 days
+D) Only certificates without OCSP checking are affected
+
+**Answer: B**
+
+**Explanation:**
+- The Root CA is the trust anchor for the entire PKI hierarchy
+- Subordinate CAs derive their trust from the Root CA
+- If Root CA is compromised, the attacker can sign fraudulent Subordinate CA certs
+- This undermines trust in ALL certificates in the entire hierarchy
+- This is why Root CA security is paramount — keep it DISABLED when not actively signing
+- Impact is total — all issued certificates must be considered compromised
+- New Root CA hierarchy must be created and all certificates reissued
+
+---
+
+### Question 8
+**An API Gateway uses a custom domain with an ACM certificate. The API is edge-optimized. The team requests the certificate in eu-west-1 where the API is deployed but the custom domain configuration fails. What is wrong?**
+
+A) API Gateway edge-optimized endpoints require the certificate in us-east-1
+B) ACM certificates cannot be used with API Gateway
+C) The certificate must use wildcard domain for API Gateway
+D) Edge-optimized API Gateway requires email validation
+
+**Answer: A**
+
+**Explanation:**
+- Edge-optimized API Gateway uses CloudFront under the hood
+- Because CloudFront is involved, the certificate must be in us-east-1
+- Regional API Gateway endpoints use certificates in the same region as the API
+- Only edge-optimized endpoints have the us-east-1 requirement
+- ACM certificates work with API Gateway — no restriction on that
+- Wildcard is optional — not required for API Gateway
+- Validation method is irrelevant for this issue
+
+---
+
+### Question 9
+**A company imports a certificate from DigiCert into ACM. 30 days before expiry, the security team receives an SNS notification. They renew the certificate with DigiCert and want ACM to use the new certificate. What is the correct process?**
+
+A) ACM automatically fetches the renewed certificate from DigiCert
+B) The team must reimport the renewed certificate into ACM
+C) The team must delete the old certificate and request a new ACM certificate
+D) The team must update the ALB listener with the new certificate ARN
+
+**Answer: B**
+
+**Explanation:**
+- Imported certificates have NO automatic renewal
+- The renewed certificate from DigiCert must be manually reimported into ACM
+- ACM reimport preserves the certificate ARN — no update needed on ALB/CloudFront
+- ACM has no connection to external CAs — cannot fetch renewed certs automatically
+- Deleting and requesting a new ACM certificate would change the ARN and require updating all associated services
+- After reimport to same ARN, services using that ARN automatically use the new certificate
+
+---
+
+### Question 10
+**A company wants to implement mTLS for their API Gateway to authenticate client applications. Which certificate type should client applications use?**
+
+A) ACM public certificates
+B) Self-signed certificates generated by OpenSSL
+C) Certificates issued by ACM Private CA
+D) Certificates imported from a commercial CA
+
+**Answer: C**
+
+**Explanation:**
+- ACM Private CA issues client certificates for mTLS authentication
+- API Gateway mTLS truststore contains the CA certificate that signed client certs
+- ACM Private CA provides centralized issuance, revocation, and audit trail for client certs
+- ACM public certs cannot be exported — cannot be used as client certificates
+- Self-signed certs work technically but have no centralized management or revocation
+- Commercial CA client certs are expensive and harder to manage at scale
+- ACM Private CA is the AWS-recommended approach for mTLS client certificates
+
+---
+
+### Question 11
+**What happens to an ACM certificate associated with an ALB when the certificate expires?**
+
+A) ACM automatically removes the certificate from the ALB
+B) The ALB continues serving traffic with the expired certificate — browsers show security warnings
+C) The ALB stops accepting HTTPS connections entirely
+D) AWS automatically replaces the expired certificate with a default AWS certificate
+
+**Answer: B**
+
+**Explanation:**
+- Expired certificates are NOT automatically removed by ACM or ALB
+- The ALB continues to serve traffic with the expired certificate
+- Browsers and clients display security warnings (NET::ERR_CERT_DATE_INVALID)
+- Users may be unable to connect if their browser enforces strict certificate checking
+- AWS does not substitute default certificates — the configured cert stays
+- This is why expiry monitoring and timely renewal is critical
+- The fix is to renew/reimport the certificate before expiry
+
+---
+
+### Question 12
+**A company needs to create a CA hierarchy where the Root CA is signed by their on-premises enterprise CA, not by ACM Private CA itself. Which ACM Private CA feature supports this?**
+
+A) External Root CA signing is not supported — must use ACM Private CA Root
+B) Create a Subordinate CA in ACM Private CA and have the on-premises CA sign the CSR
+C) Import the on-premises Root CA into ACM Private CA
+D) Use certificate chaining to link ACM Private CA to on-premises CA
+
+**Answer: B**
+
+**Explanation:**
+- ACM Private CA supports creating a Subordinate CA and exporting the CSR
+- The CSR is sent to the on-premises Root CA for signing
+- The signed certificate is imported back into ACM Private CA
+- This creates a trusted chain: on-prem Root CA → ACM Subordinate CA → end-entity certs
+- On-premises clients already trust the on-prem Root CA → automatically trust ACM-issued certs
+- You cannot import a Root CA into ACM Private CA — only subordinate CA signing works
+- Certificate chaining is a result, not a feature — this is the correct process
+
+---
+
+### Question 13
+**A security engineer needs to audit which IAM principals have requested certificates from ACM Private CA in the last 30 days. Which service provides this information?**
+
+A) ACM Private CA audit reports
+B) AWS CloudTrail logs filtered for acm-pca.amazonaws.com events
+C) AWS Config rules for Private CA
+D) VPC Flow Logs for the CA subnet
+
+**Answer: B**
+
+**Explanation:**
+- CloudTrail logs ALL ACM Private CA API calls including IssueCertificate
+- Filter for eventSource = acm-pca.amazonaws.com to find all CA operations
+- Key event: IssueCertificate — shows who requested which certificate
+- ACM Private CA audit reports show certificate issuance but CloudTrail shows the requester
+- AWS Config checks compliance posture — not individual API call attribution
+- VPC Flow Logs show network traffic — not application-level certificate requests
+- CloudTrail is always the answer for "who did what" audit questions
+
+---
+
+### Question 14
+**A company has ACM Private CA configured with CRL distribution. After revoking a certificate, clients continue to accept the revoked certificate for up to 24 hours. What explains this behavior?**
+
+A) ACM Private CA has a 24-hour revocation delay by design
+B) Clients cache the CRL and check it periodically — not in real time
+C) The revocation did not complete successfully
+D) CRL is only checked on first connection, not subsequent ones
+
+**Answer: B**
+
+**Explanation:**
+- CRL is a file published to S3 — clients download it periodically
+- Clients cache the downloaded CRL for its validity period (up to 24 hours typically)
+- During the cache period, clients use the cached CRL — don't see the new revocation
+- This is a fundamental limitation of CRL-based revocation
+- Fix: use OCSP instead — provides real-time revocation status
+- Or configure shorter CRL validity period (increases download frequency)
+- Revocation itself is immediate in ACM Private CA — the delay is client-side caching
+
+---
+
+### Question 15
+**A company uses ACM with Route 53 for DNS validation. Which statement about the DNS CNAME record for validation is TRUE?**
+
+A) The CNAME can be deleted after the certificate is issued
+B) The CNAME must be kept permanently to enable automatic renewal
+C) The CNAME must be updated every 90 days
+D) A separate CNAME is required for each renewal cycle
+
+**Answer: B**
+
+**Explanation:**
+- DNS validation CNAME must remain in DNS permanently
+- ACM re-checks the CNAME when attempting to renew the certificate
+- If CNAME is removed, ACM cannot validate domain ownership during renewal → renewal fails
+- The CNAME never expires and never needs updating — same value is used for all renewals
+- One CNAME per domain/subdomain is sufficient for all renewal cycles
+- This is the most commonly misunderstood aspect of DNS validation
+
+---
+
+### Question 16
+**A developer requests an ACM public certificate for *.company.com (wildcard). Which domains does this certificate cover?**
+
+A) company.com and all subdomains at any depth
+B) Only one level of subdomains: api.company.com, www.company.com, etc.
+C) company.com only — wildcard doesn't cover the apex domain
+D) All subdomains including sub.sub.company.com
+
+**Answer: B**
+
+**Explanation:**
+- Wildcard certificate *.company.com covers exactly ONE level of subdomains
+- Covers: api.company.com, www.company.com, mail.company.com
+- Does NOT cover: sub.api.company.com (two levels deep)
+- Does NOT cover: company.com (the apex/root domain)
+- To cover company.com AND *.company.com: request both as SANs in one certificate
+- ACM allows adding multiple names (SANs) to a single certificate
+- For deeper subdomains: need *.api.company.com separately
+
+---
+
+### Question 17
+**An organization wants to share their ACM Private CA with multiple AWS accounts in their organization so each account can issue its own certificates. Which AWS service enables this?**
+
+A) AWS IAM cross-account roles
+B) AWS Resource Access Manager (RAM)
+C) AWS Organizations SCPs
+D) ACM Private CA resource policy
+
+**Answer: B**
+
+**Explanation:**
+- AWS RAM (Resource Access Manager) is the correct service for sharing ACM Private CA
+- Share with specific accounts or entire AWS Organizations
+- Recipient accounts can issue certificates from the shared CA
+- IAM cross-account roles enable API access but don't share the CA resource itself
+- SCPs restrict permissions — they don't enable resource sharing
+- ACM Private CA does not have a resource policy like Secrets Manager
+- RAM is the standard AWS mechanism for sharing resources across accounts
+
+---
+
+### Question 18
+**A company needs certificates for IoT devices that must work offline and cannot reach OCSP endpoints. They need revocation capability. Which revocation method should they configure in ACM Private CA?**
+
+A) OCSP only — it's more secure
+B) CRL distributed to S3 — devices download CRL when connected
+C) No revocation needed for IoT devices
+D) Both OCSP and CRL — OCSP takes priority
+
+**Answer: B**
+
+**Explanation:**
+- IoT devices that work offline cannot reach real-time OCSP endpoints
+- CRL published to S3 can be downloaded when devices are periodically connected
+- Devices cache the CRL and use it for validation while offline
+- OCSP requires real-time internet connectivity — not suitable for offline devices
+- All devices need revocation capability — compromised IoT devices are a security risk
+- Both OCSP and CRL can be configured simultaneously but CRL is the practical choice here
+- CRL download frequency can be tuned based on device connectivity patterns
+
+---
+
+### Question 19
+**A company's security policy requires that all internal services must use TLS with certificates that can be revoked immediately if compromised. Which combination achieves this?**
+
+A) ACM public certificates with DNS validation
+B) ACM Private CA with OCSP enabled
+C) ACM Private CA with CRL only
+D) Imported self-signed certificates
+
+**Answer: B**
+
+**Explanation:**
+- ACM Private CA issues internal certificates (not public trust needed)
+- OCSP provides real-time revocation status — clients check on every connection
+- Immediate revocation is possible — OCSP reflects revocation within seconds
+- ACM public certificates cannot be used for internal-only services without public DNS
+- CRL has inherent delay due to client-side caching — not "immediate"
+- Self-signed certificates have no centralized revocation mechanism
+- ACM Private CA + OCSP is the only combination meeting both requirements
+
+---
+
+### Question 20
+**A company has 50 ACM certificates across multiple regions. They want automated notification when any certificate is within 30 days of expiry. Which solution requires the LEAST operational overhead?**
+
+A) Lambda function running daily checking all certificate expiry dates
+B) EventBridge rule in each region matching ACMCertificateApproachingExpiry events + SNS
+C) AWS Config rule checking certificate expiry daily
+D) CloudWatch alarm on ACM certificate expiry metric
+
+**Answer: B**
+
+**Explanation:**
+- ACM natively emits ACMCertificateApproachingExpiry events to EventBridge
+- EventBridge rule with SNS target requires zero ongoing maintenance
+- Events are emitted at 45, 30, 15, 7, and 1 days before expiry automatically
+- Lambda daily check requires writing code, scheduling, maintaining, and handling errors
+- AWS Config checks compliance posture but doesn't emit real-time expiry events
+- CloudWatch does not have native ACM certificate expiry metrics
+- EventBridge + SNS is the lowest-overhead native AWS solution
+
+---
+
+## 2.2 Common Exam Traps & Distractors
+
+### Trap 1: ACM Public Certs Can Be Installed on EC2
+> ❌ **Wrong:** "Export ACM public certificate and install on EC2"
+> ✅ **Right:** ACM public certs cannot be exported — attach to ALB, CloudFront, API Gateway only
+
+### Trap 2: ACM Certs Work with CloudFront from Any Region
+> ❌ **Wrong:** "Request ACM certificate in ap-south-1 for CloudFront"
+> ✅ **Right:** CloudFront (and edge-optimized API Gateway) require ACM cert in **us-east-1 only**
+
+### Trap 3: Email Validation Supports Auto-Renewal
+> ❌ **Wrong:** "Enable auto-renewal setting for email-validated certificate"
+> ✅ **Right:** Email validation NEVER supports auto-renewal — switch to DNS validation
+
+### Trap 4: Deleting Certificate = Revocation
+> ❌ **Wrong:** "Delete the compromised certificate from ACM to revoke it"
+> ✅ **Right:** Deletion removes from ACM management but doesn't revoke — the cert file still works. Use ACM Private CA revocation.
+
+### Trap 5: DNS CNAME Can Be Removed After Issuance
+> ❌ **Wrong:** "Remove validation CNAME after certificate is issued — no longer needed"
+> ✅ **Right:** CNAME must stay permanently for auto-renewal to work
+
+### Trap 6: Root CA Compromise Only Affects Root CA Certs
+> ❌ **Wrong:** "Root CA compromise only invalidates the Root CA certificate"
+> ✅ **Right:** Root CA compromise invalidates the ENTIRE hierarchy — all subordinate CAs and end-entity certs
+
+### Trap 7: CRL Provides Immediate Revocation
+> ❌ **Wrong:** "CRL revocation is immediate — clients know instantly"
+> ✅ **Right:** CRL has inherent delay due to client-side caching — use OCSP for near-real-time
+
+### Trap 8: ACM Auto-Renews All Certificates
+> ❌ **Wrong:** "ACM automatically renews all certificates including imported ones"
+> ✅ **Right:** Only ACM-issued certificates auto-renew — imported certs require manual renewal
+
+### Trap 9: Wildcard Covers All Subdomain Levels
+> ❌ **Wrong:** "*.company.com covers sub.api.company.com"
+> ✅ **Right:** Wildcard covers exactly ONE level — *.company.com only covers x.company.com
+
+### Trap 10: ACM Private CA Uses RAM for Sharing
+> ❌ **Wrong:** "Use IAM roles to share ACM Private CA across accounts"
+> ✅ **Right:** ACM Private CA shared via **AWS RAM** — not IAM roles
+
+---
+
+## 2.3 Key Facts Cheat Sheet
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│           ACM & PRIVATE CA — EXAM CHEAT SHEET                  │
+├──────────────────────────────────┬─────────────────────────────┤
+│ ACM public cert cost             │ Free                        │
+│ ACM Private CA cost              │ $400/month per CA           │
+│ Private CA cert cost             │ $0.75/cert (first 1000/mo)  │
+│ ACM public cert validity         │ 13 months                   │
+│ Auto-renewal start               │ 60 days before expiry       │
+│ Auto-renewal: DNS validation     │ ✅ Yes (CNAME must stay)    │
+│ Auto-renewal: email validation   │ ❌ No                       │
+│ Auto-renewal: imported certs     │ ❌ No                       │
+│ CloudFront cert region           │ us-east-1 ONLY              │
+│ Edge-optimized API GW cert region│ us-east-1 ONLY              │
+│ Regional API GW cert region      │ Same region as API          │
+│ ACM public cert exportable       │ ❌ Never                    │
+│ ACM Private CA cert exportable   │ ✅ Yes                      │
+│ EC2 direct cert installation     │ Import or Private CA only   │
+│ Wildcard coverage                │ One level only (*.x.com)    │
+│ Wildcard covers apex domain      │ ❌ No (need *.x.com + x.com)│
+│ CloudTrail for Private CA        │ acm-pca.amazonaws.com       │
+│ Expiry events in EventBridge     │ 45,30,15,7,1 days before    │
+│ CA sharing mechanism             │ AWS RAM                     │
+│ Private CA FIPS level            │ 140-2 Level 3               │
+│ Revocation: real-time            │ OCSP                        │
+│ Revocation: periodic             │ CRL (S3 published)          │
+│ Root CA best practice            │ Keep DISABLED when not used │
+│ mTLS client certs                │ ACM Private CA              │
+│ CT logging (public certs)        │ Always enabled, cannot stop │
+│ Reimport cert ARN behavior       │ ARN preserved (no updates)  │
+│ Subordinate CA external signing  │ Export CSR → on-prem CA     │
+└──────────────────────────────────┴─────────────────────────────┘
+```
+
+---
+
+## 2.4 Elimination Strategies
+
+### Strategy 1: CloudFront/Edge API GW = us-east-1
+Any scenario with **CloudFront or edge-optimized API Gateway** → certificate must be in **us-east-1** — eliminate any other region answer
+
+### Strategy 2: EC2 Direct Install = Import or Private CA
+Need to install certificate **directly on EC2** → eliminate ACM public certificates → import or ACM Private CA
+
+### Strategy 3: Auto-Renewal = DNS Validation Only
+Need **automatic renewal** → eliminate email validation → DNS validation required
+
+### Strategy 4: Immediate Revocation = OCSP
+Need **immediate/real-time revocation** → eliminate CRL (has delay) → OCSP
+
+### Strategy 5: Cross-Account CA = RAM
+Share ACM Private CA across accounts → eliminate IAM roles → **AWS RAM**
+
+### Strategy 6: mTLS Client Certs = Private CA
+Need **client certificates for mTLS** → eliminate ACM public certs (not exportable) → ACM Private CA
+
+### Strategy 7: Root CA Compromise = Total Hierarchy Compromise
+**Root CA compromised** → eliminate "only affects root" → entire hierarchy compromised
+
+### Strategy 8: Imported Cert Renewal = Manual Reimport
+**Imported certificate expiring** → eliminate auto-renewal → manual reimport to same ARN
+
+### Strategy 9: Wildcard Depth = One Level Only
+**Wildcard certificate scope** → covers x.domain.com NOT x.y.domain.com
+
+### Strategy 10: Expiry Monitoring = EventBridge Native Events
+**Least overhead certificate expiry alerting** → eliminate Lambda/Config → **EventBridge ACMCertificateApproachingExpiry + SNS**
+
+---
+
+Section 2 complete Pradeep! 20 scenario questions, 10 exam traps, full cheat sheet and elimination strategies all locked in. ✅
+
+Ready for **Section 3 — Lab 101**? 🧪

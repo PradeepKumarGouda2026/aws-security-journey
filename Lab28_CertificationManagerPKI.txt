@@ -1,0 +1,1489 @@
+# 📅 Day 36 — Section 3: Lab 101
+## AWS Certificate Manager & ACM Private CA — Full Exploration
+
+---
+
+## 🎯 Lab Objective
+In this lab you will:
+- Request and validate ACM public certificates
+- Configure DNS validation with Route 53
+- Explore certificate details and lifecycle
+- Create ACM Private CA hierarchy
+- Issue certificates from Private CA
+- Configure certificate revocation
+- Set up expiry monitoring
+- Audit via CloudTrail
+- Cleanup all resources
+
+---
+
+## Prerequisites Check
+
+```bash
+#!/bin/bash
+# Lab 101 - Prerequisites Check
+# Day 36 - AWS Security Specialist Study Plan
+
+echo "================================================"
+echo "  Lab 101: ACM & Private CA Prerequisites"
+echo "================================================"
+
+# Step 1: Verify identity
+echo ""
+echo "[1] Verifying AWS identity..."
+aws sts get-caller-identity --output table
+
+# Step 2: Capture environment
+ACCOUNT_ID=$(aws sts get-caller-identity \
+  --query Account --output text)
+REGION=$(aws configure get region)
+CALLER_ARN=$(aws sts get-caller-identity \
+  --query Arn --output text)
+
+echo ""
+echo "Account ID : $ACCOUNT_ID"
+echo "Region     : $REGION"
+echo "Caller ARN : $CALLER_ARN"
+
+# Step 3: Check existing certificates
+echo ""
+echo "[2] Checking existing ACM certificates..."
+aws acm list-certificates \
+  --query 'CertificateSummaryList[*].{
+    Domain:DomainName,
+    ARN:CertificateArn,
+    Status:Status,
+    Type:Type
+  }' \
+  --output table 2>/dev/null || \
+  echo "No existing certificates"
+
+# Step 4: Check existing Private CAs
+echo ""
+echo "[3] Checking existing Private CAs..."
+aws acm-pca list-certificate-authorities \
+  --query 'CertificateAuthorities[*].{
+    ARN:Arn,
+    Status:Status,
+    Type:Type
+  }' \
+  --output table 2>/dev/null || \
+  echo "No existing Private CAs"
+
+# Step 5: Check Route 53 hosted zones
+echo ""
+echo "[4] Checking Route 53 hosted zones..."
+aws route53 list-hosted-zones \
+  --query 'HostedZones[*].{
+    Name:Name,
+    Id:Id,
+    Private:Config.PrivateZone
+  }' \
+  --output table 2>/dev/null || \
+  echo "No hosted zones found"
+
+# Step 6: Check S3 buckets for CRL
+echo ""
+echo "[5] Checking available S3 buckets..."
+aws s3 ls 2>/dev/null | head -10
+
+# Step 7: Save environment
+cat > /tmp/lab101-env.sh << EOF
+export ACCOUNT_ID="$ACCOUNT_ID"
+export REGION="$REGION"
+export CALLER_ARN="$CALLER_ARN"
+EOF
+
+echo ""
+echo "✅ Environment saved to /tmp/lab101-env.sh"
+echo "================================================"
+echo "Prerequisites check complete!"
+echo "================================================"
+```
+
+---
+
+## Part 1 — Request ACM Public Certificate
+
+```bash
+#!/bin/bash
+# Lab 101 - Part 1: Request ACM Public Certificate
+# Day 36 - AWS Security Specialist Study Plan
+
+source /tmp/lab101-env.sh
+
+echo "================================================"
+echo "  Part 1: Request ACM Public Certificates"
+echo "================================================"
+
+# Step 1: Request certificate with DNS validation
+echo ""
+echo "[1] Requesting ACM public certificate (DNS validation)..."
+echo "    Domain: lab101.example.com"
+echo "    SANs: www.lab101.example.com, api.lab101.example.com"
+
+CERT_ARN=$(aws acm request-certificate \
+  --domain-name "lab101.example.com" \
+  --subject-alternative-names \
+    "www.lab101.example.com" \
+    "api.lab101.example.com" \
+  --validation-method DNS \
+  --idempotency-token "lab101cert001" \
+  --tags Key=Lab,Value=Lab101 \
+         Key=Environment,Value=Production \
+  --query 'CertificateArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$CERT_ARN" ]; then
+  echo "✅ Certificate requested"
+  echo "   ARN: $CERT_ARN"
+  echo "export CERT_ARN=\"$CERT_ARN\"" \
+    >> /tmp/lab101-env.sh
+else
+  echo "⚠️  Could not request certificate"
+fi
+
+# Step 2: Request wildcard certificate
+echo ""
+echo "[2] Requesting wildcard certificate..."
+WILDCARD_CERT_ARN=$(aws acm request-certificate \
+  --domain-name "*.lab101.example.com" \
+  --subject-alternative-names \
+    "lab101.example.com" \
+  --validation-method DNS \
+  --idempotency-token "lab101wildcard001" \
+  --tags Key=Lab,Value=Lab101 \
+         Key=Type,Value=Wildcard \
+  --query 'CertificateArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$WILDCARD_CERT_ARN" ]; then
+  echo "✅ Wildcard certificate requested"
+  echo "   ARN: $WILDCARD_CERT_ARN"
+  echo "export WILDCARD_CERT_ARN=\"$WILDCARD_CERT_ARN\"" \
+    >> /tmp/lab101-env.sh
+fi
+
+# Step 3: Request certificate for CloudFront (must be us-east-1)
+echo ""
+echo "[3] Requesting certificate for CloudFront (us-east-1)..."
+CF_CERT_ARN=$(aws acm request-certificate \
+  --domain-name "cdn.lab101.example.com" \
+  --validation-method DNS \
+  --idempotency-token "lab101cf001" \
+  --region us-east-1 \
+  --tags Key=Lab,Value=Lab101 \
+         Key=UseCase,Value=CloudFront \
+  --query 'CertificateArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$CF_CERT_ARN" ]; then
+  echo "✅ CloudFront certificate requested in us-east-1"
+  echo "   ARN: $CF_CERT_ARN"
+  echo "export CF_CERT_ARN=\"$CF_CERT_ARN\"" \
+    >> /tmp/lab101-env.sh
+fi
+
+# Step 4: Describe certificate to get DNS validation records
+echo ""
+echo "[4] Getting DNS validation records..."
+sleep 5  # Wait for ACM to generate CNAME records
+
+aws acm describe-certificate \
+  --certificate-arn $CERT_ARN \
+  --query 'Certificate.DomainValidationOptions[*].{
+    Domain:DomainName,
+    Status:ValidationStatus,
+    CNAMEName:ResourceRecord.Name,
+    CNAMEValue:ResourceRecord.Value,
+    Method:ValidationMethod
+  }' \
+  --output table 2>/dev/null
+
+# Step 5: Show DNS validation CNAME records
+echo ""
+echo "[5] DNS validation CNAME records to add..."
+VALIDATION_RECORDS=$(aws acm describe-certificate \
+  --certificate-arn $CERT_ARN \
+  --query \
+    'Certificate.DomainValidationOptions[*].ResourceRecord' \
+  --output json 2>/dev/null)
+
+echo "Add these CNAME records to your DNS:"
+echo $VALIDATION_RECORDS | python3 -m json.tool 2>/dev/null
+
+# Step 6: Demonstrate Route 53 automatic validation
+echo ""
+echo "[6] Route 53 automatic validation (if hosted zone exists)..."
+HOSTED_ZONE_ID=$(aws route53 list-hosted-zones \
+  --query \
+    'HostedZones[?contains(Name,`example.com`)].Id' \
+  --output text 2>/dev/null | \
+  sed 's|/hostedzone/||')
+
+if [ ! -z "$HOSTED_ZONE_ID" ] && \
+   [ "$HOSTED_ZONE_ID" != "None" ]; then
+  echo "Found hosted zone: $HOSTED_ZONE_ID"
+
+  # Get CNAME record details
+  CNAME_NAME=$(aws acm describe-certificate \
+    --certificate-arn $CERT_ARN \
+    --query \
+      'Certificate.DomainValidationOptions[0].ResourceRecord.Name' \
+    --output text 2>/dev/null)
+
+  CNAME_VALUE=$(aws acm describe-certificate \
+    --certificate-arn $CERT_ARN \
+    --query \
+      'Certificate.DomainValidationOptions[0].ResourceRecord.Value' \
+    --output text 2>/dev/null)
+
+  if [ ! -z "$CNAME_NAME" ] && \
+     [ "$CNAME_NAME" != "None" ]; then
+    # Create Route 53 CNAME record for validation
+    cat > /tmp/dns-validation.json << EOF
+{
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "$CNAME_NAME",
+        "Type": "CNAME",
+        "TTL": 300,
+        "ResourceRecords": [
+          {"Value": "$CNAME_VALUE"}
+        ]
+      }
+    }
+  ]
+}
+EOF
+
+    aws route53 change-resource-record-sets \
+      --hosted-zone-id $HOSTED_ZONE_ID \
+      --change-batch file:///tmp/dns-validation.json \
+      2>/dev/null && \
+      echo "✅ DNS validation CNAME added to Route 53" || \
+      echo "⚠️  Could not add CNAME to Route 53"
+  fi
+else
+  echo "No Route 53 hosted zone for example.com found"
+  echo "In production: add the CNAME to your DNS provider"
+fi
+
+# Step 7: Check certificate status
+echo ""
+echo "[7] Checking certificate status..."
+aws acm describe-certificate \
+  --certificate-arn $CERT_ARN \
+  --query 'Certificate.{
+    Domain:DomainName,
+    Status:Status,
+    Type:Type,
+    KeyAlgorithm:KeyAlgorithm,
+    NotBefore:NotBefore,
+    NotAfter:NotAfter,
+    RenewalEligibility:RenewalEligibility
+  }' \
+  --output table 2>/dev/null
+
+# Step 8: List all requested certificates
+echo ""
+echo "[8] Listing all Lab101 certificates..."
+aws acm list-certificates \
+  --query 'CertificateSummaryList[*].{
+    Domain:DomainName,
+    Status:Status,
+    Type:Type
+  }' \
+  --output table 2>/dev/null
+
+echo ""
+echo "================================================"
+echo "Part 1 Complete!"
+echo "Certificates requested:"
+echo "  1. lab101.example.com (+ SANs)"
+echo "  2. *.lab101.example.com (wildcard)"
+echo "  3. cdn.lab101.example.com (us-east-1)"
+echo "Status: PENDING_VALIDATION"
+echo "  (DNS validation CNAME must be added)"
+echo "================================================"
+```
+
+---
+
+## Part 2 — Certificate Details & Lifecycle
+
+```bash
+#!/bin/bash
+# Lab 101 - Part 2: Certificate Details & Lifecycle
+# Day 36 - AWS Security Specialist Study Plan
+
+source /tmp/lab101-env.sh
+
+echo "================================================"
+echo "  Part 2: Certificate Details & Lifecycle"
+echo "================================================"
+
+# Step 1: Full certificate description
+echo ""
+echo "[1] Full certificate metadata..."
+aws acm describe-certificate \
+  --certificate-arn $CERT_ARN \
+  --output json 2>/dev/null | python3 -m json.tool
+
+# Step 2: List certificate tags
+echo ""
+echo "[2] Certificate tags..."
+aws acm list-tags-for-certificate \
+  --certificate-arn $CERT_ARN \
+  --output table 2>/dev/null
+
+# Step 3: Add additional tags
+echo ""
+echo "[3] Adding additional tags..."
+aws acm add-tags-to-certificate \
+  --certificate-arn $CERT_ARN \
+  --tags Key=Owner,Value=SecurityTeam \
+         Key=CostCenter,Value=CC-001 \
+         Key=Criticality,Value=High \
+  2>/dev/null && echo "✅ Tags added"
+
+# Step 4: Certificate renewal status
+echo ""
+echo "[4] Checking renewal eligibility..."
+aws acm describe-certificate \
+  --certificate-arn $CERT_ARN \
+  --query 'Certificate.{
+    RenewalEligibility:RenewalEligibility,
+    RenewalSummary:RenewalSummary,
+    Status:Status
+  }' \
+  --output json 2>/dev/null | python3 -m json.tool
+
+# Step 5: Demonstrate certificate import
+echo ""
+echo "[5] Certificate import reference..."
+cat << 'EOF'
+# Import an external certificate (e.g., from DigiCert)
+# Requires: certificate + private key + certificate chain
+
+aws acm import-certificate \
+  --certificate fileb://certificate.pem \
+  --private-key fileb://private-key.pem \
+  --certificate-chain fileb://chain.pem \
+  --tags Key=Lab,Value=Lab101 \
+         Key=Source,Value=DigiCert
+
+# To reimport (renew) an existing imported cert:
+aws acm import-certificate \
+  --certificate-arn <existing-arn> \
+  --certificate fileb://new-certificate.pem \
+  --private-key fileb://private-key.pem \
+  --certificate-chain fileb://new-chain.pem
+
+# Note: Reimporting preserves ARN
+# All associated services automatically use new cert
+EOF
+
+# Step 6: Certificate association reference
+echo ""
+echo "[6] Certificate association with services reference..."
+cat << EOF
+# Associate with ALB HTTPS listener:
+aws elbv2 add-listener-certificates \
+  --listener-arn <alb-listener-arn> \
+  --certificates CertificateArn=$CERT_ARN
+
+# Create ALB HTTPS listener with certificate:
+aws elbv2 create-listener \
+  --load-balancer-arn <alb-arn> \
+  --protocol HTTPS \
+  --port 443 \
+  --certificates CertificateArn=$CERT_ARN \
+  --default-actions Type=forward,TargetGroupArn=<tg-arn>
+
+# Associate with CloudFront (must be us-east-1 cert):
+aws cloudfront update-distribution \
+  --id <distribution-id> \
+  --distribution-config '{
+    "ViewerCertificate": {
+      "ACMCertificateArn": "'$CF_CERT_ARN'",
+      "SSLSupportMethod": "sni-only",
+      "MinimumProtocolVersion": "TLSv1.2_2021"
+    }
+  }'
+EOF
+
+# Step 7: SNI demonstration
+echo ""
+echo "[7] SNI (Server Name Indication) with multiple certs..."
+cat << 'EOF'
+# ALB supports multiple certificates via SNI
+# Each certificate covers different domains
+
+# Add multiple certs to one HTTPS listener:
+aws elbv2 add-listener-certificates \
+  --listener-arn <listener-arn> \
+  --certificates \
+    CertificateArn=<cert-arn-1> \
+    CertificateArn=<cert-arn-2> \
+    CertificateArn=<cert-arn-3>
+
+# ALB automatically selects correct cert based on
+# the hostname in the TLS ClientHello message (SNI)
+# If no match found → uses default certificate
+
+# Check which certs are on a listener:
+aws elbv2 describe-listener-certificates \
+  --listener-arn <listener-arn>
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 2 Complete!"
+echo "Certificate lifecycle demonstrated:"
+echo "  - Full metadata inspection"
+echo "  - Tagging best practices"
+echo "  - Import/reimport reference"
+echo "  - ALB and CloudFront association"
+echo "  - SNI multi-certificate pattern"
+echo "================================================"
+```
+
+---
+
+## Part 3 — Create ACM Private CA Hierarchy
+
+```bash
+#!/bin/bash
+# Lab 101 - Part 3: Create ACM Private CA Hierarchy
+# Day 36 - AWS Security Specialist Study Plan
+# Note: Private CA costs $400/month — delete immediately after lab!
+
+source /tmp/lab101-env.sh
+
+echo "================================================"
+echo "  Part 3: ACM Private CA Hierarchy"
+echo "  ⚠️  COST WARNING: $400/month per CA"
+echo "  DELETE immediately after lab!"
+echo "================================================"
+
+# Step 1: Create S3 bucket for CRL
+echo ""
+echo "[1] Creating S3 bucket for CRL distribution..."
+CRL_BUCKET="lab101-crl-${ACCOUNT_ID}-${REGION}"
+
+aws s3 mb s3://$CRL_BUCKET \
+  --region $REGION 2>/dev/null && \
+  echo "✅ CRL bucket created: $CRL_BUCKET" || \
+  echo "⚠️  Bucket may already exist"
+
+echo "export CRL_BUCKET=\"$CRL_BUCKET\"" \
+  >> /tmp/lab101-env.sh
+
+# Configure bucket policy for CRL access
+cat > /tmp/crl-bucket-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowACMPCAWrite",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "acm-pca.amazonaws.com"
+      },
+      "Action": [
+        "s3:PutObject",
+        "s3:PutObjectAcl",
+        "s3:GetBucketAcl",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::$CRL_BUCKET",
+        "arn:aws:s3:::$CRL_BUCKET/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "$ACCOUNT_ID"
+        }
+      }
+    },
+    {
+      "Sid": "AllowPublicCRLRead",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::$CRL_BUCKET/crl/*"
+    }
+  ]
+}
+EOF
+
+aws s3api put-bucket-policy \
+  --bucket $CRL_BUCKET \
+  --policy file:///tmp/crl-bucket-policy.json \
+  2>/dev/null && \
+  echo "✅ CRL bucket policy applied"
+
+# Step 2: Create Root CA
+echo ""
+echo "[2] Creating Root CA..."
+ROOT_CA_ARN=$(aws acm-pca create-certificate-authority \
+  --certificate-authority-configuration '{
+    "KeyAlgorithm": "RSA_2048",
+    "SigningAlgorithm": "SHA256WITHRSA",
+    "Subject": {
+      "Country": "IN",
+      "Organization": "Lab101 Corp",
+      "OrganizationalUnit": "Security",
+      "State": "Karnataka",
+      "Locality": "Bengaluru",
+      "CommonName": "Lab101 Root CA"
+    }
+  }' \
+  --certificate-authority-type ROOT \
+  --revocation-configuration '{
+    "CrlConfiguration": {
+      "Enabled": true,
+      "ExpirationInDays": 7,
+      "S3BucketName": "'$CRL_BUCKET'",
+      "S3ObjectAcl": "BUCKET_OWNER_FULL_CONTROL"
+    },
+    "OcspConfiguration": {
+      "Enabled": true
+    }
+  }' \
+  --tags Key=Lab,Value=Lab101 \
+         Key=Type,Value=RootCA \
+  --query 'CertificateAuthorityArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$ROOT_CA_ARN" ]; then
+  echo "✅ Root CA created"
+  echo "   ARN: $ROOT_CA_ARN"
+  echo "export ROOT_CA_ARN=\"$ROOT_CA_ARN\"" \
+    >> /tmp/lab101-env.sh
+else
+  echo "⚠️  Could not create Root CA"
+  echo "    Check IAM permissions and region support"
+fi
+
+# Step 3: Wait for Root CA to be in PENDING_CERTIFICATE state
+echo ""
+echo "[3] Waiting for Root CA to be ready..."
+MAX_WAIT=10
+COUNTER=0
+while [ $COUNTER -lt $MAX_WAIT ]; do
+  STATUS=$(aws acm-pca describe-certificate-authority \
+    --certificate-authority-arn $ROOT_CA_ARN \
+    --query 'CertificateAuthority.Status' \
+    --output text 2>/dev/null)
+
+  echo "   Status: $STATUS"
+  if [ "$STATUS" == "PENDING_CERTIFICATE" ]; then
+    echo "✅ Root CA ready for self-signed cert"
+    break
+  fi
+  sleep 5
+  COUNTER=$((COUNTER+1))
+done
+
+# Step 4: Generate and install self-signed Root CA cert
+echo ""
+echo "[4] Generating self-signed Root CA certificate..."
+
+# Get CSR from Root CA
+aws acm-pca get-certificate-authority-csr \
+  --certificate-authority-arn $ROOT_CA_ARN \
+  --output text > /tmp/root-ca.csr 2>/dev/null && \
+  echo "✅ Root CA CSR retrieved"
+
+# Issue self-signed certificate for Root CA
+ROOT_CERT_ARN=$(aws acm-pca issue-certificate \
+  --certificate-authority-arn $ROOT_CA_ARN \
+  --csr fileb:///tmp/root-ca.csr \
+  --signing-algorithm SHA256WITHRSA \
+  --template-arn \
+    arn:aws:acm-pca:::template/RootCACertificate/V1 \
+  --validity Value=10,Type=YEARS \
+  --query 'CertificateArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$ROOT_CERT_ARN" ]; then
+  echo "✅ Root CA certificate issued"
+  echo "   Cert ARN: $ROOT_CERT_ARN"
+  echo "export ROOT_CERT_ARN=\"$ROOT_CERT_ARN\"" \
+    >> /tmp/lab101-env.sh
+
+  # Wait for certificate
+  sleep 5
+
+  # Download the certificate
+  aws acm-pca get-certificate \
+    --certificate-authority-arn $ROOT_CA_ARN \
+    --certificate-arn $ROOT_CERT_ARN \
+    --query 'Certificate' \
+    --output text > /tmp/root-ca-cert.pem 2>/dev/null && \
+    echo "✅ Root CA certificate downloaded"
+
+  # Install certificate into Root CA
+  aws acm-pca import-certificate-authority-certificate \
+    --certificate-authority-arn $ROOT_CA_ARN \
+    --certificate fileb:///tmp/root-ca-cert.pem \
+    2>/dev/null && \
+    echo "✅ Root CA certificate installed" || \
+    echo "⚠️  Could not install Root CA certificate"
+fi
+
+# Step 5: Create Subordinate CA
+echo ""
+echo "[5] Creating Subordinate CA (for end-entity certs)..."
+SUB_CA_ARN=$(aws acm-pca create-certificate-authority \
+  --certificate-authority-configuration '{
+    "KeyAlgorithm": "RSA_2048",
+    "SigningAlgorithm": "SHA256WITHRSA",
+    "Subject": {
+      "Country": "IN",
+      "Organization": "Lab101 Corp",
+      "OrganizationalUnit": "Security",
+      "State": "Karnataka",
+      "Locality": "Bengaluru",
+      "CommonName": "Lab101 Subordinate CA"
+    }
+  }' \
+  --certificate-authority-type SUBORDINATE \
+  --revocation-configuration '{
+    "CrlConfiguration": {
+      "Enabled": true,
+      "ExpirationInDays": 7,
+      "S3BucketName": "'$CRL_BUCKET'",
+      "S3ObjectAcl": "BUCKET_OWNER_FULL_CONTROL"
+    },
+    "OcspConfiguration": {
+      "Enabled": true
+    }
+  }' \
+  --tags Key=Lab,Value=Lab101 \
+         Key=Type,Value=SubordinateCA \
+  --query 'CertificateAuthorityArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$SUB_CA_ARN" ]; then
+  echo "✅ Subordinate CA created"
+  echo "   ARN: $SUB_CA_ARN"
+  echo "export SUB_CA_ARN=\"$SUB_CA_ARN\"" \
+    >> /tmp/lab101-env.sh
+fi
+
+# Step 6: Sign Subordinate CA with Root CA
+echo ""
+echo "[6] Signing Subordinate CA with Root CA..."
+sleep 10  # Wait for Sub CA to be ready
+
+# Get Sub CA CSR
+aws acm-pca get-certificate-authority-csr \
+  --certificate-authority-arn $SUB_CA_ARN \
+  --output text > /tmp/sub-ca.csr 2>/dev/null && \
+  echo "✅ Subordinate CA CSR retrieved"
+
+# Issue Sub CA certificate from Root CA
+SUB_CERT_ARN=$(aws acm-pca issue-certificate \
+  --certificate-authority-arn $ROOT_CA_ARN \
+  --csr fileb:///tmp/sub-ca.csr \
+  --signing-algorithm SHA256WITHRSA \
+  --template-arn \
+    arn:aws:acm-pca:::template/SubordinateCACertificate_PathLen0/V1 \
+  --validity Value=5,Type=YEARS \
+  --query 'CertificateArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$SUB_CERT_ARN" ]; then
+  echo "✅ Subordinate CA certificate issued by Root CA"
+  echo "   Cert ARN: $SUB_CERT_ARN"
+
+  # Wait for certificate
+  sleep 5
+
+  # Download Sub CA certificate and chain
+  aws acm-pca get-certificate \
+    --certificate-authority-arn $ROOT_CA_ARN \
+    --certificate-arn $SUB_CERT_ARN \
+    --query 'Certificate' \
+    --output text > /tmp/sub-ca-cert.pem 2>/dev/null
+
+  aws acm-pca get-certificate \
+    --certificate-authority-arn $ROOT_CA_ARN \
+    --certificate-arn $SUB_CERT_ARN \
+    --query 'CertificateChain' \
+    --output text > /tmp/sub-ca-chain.pem 2>/dev/null
+
+  echo "✅ Sub CA certificate and chain downloaded"
+
+  # Install Sub CA certificate
+  aws acm-pca import-certificate-authority-certificate \
+    --certificate-authority-arn $SUB_CA_ARN \
+    --certificate fileb:///tmp/sub-ca-cert.pem \
+    --certificate-chain fileb:///tmp/sub-ca-chain.pem \
+    2>/dev/null && \
+    echo "✅ Subordinate CA certificate installed" || \
+    echo "⚠️  Could not install Sub CA certificate"
+fi
+
+# Step 7: Disable Root CA (security best practice)
+echo ""
+echo "[7] Disabling Root CA (security best practice)..."
+echo "    Root CA should only be active when signing Sub CAs"
+aws acm-pca update-certificate-authority \
+  --certificate-authority-arn $ROOT_CA_ARN \
+  --status DISABLED 2>/dev/null && \
+  echo "✅ Root CA DISABLED (best practice)" || \
+  echo "⚠️  Could not disable Root CA"
+
+# Step 8: Verify CA hierarchy
+echo ""
+echo "[8] Verifying CA hierarchy..."
+for CA_ARN in $ROOT_CA_ARN $SUB_CA_ARN; do
+  echo ""
+  echo "--- CA: $CA_ARN ---"
+  aws acm-pca describe-certificate-authority \
+    --certificate-authority-arn $CA_ARN \
+    --query 'CertificateAuthority.{
+      Type:Type,
+      Status:Status,
+      Subject:CertificateAuthorityConfiguration.Subject.CommonName,
+      KeyAlgorithm:CertificateAuthorityConfiguration.KeyAlgorithm,
+      Created:CreatedAt
+    }' \
+    --output table 2>/dev/null
+done
+
+echo ""
+echo "================================================"
+echo "Part 3 Complete!"
+echo "CA Hierarchy created:"
+echo "  Root CA: Lab101 Root CA (DISABLED)"
+echo "  Sub CA:  Lab101 Subordinate CA (ACTIVE)"
+echo "  CRL:     Published to S3: $CRL_BUCKET"
+echo "  OCSP:    AWS managed endpoint"
+echo "================================================"
+```
+
+---
+
+## Part 4 — Issue & Manage Certificates from Private CA
+
+```bash
+#!/bin/bash
+# Lab 101 - Part 4: Issue Certificates from Private CA
+# Day 36 - AWS Security Specialist Study Plan
+
+source /tmp/lab101-env.sh
+
+echo "================================================"
+echo "  Part 4: Issue Certificates from Private CA"
+echo "================================================"
+
+# Step 1: Issue server certificate via ACM
+echo ""
+echo "[1] Issuing server certificate via ACM + Private CA..."
+PRIVATE_CERT_ARN=$(aws acm request-certificate \
+  --domain-name "internal-api.lab101.local" \
+  --subject-alternative-names \
+    "service-a.lab101.local" \
+    "service-b.lab101.local" \
+  --certificate-authority-arn $SUB_CA_ARN \
+  --tags Key=Lab,Value=Lab101 \
+         Key=Type,Value=ServerCert \
+         Key=Service,Value=InternalAPI \
+  --query 'CertificateArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$PRIVATE_CERT_ARN" ]; then
+  echo "✅ Private certificate issued"
+  echo "   ARN: $PRIVATE_CERT_ARN"
+  echo "export PRIVATE_CERT_ARN=\"$PRIVATE_CERT_ARN\"" \
+    >> /tmp/lab101-env.sh
+else
+  echo "⚠️  Could not issue certificate"
+fi
+
+# Step 2: Issue certificate directly via ACM Private CA API
+echo ""
+echo "[2] Issuing certificate directly via Private CA API..."
+
+# Generate key pair locally (for direct issuance)
+openssl genrsa -out /tmp/client-key.pem 2048 2>/dev/null && \
+  echo "✅ RSA key pair generated"
+
+# Generate CSR
+openssl req -new \
+  -key /tmp/client-key.pem \
+  -out /tmp/client.csr \
+  -subj "/CN=client.lab101.local/O=Lab101 Corp/C=IN" \
+  2>/dev/null && echo "✅ CSR generated"
+
+# Issue certificate from Sub CA
+CLIENT_CERT_ARN=$(aws acm-pca issue-certificate \
+  --certificate-authority-arn $SUB_CA_ARN \
+  --csr fileb:///tmp/client.csr \
+  --signing-algorithm SHA256WITHRSA \
+  --template-arn \
+    arn:aws:acm-pca:::template/EndEntityCertificate/V1 \
+  --validity Value=365,Type=DAYS \
+  --query 'CertificateArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$CLIENT_CERT_ARN" ]; then
+  echo "✅ Client certificate issued"
+  echo "   ARN: $CLIENT_CERT_ARN"
+  echo "export CLIENT_CERT_ARN=\"$CLIENT_CERT_ARN\"" \
+    >> /tmp/lab101-env.sh
+
+  # Wait and download
+  sleep 5
+  aws acm-pca get-certificate \
+    --certificate-authority-arn $SUB_CA_ARN \
+    --certificate-arn $CLIENT_CERT_ARN \
+    --query 'Certificate' \
+    --output text > /tmp/client-cert.pem 2>/dev/null && \
+    echo "✅ Client certificate downloaded"
+
+  # Show certificate details
+  echo ""
+  echo "Certificate details:"
+  openssl x509 -in /tmp/client-cert.pem \
+    -noout -subject -issuer -dates 2>/dev/null
+fi
+
+# Step 3: Export certificate with private key
+echo ""
+echo "[3] Exporting ACM Private CA certificate..."
+if [ ! -z "$PRIVATE_CERT_ARN" ]; then
+  aws acm export-certificate \
+    --certificate-arn $PRIVATE_CERT_ARN \
+    --passphrase "Lab101Export@Pass!" \
+    --query '{
+      Certificate:Certificate,
+      CertificateChain:CertificateChain
+    }' \
+    --output json 2>/dev/null | \
+    python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print('Certificate excerpt:')
+print(data.get('Certificate','')[:100],'...')
+print('Chain excerpt:')
+print(data.get('CertificateChain','')[:100],'...')
+print('✅ Export successful (private key included)')
+print('   Private key encrypted with passphrase')
+" 2>/dev/null || \
+    echo "ℹ️  Export requires ISSUED status — cert may still be pending"
+fi
+
+# Step 4: Revoke a certificate
+echo ""
+echo "[4] Revoking client certificate (testing revocation)..."
+if [ ! -z "$CLIENT_CERT_ARN" ]; then
+  # Get certificate serial number
+  SERIAL=$(aws acm-pca get-certificate \
+    --certificate-authority-arn $SUB_CA_ARN \
+    --certificate-arn $CLIENT_CERT_ARN \
+    --query 'Certificate' \
+    --output text 2>/dev/null | \
+    openssl x509 -noout -serial 2>/dev/null | \
+    cut -d= -f2)
+
+  echo "Certificate serial: $SERIAL"
+
+  if [ ! -z "$SERIAL" ]; then
+    aws acm-pca revoke-certificate \
+      --certificate-authority-arn $SUB_CA_ARN \
+      --certificate-serial $SERIAL \
+      --revocation-reason KEY_COMPROMISE 2>/dev/null && \
+      echo "✅ Certificate revoked (reason: KEY_COMPROMISE)" || \
+      echo "⚠️  Could not revoke certificate"
+  fi
+fi
+
+# Step 5: List issued certificates
+echo ""
+echo "[5] Listing certificates issued by Sub CA..."
+aws acm-pca list-certificates \
+  --certificate-authority-arn $SUB_CA_ARN \
+  --query 'CertificateSummaryList[*].{
+    ARN:Arn,
+    Status:Status
+  }' \
+  --output table 2>/dev/null
+
+# Step 6: Get CA certificate chain
+echo ""
+echo "[6] Getting CA certificate chain..."
+aws acm-pca get-certificate-authority-certificate \
+  --certificate-authority-arn $SUB_CA_ARN \
+  --query '{
+    CertificateExcerpt:Certificate,
+    ChainExcerpt:CertificateChain
+  }' \
+  --output json 2>/dev/null | \
+  python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+cert = data.get('CertificateExcerpt','')
+chain = data.get('ChainExcerpt','')
+print(f'Sub CA cert length: {len(cert)} chars')
+print(f'Chain length: {len(chain)} chars')
+print('✅ CA certificate chain retrieved successfully')
+"
+
+echo ""
+echo "================================================"
+echo "Part 4 Complete!"
+echo "Certificates managed:"
+echo "  1. Server cert via ACM + Private CA"
+echo "  2. Client cert via direct Private CA API"
+echo "  3. Export demonstrated"
+echo "  4. Revocation tested"
+echo "================================================"
+```
+
+---
+
+## Part 5 — Certificate Expiry Monitoring
+
+```bash
+#!/bin/bash
+# Lab 101 - Part 5: Certificate Expiry Monitoring
+# Day 36 - AWS Security Specialist Study Plan
+
+source /tmp/lab101-env.sh
+
+echo "================================================"
+echo "  Part 5: Certificate Expiry Monitoring"
+echo "================================================"
+
+# Step 1: Create SNS topic for cert alerts
+echo ""
+echo "[1] Creating SNS topic for certificate alerts..."
+CERT_ALERT_TOPIC=$(aws sns create-topic \
+  --name "Lab101-CertificateAlerts" \
+  --tags Key=Lab,Value=Lab101 \
+  --query 'TopicArn' \
+  --output text 2>/dev/null)
+
+echo "✅ SNS topic created: $CERT_ALERT_TOPIC"
+echo "export CERT_ALERT_TOPIC=\"$CERT_ALERT_TOPIC\"" \
+  >> /tmp/lab101-env.sh
+
+# Step 2: EventBridge rule for ACM expiry events
+echo ""
+echo "[2] Creating EventBridge rule for cert expiry..."
+aws events put-rule \
+  --name "Lab101-CertApproachingExpiry" \
+  --event-pattern '{
+    "source": ["aws.acm"],
+    "detail-type": [
+      "ACM Certificate Approaching Expiry"
+    ]
+  }' \
+  --state ENABLED \
+  --description "Alert when ACM cert approaching expiry" \
+  --output table 2>/dev/null && \
+  echo "✅ EventBridge expiry rule created"
+
+# Step 3: Add SNS target to EventBridge rule
+echo ""
+echo "[3] Adding SNS target to EventBridge rule..."
+aws events put-targets \
+  --rule "Lab101-CertApproachingExpiry" \
+  --targets "Id=CertAlertSNS,Arn=$CERT_ALERT_TOPIC" \
+  2>/dev/null && \
+  echo "✅ SNS target added to EventBridge rule"
+
+# Step 4: EventBridge rule for rotation failure
+echo ""
+echo "[4] Creating EventBridge rule for cert changes..."
+aws events put-rule \
+  --name "Lab101-CertStateChange" \
+  --event-pattern '{
+    "source": ["aws.acm"],
+    "detail-type": [
+      "ACM Certificate Approaching Expiry",
+      "AWS Health Event"
+    ]
+  }' \
+  --state ENABLED \
+  --description "Monitor certificate state changes" \
+  --output table 2>/dev/null && \
+  echo "✅ Certificate state change rule created"
+
+# Step 5: Create Config rule for cert monitoring
+echo ""
+echo "[5] Creating AWS Config rule for ACM..."
+aws configservice put-config-rule \
+  --config-rule '{
+    "ConfigRuleName": "Lab101-ACMCertExpiry",
+    "Description": "Check for certificates expiring within 30 days",
+    "Source": {
+      "Owner": "AWS",
+      "SourceIdentifier": "ACM_CERTIFICATE_EXPIRATION_CHECK"
+    },
+    "InputParameters": "{\"daysToExpiration\":\"30\"}",
+    "Scope": {
+      "ComplianceResourceTypes": [
+        "AWS::ACM::Certificate"
+      ]
+    }
+  }' \
+  2>/dev/null && \
+  echo "✅ AWS Config rule created for cert expiry" || \
+  echo "⚠️  Config rule creation failed (Config may not be enabled)"
+
+# Step 6: Lambda function for cert audit
+echo ""
+echo "[6] Certificate audit Lambda reference..."
+cat << 'LAMBDAREF'
+# Lambda function to audit all certificates
+
+import boto3
+import json
+from datetime import datetime, timezone, timedelta
+
+def lambda_handler(event, context):
+    acm = boto3.client('acm')
+    sns = boto3.client('sns')
+
+    # List all certificates
+    response = acm.list_certificates(
+        CertificateStatuses=['ISSUED', 'PENDING_VALIDATION']
+    )
+
+    expiring_soon = []
+    thirty_days = datetime.now(timezone.utc) + timedelta(days=30)
+
+    for cert_summary in response['CertificateSummaryList']:
+        cert_arn = cert_summary['CertificateArn']
+
+        # Get certificate details
+        cert = acm.describe_certificate(
+            CertificateArn=cert_arn
+        )['Certificate']
+
+        not_after = cert.get('NotAfter')
+        if not_after and not_after < thirty_days:
+            expiring_soon.append({
+                'domain': cert.get('DomainName'),
+                'arn': cert_arn,
+                'expires': str(not_after),
+                'days_left': (not_after - datetime.now(
+                    timezone.utc)).days,
+                'type': cert.get('Type'),
+                'renewal': cert.get('RenewalEligibility')
+            })
+
+    if expiring_soon:
+        message = f"⚠️ {len(expiring_soon)} certificates expiring soon:\n"
+        for cert in expiring_soon:
+            message += (
+                f"\n- {cert['domain']}\n"
+                f"  Days left: {cert['days_left']}\n"
+                f"  Type: {cert['type']}\n"
+                f"  Auto-renewal: {cert['renewal']}\n"
+            )
+
+        sns.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Subject='ACM Certificate Expiry Alert',
+            Message=message
+        )
+        print(f"Alert sent for {len(expiring_soon)} certs")
+    else:
+        print("No certificates expiring within 30 days")
+
+    return {'expiring': len(expiring_soon)}
+LAMBDAREF
+
+# Step 7: Check current certificate expiry status
+echo ""
+echo "[7] Checking current certificate details..."
+for CERT in $CERT_ARN $WILDCARD_CERT_ARN; do
+  if [ ! -z "$CERT" ]; then
+    echo ""
+    echo "Certificate: $CERT"
+    aws acm describe-certificate \
+      --certificate-arn $CERT \
+      --query 'Certificate.{
+        Domain:DomainName,
+        Status:Status,
+        NotAfter:NotAfter,
+        RenewalEligibility:RenewalEligibility,
+        Type:Type
+      }' \
+      --output table 2>/dev/null
+  fi
+done
+
+# Step 8: Audit summary of key events
+echo ""
+echo "[8] Key CloudTrail events for ACM audit..."
+cat << 'EOF'
+┌──────────────────────────────────┬────────────────────────────┐
+│ ACM CloudTrail Event             │ Security Significance      │
+├──────────────────────────────────┼────────────────────────────┤
+│ RequestCertificate               │ New cert requested         │
+│ ImportCertificate                │ External cert imported     │
+│ DeleteCertificate                │ Certificate deleted        │
+│ AddTagsToCertificate             │ Tags added                 │
+│ RemoveTagsFromCertificate        │ Tags removed               │
+├──────────────────────────────────┼────────────────────────────┤
+│ ACM Private CA Events            │                            │
+├──────────────────────────────────┼────────────────────────────┤
+│ CreateCertificateAuthority       │ New CA created             │
+│ IssueCertificate                 │ Certificate issued         │
+│ RevokeCertificate                │ Certificate revoked        │
+│ DeleteCertificateAuthority       │ CA deleted                 │
+│ UpdateCertificateAuthority       │ CA status changed          │
+│ ImportCertificateAuthorityCert   │ CA cert installed          │
+└──────────────────────────────────┴────────────────────────────┘
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 5 Complete!"
+echo "Monitoring configured:"
+echo "  - SNS topic for cert alerts"
+echo "  - EventBridge for expiry events"
+echo "  - AWS Config rule for compliance"
+echo "  - Lambda audit pattern documented"
+echo "================================================"
+```
+
+---
+
+## Part 6 — CloudTrail Audit
+
+```bash
+#!/bin/bash
+# Lab 101 - Part 6: CloudTrail Audit
+# Day 36 - AWS Security Specialist Study Plan
+
+source /tmp/lab101-env.sh
+
+echo "================================================"
+echo "  Part 6: CloudTrail Audit"
+echo "================================================"
+
+# Step 1: Search ACM events
+echo ""
+echo "[1] Searching CloudTrail for ACM events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventSource,\
+AttributeValue=acm.amazonaws.com \
+  --max-results 15 \
+  --query 'Events[*].{
+    Time:EventTime,
+    Event:EventName,
+    User:Username
+  }' \
+  --output table 2>/dev/null
+
+# Step 2: Search Private CA events
+echo ""
+echo "[2] Searching CloudTrail for Private CA events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventSource,\
+AttributeValue=acm-pca.amazonaws.com \
+  --max-results 15 \
+  --query 'Events[*].{
+    Time:EventTime,
+    Event:EventName,
+    User:Username
+  }' \
+  --output table 2>/dev/null
+
+# Step 3: Search for certificate issuance
+echo ""
+echo "[3] Searching for IssueCertificate events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventName,\
+AttributeValue=IssueCertificate \
+  --query 'Events[*].{
+    Time:EventTime,
+    User:Username,
+    Event:EventName
+  }' \
+  --output table 2>/dev/null
+
+# Step 4: Search for revocation events
+echo ""
+echo "[4] Searching for RevokeCertificate events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventName,\
+AttributeValue=RevokeCertificate \
+  --query 'Events[*].{
+    Time:EventTime,
+    User:Username,
+    Event:EventName
+  }' \
+  --output table 2>/dev/null
+
+echo ""
+echo "================================================"
+echo "Part 6 Complete!"
+echo "All ACM and Private CA events auditable"
+echo "via CloudTrail."
+echo "================================================"
+```
+
+---
+
+## Part 7 — Cleanup
+
+```bash
+#!/bin/bash
+# Lab 101 - Part 7: Cleanup
+# Day 36 - AWS Security Specialist Study Plan
+# ⚠️  CRITICAL: Delete Private CAs immediately to stop $400/month charges!
+
+source /tmp/lab101-env.sh
+
+echo "================================================"
+echo "  Part 7: Lab Cleanup"
+echo "  ⚠️  CRITICAL: Delete CAs to stop charges!"
+echo "================================================"
+
+# Step 1: Delete ACM public certificates
+echo ""
+echo "[1] Deleting ACM public certificates..."
+for CERT in $CERT_ARN $WILDCARD_CERT_ARN; do
+  if [ ! -z "$CERT" ]; then
+    aws acm delete-certificate \
+      --certificate-arn $CERT 2>/dev/null && \
+      echo "✅ Deleted: $CERT" || \
+      echo "⚠️  Could not delete (may be in use): $CERT"
+  fi
+done
+
+# Delete CloudFront cert in us-east-1
+if [ ! -z "$CF_CERT_ARN" ]; then
+  aws acm delete-certificate \
+    --certificate-arn $CF_CERT_ARN \
+    --region us-east-1 2>/dev/null && \
+    echo "✅ Deleted CloudFront cert"
+fi
+
+# Delete private cert
+if [ ! -z "$PRIVATE_CERT_ARN" ]; then
+  aws acm delete-certificate \
+    --certificate-arn $PRIVATE_CERT_ARN 2>/dev/null && \
+    echo "✅ Deleted private cert"
+fi
+
+# Step 2: Delete ACM Private CA certificates first
+echo ""
+echo "[2] Cleaning up Private CA issued certs..."
+# Certificates are deleted with the CA
+
+# Step 3: Delete Subordinate CA
+echo ""
+echo "[3] Deleting Subordinate CA..."
+if [ ! -z "$SUB_CA_ARN" ]; then
+  # Must disable before delete
+  aws acm-pca update-certificate-authority \
+    --certificate-authority-arn $SUB_CA_ARN \
+    --status DISABLED 2>/dev/null && \
+    echo "✅ Sub CA disabled"
+
+  aws acm-pca delete-certificate-authority \
+    --certificate-authority-arn $SUB_CA_ARN \
+    --permanent-deletion-time-in-days 7 \
+    2>/dev/null && \
+    echo "✅ Sub CA scheduled for deletion (7 days)" || \
+    echo "⚠️  Could not delete Sub CA"
+fi
+
+# Step 4: Delete Root CA
+echo ""
+echo "[4] Deleting Root CA..."
+if [ ! -z "$ROOT_CA_ARN" ]; then
+  # Re-enable to delete (must not be DISABLED to delete? No - can delete disabled)
+  aws acm-pca delete-certificate-authority \
+    --certificate-authority-arn $ROOT_CA_ARN \
+    --permanent-deletion-time-in-days 7 \
+    2>/dev/null && \
+    echo "✅ Root CA scheduled for deletion (7 days)" || \
+    echo "⚠️  Could not delete Root CA"
+fi
+
+# Step 5: Delete S3 CRL bucket
+echo ""
+echo "[5] Deleting CRL S3 bucket..."
+if [ ! -z "$CRL_BUCKET" ]; then
+  # Empty bucket first
+  aws s3 rm s3://$CRL_BUCKET --recursive \
+    2>/dev/null && echo "✅ Bucket emptied"
+
+  aws s3 rb s3://$CRL_BUCKET \
+    2>/dev/null && echo "✅ CRL bucket deleted"
+fi
+
+# Step 6: Delete SNS topic
+echo ""
+echo "[6] Deleting SNS topic..."
+if [ ! -z "$CERT_ALERT_TOPIC" ]; then
+  aws sns delete-topic \
+    --topic-arn $CERT_ALERT_TOPIC 2>/dev/null && \
+    echo "✅ SNS topic deleted"
+fi
+
+# Step 7: Delete EventBridge rules
+echo ""
+echo "[7] Deleting EventBridge rules..."
+for RULE in \
+  "Lab101-CertApproachingExpiry" \
+  "Lab101-CertStateChange"; do
+  aws events remove-targets \
+    --rule $RULE \
+    --ids "CertAlertSNS" 2>/dev/null
+  aws events delete-rule \
+    --name $RULE \
+    --force 2>/dev/null && \
+    echo "✅ Deleted rule: $RULE"
+done
+
+# Step 8: Delete Config rule
+echo ""
+echo "[8] Deleting Config rule..."
+aws configservice delete-config-rule \
+  --config-rule-name "Lab101-ACMCertExpiry" \
+  2>/dev/null && echo "✅ Config rule deleted"
+
+# Step 9: Cleanup temp files
+echo ""
+echo "[9] Cleaning up temp files..."
+rm -f /tmp/lab101-env.sh \
+      /tmp/root-ca.csr \
+      /tmp/root-ca-cert.pem \
+      /tmp/sub-ca.csr \
+      /tmp/sub-ca-cert.pem \
+      /tmp/sub-ca-chain.pem \
+      /tmp/client-key.pem \
+      /tmp/client.csr \
+      /tmp/client-cert.pem \
+      /tmp/crl-bucket-policy.json \
+      /tmp/dns-validation.json
+echo "✅ Temp files cleaned"
+
+echo ""
+echo "================================================"
+echo "Lab 101 Cleanup Complete!"
+echo ""
+echo "⚠️  Private CAs in 7-day deletion window"
+echo "    Charges STOP once deletion initiated"
+echo "    Cannot be recovered after 7 days"
+echo "================================================"
+```
+
+---
+
+## ✅ Lab 101 Verification Checklist
+
+```
+Lab 101 — Completion Checklist
+│
+├── Prerequisites
+│     ├── [ ] Verified identity and region
+│     └── [ ] Checked existing certs and CAs
+│
+├── Part 1: ACM Public Certificates
+│     ├── [ ] Requested cert with DNS validation
+│     ├── [ ] Requested wildcard certificate
+│     ├── [ ] Requested CloudFront cert (us-east-1)
+│     ├── [ ] Retrieved DNS validation CNAME records
+│     └── [ ] Understood Route 53 auto-validation
+│
+├── Part 2: Certificate Lifecycle
+│     ├── [ ] Inspected full certificate metadata
+│     ├── [ ] Added tags to certificate
+│     ├── [ ] Understood import/reimport flow
+│     ├── [ ] Understood ALB association
+│     └── [ ] Understood SNI multi-cert pattern
+│
+├── Part 3: Private CA Hierarchy
+│     ├── [ ] Created S3 bucket for CRL
+│     ├── [ ] Created Root CA with CRL + OCSP
+│     ├── [ ] Installed self-signed Root CA cert
+│     ├── [ ] Created Subordinate CA
+│     ├── [ ] Signed Sub CA with Root CA
+│     └── [ ] Disabled Root CA (best practice)
+│
+├── Part 4: Issue & Manage Certs
+│     ├── [ ] Issued server cert via ACM + Private CA
+│     ├── [ ] Issued client cert via direct API + CSR
+│     ├── [ ] Exported certificate with private key
+│     └── [ ] Revoked certificate (KEY_COMPROMISE)
+│
+├── Part 5: Expiry Monitoring
+│     ├── [ ] Created SNS alert topic
+│     ├── [ ] Created EventBridge expiry rule
+│     ├── [ ] Created AWS Config compliance rule
+│     └── [ ] Understood Lambda audit pattern
+│
+├── Part 6: CloudTrail Audit
+│     ├── [ ] Searched ACM events
+│     ├── [ ] Searched Private CA events
+│     └── [ ] Identified key audit events
+│
+└── Part 7: Cleanup
+      ├── [ ] All ACM certs deleted
+      ├── [ ] Both CAs deletion initiated
+      └── [ ] S3 bucket and monitoring resources deleted
+```
+
+---
+
+## 🔑 Lab 101 Key Takeaways
+
+| Concept | What You Practiced |
+|---|---|
+| DNS validation | CNAME records — must stay permanently |
+| us-east-1 requirement | CloudFront cert must be in us-east-1 |
+| Wildcard certificates | Covers one subdomain level only |
+| CA hierarchy | Root CA signs Sub CA → Sub CA issues end-entity |
+| Root CA security | Disable Root CA when not actively signing |
+| CRL configuration | S3 bucket with ACM PCA write permissions |
+| OCSP | Real-time revocation — AWS managed endpoint |
+| Certificate revocation | KEY_COMPROMISE reason code |
+| Export | Private CA certs exportable, public certs NOT |
+| Expiry monitoring | EventBridge native ACM events + SNS |
+| Cost awareness | Delete Private CAs immediately after lab |
+
+---
+
+# 🎉 Day 36 — Fully Complete!
+
+All three sections done at full depth:
+- ✅ **Section 1** — Full Theory (1.1 to 1.6)
+- ✅ **Section 2** — 20 Exam Q&A + Traps + Cheat Sheet
+- ✅ **Section 3** — Lab 101 (7 parts, full scripts)
+
+---
+
+## 📅 Day 37 Preview
+```
+Day 37: AWS WAF & Shield (3 hours)
+├── WAF web ACLs and rule groups
+├── WAF managed rules (AWS + marketplace)
+├── Rate limiting and bot control
+├── Shield Standard vs Advanced
+├── Shield Response Team (SRT)
+├── DDoS protection architecture
+└── Lab 102: WAF web ACL creation and testing
+```
+
+Ready when you are Pradeep! 💪

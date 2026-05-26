@@ -1,0 +1,1575 @@
+# 📅 Day 38 — Section 3: Lab 103
+## Amazon Cognito — Part A
+
+---
+
+## 🎯 Lab Objective
+In this lab you will:
+- Create and configure Cognito User Pool
+- Set up App Client with OAuth flows
+- Configure MFA and password policies
+- Create Identity Pool with role mapping
+- Test authentication flows
+- Configure Lambda triggers
+- Set up monitoring and auditing
+- Cleanup all resources
+
+---
+
+## Prerequisites Check
+
+```bash
+#!/bin/bash
+# Lab 103 - Prerequisites Check
+# Day 38 - AWS Security Specialist Study Plan
+
+echo "================================================"
+echo "  Lab 103: Amazon Cognito Prerequisites"
+echo "================================================"
+
+# Step 1: Verify identity
+echo ""
+echo "[1] Verifying AWS identity..."
+aws sts get-caller-identity --output table
+
+# Step 2: Capture environment
+ACCOUNT_ID=$(aws sts get-caller-identity \
+  --query Account --output text)
+REGION=$(aws configure get region)
+CALLER_ARN=$(aws sts get-caller-identity \
+  --query Arn --output text)
+
+echo ""
+echo "Account ID : $ACCOUNT_ID"
+echo "Region     : $REGION"
+echo "Caller ARN : $CALLER_ARN"
+
+# Step 3: Check existing User Pools
+echo ""
+echo "[2] Checking existing User Pools..."
+aws cognito-idp list-user-pools \
+  --max-results 10 \
+  --query 'UserPools[*].{
+    Id:Id,
+    Name:Name,
+    CreationDate:CreationDate
+  }' \
+  --output table 2>/dev/null || \
+  echo "No existing User Pools"
+
+# Step 4: Check existing Identity Pools
+echo ""
+echo "[3] Checking existing Identity Pools..."
+aws cognito-identity list-identity-pools \
+  --max-results 10 \
+  --query 'IdentityPools[*].{
+    Id:IdentityPoolId,
+    Name:IdentityPoolName
+  }' \
+  --output table 2>/dev/null || \
+  echo "No existing Identity Pools"
+
+# Step 5: Save environment
+cat > /tmp/lab103-env.sh << EOF
+export ACCOUNT_ID="$ACCOUNT_ID"
+export REGION="$REGION"
+export CALLER_ARN="$CALLER_ARN"
+EOF
+
+echo ""
+echo "✅ Environment saved to /tmp/lab103-env.sh"
+echo "================================================"
+echo "Prerequisites check complete!"
+echo "================================================"
+```
+
+---
+
+## Part 1 — Create User Pool with Security Configuration
+
+```bash
+#!/bin/bash
+# Lab 103 - Part 1: Create User Pool
+# Day 38 - AWS Security Specialist Study Plan
+
+source /tmp/lab103-env.sh
+
+echo "================================================"
+echo "  Part 1: Create User Pool"
+echo "================================================"
+
+# Step 1: Create User Pool with full security config
+echo ""
+echo "[1] Creating User Pool with security settings..."
+
+USER_POOL_ID=$(aws cognito-idp create-user-pool \
+  --pool-name "Lab103-UserPool" \
+  --policies '{
+    "PasswordPolicy": {
+      "MinimumLength": 12,
+      "RequireUppercase": true,
+      "RequireLowercase": true,
+      "RequireNumbers": true,
+      "RequireSymbols": true,
+      "TemporaryPasswordValidityDays": 7
+    }
+  }' \
+  --auto-verified-attributes email \
+  --username-attributes email \
+  --mfa-configuration "ON" \
+  --software-token-mfa-configuration \
+    Enabled=true \
+  --account-recovery-setting '{
+    "RecoveryMechanisms": [
+      {"Priority": 1, "Name": "verified_email"}
+    ]
+  }' \
+  --admin-create-user-config '{
+    "AllowAdminCreateUserOnly": false,
+    "InviteMessageTemplate": {
+      "EmailMessage": "Your username is {username} and temporary password is {####}",
+      "EmailSubject": "Your Lab103 App Invitation"
+    }
+  }' \
+  --schema '[
+    {
+      "Name": "department",
+      "AttributeDataType": "String",
+      "Mutable": true,
+      "Required": false,
+      "StringAttributeConstraints": {
+        "MinLength": "1",
+        "MaxLength": "50"
+      }
+    },
+    {
+      "Name": "employee_id",
+      "AttributeDataType": "String",
+      "Mutable": false,
+      "Required": false
+    }
+  ]' \
+  --user-pool-tags Lab=Lab103 Environment=Production \
+  --query 'UserPool.Id' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$USER_POOL_ID" ]; then
+  echo "✅ User Pool created"
+  echo "   ID: $USER_POOL_ID"
+  echo "export USER_POOL_ID=\"$USER_POOL_ID\"" \
+    >> /tmp/lab103-env.sh
+else
+  echo "⚠️  Could not create User Pool"
+fi
+
+# Step 2: Get User Pool ARN
+USER_POOL_ARN=$(aws cognito-idp describe-user-pool \
+  --user-pool-id $USER_POOL_ID \
+  --query 'UserPool.Arn' \
+  --output text 2>/dev/null)
+
+echo "export USER_POOL_ARN=\"$USER_POOL_ARN\"" \
+  >> /tmp/lab103-env.sh
+echo "   ARN: $USER_POOL_ARN"
+
+# Step 3: Create user groups
+echo ""
+echo "[2] Creating user groups..."
+for GROUP in "Admins" "PremiumUsers" "BasicUsers"; do
+  aws cognito-idp create-group \
+    --user-pool-id $USER_POOL_ID \
+    --group-name $GROUP \
+    --description "Lab103 $GROUP group" \
+    --precedence $([ "$GROUP" = "Admins" ] && \
+      echo 1 || \
+      [ "$GROUP" = "PremiumUsers" ] && \
+      echo 2 || echo 3) \
+    2>/dev/null && \
+    echo "✅ Group created: $GROUP" || \
+    echo "⚠️  Could not create group: $GROUP"
+done
+
+# Step 4: Create test users
+echo ""
+echo "[3] Creating test users..."
+
+# Admin user
+aws cognito-idp admin-create-user \
+  --user-pool-id $USER_POOL_ID \
+  --username "admin@lab103.com" \
+  --temporary-password "TempPass@123!" \
+  --user-attributes \
+    Name=email,Value=admin@lab103.com \
+    Name=email_verified,Value=true \
+    Name=custom:department,Value=Security \
+    Name=custom:employee_id,Value=EMP001 \
+  --message-action SUPPRESS \
+  2>/dev/null && echo "✅ Admin user created"
+
+# Regular user
+aws cognito-idp admin-create-user \
+  --user-pool-id $USER_POOL_ID \
+  --username "user@lab103.com" \
+  --temporary-password "TempPass@123!" \
+  --user-attributes \
+    Name=email,Value=user@lab103.com \
+    Name=email_verified,Value=true \
+    Name=custom:department,Value=Engineering \
+    Name=custom:employee_id,Value=EMP002 \
+  --message-action SUPPRESS \
+  2>/dev/null && echo "✅ Regular user created"
+
+# Step 5: Add users to groups
+echo ""
+echo "[4] Adding users to groups..."
+aws cognito-idp admin-add-user-to-group \
+  --user-pool-id $USER_POOL_ID \
+  --username "admin@lab103.com" \
+  --group-name "Admins" \
+  2>/dev/null && echo "✅ Admin added to Admins group"
+
+aws cognito-idp admin-add-user-to-group \
+  --user-pool-id $USER_POOL_ID \
+  --username "user@lab103.com" \
+  --group-name "BasicUsers" \
+  2>/dev/null && echo "✅ User added to BasicUsers group"
+
+# Step 6: Verify User Pool configuration
+echo ""
+echo "[5] Verifying User Pool configuration..."
+aws cognito-idp describe-user-pool \
+  --user-pool-id $USER_POOL_ID \
+  --query 'UserPool.{
+    Name:Name,
+    Status:Status,
+    MfaConfiguration:MfaConfiguration,
+    EstimatedNumberOfUsers:EstimatedNumberOfUsers
+  }' \
+  --output table 2>/dev/null
+
+echo ""
+echo "================================================"
+echo "Part 1 Complete!"
+echo "User Pool: $USER_POOL_ID"
+echo "Groups: Admins, PremiumUsers, BasicUsers"
+echo "Users: admin@lab103.com, user@lab103.com"
+echo "MFA: REQUIRED (TOTP)"
+echo "================================================"
+```
+
+---
+
+## Part 2 — Create App Client & Domain
+
+```bash
+#!/bin/bash
+# Lab 103 - Part 2: App Client & Domain
+# Day 38 - AWS Security Specialist Study Plan
+
+source /tmp/lab103-env.sh
+
+echo "================================================"
+echo "  Part 2: App Client & Hosted UI Domain"
+echo "================================================"
+
+# Step 1: Create server-side app client (with secret)
+echo ""
+echo "[1] Creating server-side App Client (confidential)..."
+SERVER_CLIENT=$(aws cognito-idp create-user-pool-client \
+  --user-pool-id $USER_POOL_ID \
+  --client-name "Lab103-ServerApp" \
+  --generate-secret \
+  --explicit-auth-flows \
+    ALLOW_USER_SRP_AUTH \
+    ALLOW_REFRESH_TOKEN_AUTH \
+  --supported-identity-providers COGNITO \
+  --allowed-o-auth-flows code \
+  --allowed-o-auth-scopes \
+    openid email profile \
+  --allowed-o-auth-flows-user-pool-client \
+  --callback-urls \
+    "https://localhost:3000/callback" \
+  --logout-urls \
+    "https://localhost:3000/logout" \
+  --token-validity-units '{
+    "AccessToken": "hours",
+    "IdToken": "hours",
+    "RefreshToken": "days"
+  }' \
+  --access-token-validity 1 \
+  --id-token-validity 1 \
+  --refresh-token-validity 30 \
+  --output json 2>/dev/null)
+
+SERVER_CLIENT_ID=$(echo $SERVER_CLIENT | \
+  python3 -c \
+  "import sys,json; \
+  print(json.load(sys.stdin)\
+  ['UserPoolClient']['ClientId'])")
+
+if [ ! -z "$SERVER_CLIENT_ID" ]; then
+  echo "✅ Server App Client created"
+  echo "   Client ID: $SERVER_CLIENT_ID"
+  echo "export SERVER_CLIENT_ID=\"$SERVER_CLIENT_ID\"" \
+    >> /tmp/lab103-env.sh
+fi
+
+# Step 2: Create mobile/SPA app client (no secret, PKCE)
+echo ""
+echo "[2] Creating mobile App Client (public, no secret)..."
+MOBILE_CLIENT=$(aws cognito-idp create-user-pool-client \
+  --user-pool-id $USER_POOL_ID \
+  --client-name "Lab103-MobileApp" \
+  --no-generate-secret \
+  --explicit-auth-flows \
+    ALLOW_USER_SRP_AUTH \
+    ALLOW_REFRESH_TOKEN_AUTH \
+  --supported-identity-providers COGNITO \
+  --allowed-o-auth-flows code \
+  --allowed-o-auth-scopes \
+    openid email profile \
+  --allowed-o-auth-flows-user-pool-client \
+  --callback-urls \
+    "myapp://callback" \
+  --logout-urls \
+    "myapp://logout" \
+  --prevent-user-existence-errors ENABLED \
+  --enable-token-revocation \
+  --access-token-validity 1 \
+  --id-token-validity 1 \
+  --refresh-token-validity 7 \
+  --output json 2>/dev/null)
+
+MOBILE_CLIENT_ID=$(echo $MOBILE_CLIENT | \
+  python3 -c \
+  "import sys,json; \
+  print(json.load(sys.stdin)\
+  ['UserPoolClient']['ClientId'])")
+
+if [ ! -z "$MOBILE_CLIENT_ID" ]; then
+  echo "✅ Mobile App Client created (no secret)"
+  echo "   Client ID: $MOBILE_CLIENT_ID"
+  echo "export MOBILE_CLIENT_ID=\"$MOBILE_CLIENT_ID\"" \
+    >> /tmp/lab103-env.sh
+fi
+
+# Step 3: Create M2M app client (client credentials)
+echo ""
+echo "[3] Creating M2M App Client (client credentials)..."
+M2M_CLIENT=$(aws cognito-idp create-user-pool-client \
+  --user-pool-id $USER_POOL_ID \
+  --client-name "Lab103-ServiceClient" \
+  --generate-secret \
+  --explicit-auth-flows \
+    ALLOW_REFRESH_TOKEN_AUTH \
+  --allowed-o-auth-flows client_credentials \
+  --allowed-o-auth-flows-user-pool-client \
+  --supported-identity-providers COGNITO \
+  --output json 2>/dev/null)
+
+M2M_CLIENT_ID=$(echo $M2M_CLIENT | \
+  python3 -c \
+  "import sys,json; \
+  print(json.load(sys.stdin)\
+  ['UserPoolClient']['ClientId'])" \
+  2>/dev/null)
+
+if [ ! -z "$M2M_CLIENT_ID" ]; then
+  echo "✅ M2M Service Client created"
+  echo "   Client ID: $M2M_CLIENT_ID"
+  echo "export M2M_CLIENT_ID=\"$M2M_CLIENT_ID\"" \
+    >> /tmp/lab103-env.sh
+fi
+
+# Step 4: Create Cognito domain for Hosted UI
+echo ""
+echo "[4] Creating Cognito domain for Hosted UI..."
+DOMAIN_PREFIX="lab103-${ACCOUNT_ID}"
+
+aws cognito-idp create-user-pool-domain \
+  --user-pool-id $USER_POOL_ID \
+  --domain $DOMAIN_PREFIX \
+  2>/dev/null && \
+  echo "✅ Cognito domain created" && \
+  echo "   URL: https://${DOMAIN_PREFIX}.auth.${REGION}.amazoncognito.com" || \
+  echo "⚠️  Could not create domain (may already exist)"
+
+echo "export DOMAIN_PREFIX=\"$DOMAIN_PREFIX\"" \
+  >> /tmp/lab103-env.sh
+
+# Step 5: List app clients
+echo ""
+echo "[5] Listing App Clients..."
+aws cognito-idp list-user-pool-clients \
+  --user-pool-id $USER_POOL_ID \
+  --query 'UserPoolClients[*].{
+    Name:ClientName,
+    Id:ClientId
+  }' \
+  --output table 2>/dev/null
+
+# Step 6: Show Hosted UI URL
+echo ""
+echo "[6] Hosted UI login URL..."
+echo "Open in browser to test:"
+echo "https://${DOMAIN_PREFIX}.auth.${REGION}.amazoncognito.com/login"
+echo "  ?client_id=${SERVER_CLIENT_ID}"
+echo "  &response_type=code"
+echo "  &scope=openid+email+profile"
+echo "  &redirect_uri=https://localhost:3000/callback"
+
+echo ""
+echo "================================================"
+echo "Part 2 Complete!"
+echo "App Clients:"
+echo "  1. Server App (confidential + secret)"
+echo "  2. Mobile App (public + no secret)"
+echo "  3. Service Client (M2M + client credentials)"
+echo "Hosted UI available at Cognito domain"
+echo "================================================"
+```
+
+---
+
+## Part 3 — Lambda Triggers
+
+```bash
+#!/bin/bash
+# Lab 103 - Part 3: Lambda Triggers
+# Day 38 - AWS Security Specialist Study Plan
+
+source /tmp/lab103-env.sh
+
+echo "================================================"
+echo "  Part 3: Lambda Triggers"
+echo "================================================"
+
+# Step 1: Create Pre-token generation Lambda
+echo ""
+echo "[1] Creating Pre-token generation Lambda..."
+
+mkdir -p /tmp/lab103-lambda
+cat > /tmp/lab103-lambda/pre_token.py << 'PYEOF'
+"""
+Pre-token generation Lambda trigger
+Adds custom claims to Cognito JWT tokens
+"""
+import json
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def lambda_handler(event, context):
+    logger.info(f"Pre-token event: {json.dumps(event)}")
+
+    # Get user attributes from event
+    user_attributes = event.get(
+        'request', {}
+    ).get('userAttributes', {})
+
+    # Get user groups
+    groups = event.get(
+        'request', {}
+    ).get('groupConfiguration', {}).get(
+        'groupsToOverride', []
+    )
+
+    # Add custom claims to ID token
+    event['response'] = {
+        'claimsOverrideDetails': {
+            'claimsToAddOrOverride': {
+                # Add department from custom attribute
+                'department': user_attributes.get(
+                    'custom:department', 'unknown'
+                ),
+                # Add employee ID
+                'employee_id': user_attributes.get(
+                    'custom:employee_id', 'unknown'
+                ),
+                # Add role based on group membership
+                'app_role': get_role_from_groups(groups),
+                # Add permissions array
+                'permissions': get_permissions(groups)
+            },
+            # Suppress sensitive attributes
+            'claimsToSuppress': []
+        }
+    }
+
+    logger.info(
+        f"Token claims added for user: "
+        f"{user_attributes.get('email')}"
+    )
+    return event
+
+def get_role_from_groups(groups):
+    """Map Cognito groups to application roles"""
+    if 'Admins' in groups:
+        return 'admin'
+    elif 'PremiumUsers' in groups:
+        return 'premium'
+    else:
+        return 'basic'
+
+def get_permissions(groups):
+    """Generate permissions list from groups"""
+    permissions = ['read']
+    if 'Admins' in groups:
+        permissions.extend(['write', 'delete', 'admin'])
+    elif 'PremiumUsers' in groups:
+        permissions.append('write')
+    return ','.join(permissions)
+PYEOF
+
+# Create Pre-authentication Lambda
+cat > /tmp/lab103-lambda/pre_auth.py << 'PYEOF'
+"""
+Pre-authentication Lambda trigger
+Custom checks before allowing login
+"""
+import json
+import logging
+from datetime import datetime
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# Blocked users list (in production: DynamoDB lookup)
+BLOCKED_USERS = ['blocked@lab103.com']
+
+# Maintenance window (example)
+MAINTENANCE_MODE = False
+
+def lambda_handler(event, context):
+    logger.info(f"Pre-auth event: {json.dumps(event)}")
+
+    username = event['userName']
+    source_ip = event['request'].get(
+        'userContextData', {}
+    ).get('ipAddress', 'unknown')
+
+    # Check 1: Blocked users
+    if username in BLOCKED_USERS:
+        raise Exception(
+            f"PreAuthentication: User {username} is blocked"
+        )
+
+    # Check 2: Maintenance window
+    if MAINTENANCE_MODE:
+        raise Exception(
+            "PreAuthentication: System under maintenance"
+        )
+
+    # Check 3: Business hours (example)
+    hour = datetime.utcnow().hour
+    logger.info(
+        f"Login attempt - User: {username}, "
+        f"IP: {source_ip}, Hour: {hour}UTC"
+    )
+
+    # Log all login attempts for audit
+    logger.info(
+        f"AUDIT: Login attempt from {username} at "
+        f"{datetime.utcnow().isoformat()}"
+    )
+
+    return event
+PYEOF
+
+# Package both Lambda functions
+cd /tmp/lab103-lambda
+zip pre_token.zip pre_token.py 2>/dev/null
+zip pre_auth.zip pre_auth.py 2>/dev/null
+echo "✅ Lambda packages created"
+
+# Create IAM role for Lambda triggers
+cat > /tmp/lambda-cognito-trust.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+LAMBDA_ROLE_ARN=$(aws iam create-role \
+  --role-name "Lab103-CognitoLambdaRole" \
+  --assume-role-policy-document \
+    file:///tmp/lambda-cognito-trust.json \
+  --query 'Role.Arn' \
+  --output text 2>/dev/null)
+
+aws iam attach-role-policy \
+  --role-name "Lab103-CognitoLambdaRole" \
+  --policy-arn \
+    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" \
+  2>/dev/null
+
+echo "✅ Lambda IAM role created"
+echo "export LAMBDA_ROLE_ARN=\"$LAMBDA_ROLE_ARN\"" \
+  >> /tmp/lab103-env.sh
+
+sleep 10  # Wait for IAM propagation
+
+# Step 2: Deploy Lambda functions
+echo ""
+echo "[2] Deploying Lambda trigger functions..."
+
+PRE_TOKEN_ARN=$(aws lambda create-function \
+  --function-name "Lab103-PreTokenGeneration" \
+  --runtime python3.11 \
+  --handler pre_token.lambda_handler \
+  --role $LAMBDA_ROLE_ARN \
+  --zip-file fileb:///tmp/lab103-lambda/pre_token.zip \
+  --description "Lab103 pre-token generation trigger" \
+  --timeout 5 \
+  --tags Lab=Lab103 \
+  --query 'FunctionArn' \
+  --output text 2>/dev/null)
+
+PRE_AUTH_ARN=$(aws lambda create-function \
+  --function-name "Lab103-PreAuthentication" \
+  --runtime python3.11 \
+  --handler pre_auth.lambda_handler \
+  --role $LAMBDA_ROLE_ARN \
+  --zip-file fileb:///tmp/lab103-lambda/pre_auth.zip \
+  --description "Lab103 pre-authentication trigger" \
+  --timeout 5 \
+  --tags Lab=Lab103 \
+  --query 'FunctionArn' \
+  --output text 2>/dev/null)
+
+echo "✅ Pre-token Lambda: $PRE_TOKEN_ARN"
+echo "✅ Pre-auth Lambda: $PRE_AUTH_ARN"
+echo "export PRE_TOKEN_ARN=\"$PRE_TOKEN_ARN\"" \
+  >> /tmp/lab103-env.sh
+echo "export PRE_AUTH_ARN=\"$PRE_AUTH_ARN\"" \
+  >> /tmp/lab103-env.sh
+
+# Step 3: Grant Cognito permission to invoke Lambda
+echo ""
+echo "[3] Granting Cognito invoke permissions..."
+for FUNC in \
+  "Lab103-PreTokenGeneration" \
+  "Lab103-PreAuthentication"; do
+  aws lambda add-permission \
+    --function-name $FUNC \
+    --statement-id "CognitoInvoke" \
+    --action lambda:InvokeFunction \
+    --principal cognito-idp.amazonaws.com \
+    --source-arn $USER_POOL_ARN \
+    2>/dev/null && \
+    echo "✅ Permission granted for: $FUNC"
+done
+
+# Step 4: Attach Lambda triggers to User Pool
+echo ""
+echo "[4] Attaching Lambda triggers to User Pool..."
+aws cognito-idp update-user-pool \
+  --user-pool-id $USER_POOL_ID \
+  --lambda-config \
+    PreAuthentication=$PRE_AUTH_ARN,\
+PreTokenGeneration=$PRE_TOKEN_ARN \
+  2>/dev/null && \
+  echo "✅ Lambda triggers attached to User Pool" || \
+  echo "⚠️  Could not attach triggers"
+
+# Step 5: Verify triggers
+echo ""
+echo "[5] Verifying Lambda triggers..."
+aws cognito-idp describe-user-pool \
+  --user-pool-id $USER_POOL_ID \
+  --query 'UserPool.LambdaConfig' \
+  --output table 2>/dev/null
+
+echo ""
+echo "================================================"
+echo "Part 3 Complete!"
+echo "Lambda Triggers configured:"
+echo "  PreAuthentication: blocks bad users"
+echo "  PreTokenGeneration: adds custom claims"
+echo "================================================"
+```
+
+---
+
+Ready for **Part B** of Lab 103 (Identity Pool + Monitoring + Cleanup)? 🧪
+
+# 📅 Day 38 — Section 3: Lab 103
+## Amazon Cognito — Part B
+
+---
+
+## Part 4 — Create Identity Pool with Role Mapping
+
+```bash
+#!/bin/bash
+# Lab 103 - Part 4: Identity Pool
+# Day 38 - AWS Security Specialist Study Plan
+
+source /tmp/lab103-env.sh
+
+echo "================================================"
+echo "  Part 4: Identity Pool with Role Mapping"
+echo "================================================"
+
+# Step 1: Create IAM roles for Identity Pool
+echo ""
+echo "[1] Creating IAM roles for Identity Pool..."
+
+# Trust policy for authenticated role
+cat > /tmp/auth-trust-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "cognito-identity.amazonaws.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "cognito-identity.amazonaws.com:aud":
+            "IDENTITY_POOL_ID_PLACEHOLDER"
+        },
+        "ForAnyValue:StringLike": {
+          "cognito-identity.amazonaws.com:amr":
+            "authenticated"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+# Trust policy for unauthenticated role
+cat > /tmp/unauth-trust-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "cognito-identity.amazonaws.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "cognito-identity.amazonaws.com:aud":
+            "IDENTITY_POOL_ID_PLACEHOLDER"
+        },
+        "ForAnyValue:StringLike": {
+          "cognito-identity.amazonaws.com:amr":
+            "unauthenticated"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+# Create authenticated role
+AUTH_ROLE_ARN=$(aws iam create-role \
+  --role-name "Lab103-CognitoAuthRole" \
+  --assume-role-policy-document \
+    file:///tmp/auth-trust-policy.json \
+  --query 'Role.Arn' \
+  --output text 2>/dev/null)
+
+# Create unauthenticated role
+UNAUTH_ROLE_ARN=$(aws iam create-role \
+  --role-name "Lab103-CognitoUnauthRole" \
+  --assume-role-policy-document \
+    file:///tmp/unauth-trust-policy.json \
+  --query 'Role.Arn' \
+  --output text 2>/dev/null)
+
+# Create admin role (for role mapping)
+ADMIN_ROLE_ARN=$(aws iam create-role \
+  --role-name "Lab103-CognitoAdminRole" \
+  --assume-role-policy-document \
+    file:///tmp/auth-trust-policy.json \
+  --query 'Role.Arn' \
+  --output text 2>/dev/null)
+
+echo "✅ Auth Role:   $AUTH_ROLE_ARN"
+echo "✅ Unauth Role: $UNAUTH_ROLE_ARN"
+echo "✅ Admin Role:  $ADMIN_ROLE_ARN"
+
+echo "export AUTH_ROLE_ARN=\"$AUTH_ROLE_ARN\"" \
+  >> /tmp/lab103-env.sh
+echo "export UNAUTH_ROLE_ARN=\"$UNAUTH_ROLE_ARN\"" \
+  >> /tmp/lab103-env.sh
+echo "export ADMIN_ROLE_ARN=\"$ADMIN_ROLE_ARN\"" \
+  >> /tmp/lab103-env.sh
+
+# Step 2: Attach policies to roles
+echo ""
+echo "[2] Attaching policies to IAM roles..."
+
+# Authenticated role - S3 access to own folder
+cat > /tmp/auth-role-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowOwnS3Folder",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::lab103-user-data/\${cognito-identity.amazonaws.com:sub}/*"
+      ]
+    },
+    {
+      "Sid": "AllowListOwnFolder",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::lab103-user-data",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "\${cognito-identity.amazonaws.com:sub}/*"
+          ]
+        }
+      }
+    }
+  ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name "Lab103-CognitoAuthRole" \
+  --policy-name "Lab103-AuthS3Policy" \
+  --policy-document \
+    file:///tmp/auth-role-policy.json \
+  2>/dev/null && \
+  echo "✅ Auth role S3 policy attached"
+
+# Unauthenticated role - read-only public content
+cat > /tmp/unauth-role-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowPublicRead",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::lab103-public-content/*"
+    }
+  ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name "Lab103-CognitoUnauthRole" \
+  --policy-name "Lab103-UnauthPolicy" \
+  --policy-document \
+    file:///tmp/unauth-role-policy.json \
+  2>/dev/null && \
+  echo "✅ Unauth role read-only policy attached"
+
+# Admin role - broader access
+cat > /tmp/admin-role-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AdminS3Access",
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::lab103-user-data",
+        "arn:aws:s3:::lab103-user-data/*"
+      ]
+    },
+    {
+      "Sid": "AdminDynamoAccess",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Scan",
+        "dynamodb:Query"
+      ],
+      "Resource": "arn:aws:dynamodb:*:*:table/lab103-*"
+    }
+  ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name "Lab103-CognitoAdminRole" \
+  --policy-name "Lab103-AdminPolicy" \
+  --policy-document \
+    file:///tmp/admin-role-policy.json \
+  2>/dev/null && \
+  echo "✅ Admin role policy attached"
+
+# Step 3: Create Identity Pool
+echo ""
+echo "[3] Creating Identity Pool..."
+IDENTITY_POOL_ID=$(aws cognito-identity \
+  create-identity-pool \
+  --identity-pool-name "Lab103IdentityPool" \
+  --allow-unauthenticated-identities \
+  --cognito-identity-providers \
+    ProviderName=cognito-idp.${REGION}.amazonaws.com/${USER_POOL_ID},\
+ClientId=${SERVER_CLIENT_ID},\
+ServerSideTokenCheck=true \
+  --identity-pool-tags Lab=Lab103 \
+  --query 'IdentityPoolId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$IDENTITY_POOL_ID" ]; then
+  echo "✅ Identity Pool created"
+  echo "   ID: $IDENTITY_POOL_ID"
+  echo "export IDENTITY_POOL_ID=\"$IDENTITY_POOL_ID\"" \
+    >> /tmp/lab103-env.sh
+fi
+
+# Step 4: Set Identity Pool roles
+echo ""
+echo "[4] Setting Identity Pool roles..."
+aws cognito-identity set-identity-pool-roles \
+  --identity-pool-id $IDENTITY_POOL_ID \
+  --roles \
+    authenticated=$AUTH_ROLE_ARN,\
+unauthenticated=$UNAUTH_ROLE_ARN \
+  --role-mappings "{
+    \"cognito-idp.${REGION}.amazonaws.com/${USER_POOL_ID}:${SERVER_CLIENT_ID}\": {
+      \"Type\": \"Rules\",
+      \"AmbiguousRoleResolution\": \"AuthenticatedRole\",
+      \"RulesConfiguration\": {
+        \"Rules\": [
+          {
+            \"Claim\": \"cognito:groups\",
+            \"MatchType\": \"Contains\",
+            \"Value\": \"Admins\",
+            \"RoleARN\": \"$ADMIN_ROLE_ARN\"
+          }
+        ]
+      }
+    }
+  }" \
+  2>/dev/null && \
+  echo "✅ Identity Pool roles configured" && \
+  echo "   Rule: Admins group → AdminRole" && \
+  echo "   Default: AuthenticatedRole" || \
+  echo "⚠️  Could not set roles"
+
+# Step 5: Verify Identity Pool
+echo ""
+echo "[5] Verifying Identity Pool configuration..."
+aws cognito-identity describe-identity-pool \
+  --identity-pool-id $IDENTITY_POOL_ID \
+  --query '{
+    Name:IdentityPoolName,
+    AllowUnauth:AllowUnauthenticatedIdentities,
+    Providers:CognitoIdentityProviders
+  }' \
+  --output table 2>/dev/null
+
+echo ""
+echo "================================================"
+echo "Part 4 Complete!"
+echo "Identity Pool: $IDENTITY_POOL_ID"
+echo "Role Mapping:"
+echo "  Admins group  → AdminRole (S3+DynamoDB)"
+echo "  Authenticated → AuthRole  (own S3 folder)"
+echo "  Guest         → UnauthRole (public S3)"
+echo "================================================"
+```
+
+---
+
+## Part 5 — Test Authentication Flows
+
+```bash
+#!/bin/bash
+# Lab 103 - Part 5: Test Authentication
+# Day 38 - AWS Security Specialist Study Plan
+
+source /tmp/lab103-env.sh
+
+echo "================================================"
+echo "  Part 5: Test Authentication Flows"
+echo "================================================"
+
+# Step 1: Admin set permanent password for test user
+echo ""
+echo "[1] Setting permanent password for test user..."
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $USER_POOL_ID \
+  --username "user@lab103.com" \
+  --password "PermanentPass@123!" \
+  --permanent \
+  2>/dev/null && \
+  echo "✅ Permanent password set for user@lab103.com"
+
+# Step 2: Initiate auth flow
+echo ""
+echo "[2] Initiating authentication (SRP flow)..."
+AUTH_RESULT=$(aws cognito-idp initiate-auth \
+  --auth-flow USER_PASSWORD_AUTH \
+  --client-id $MOBILE_CLIENT_ID \
+  --auth-parameters \
+    USERNAME=user@lab103.com,\
+PASSWORD=PermanentPass@123! \
+  --output json 2>/dev/null)
+
+echo "Auth result type: $(echo $AUTH_RESULT | \
+  python3 -c \
+  "import sys,json; d=json.load(sys.stdin); \
+  print(d.get('ChallengeName', \
+  'SUCCESS' if 'AuthenticationResult' \
+  in d else 'UNKNOWN'))" 2>/dev/null)"
+
+# Extract tokens if auth succeeded
+ID_TOKEN=$(echo $AUTH_RESULT | \
+  python3 -c \
+  "import sys,json; \
+  d=json.load(sys.stdin); \
+  r=d.get('AuthenticationResult',{}); \
+  print(r.get('IdToken',''))" 2>/dev/null)
+
+ACCESS_TOKEN=$(echo $AUTH_RESULT | \
+  python3 -c \
+  "import sys,json; \
+  d=json.load(sys.stdin); \
+  r=d.get('AuthenticationResult',{}); \
+  print(r.get('AccessToken',''))" 2>/dev/null)
+
+REFRESH_TOKEN=$(echo $AUTH_RESULT | \
+  python3 -c \
+  "import sys,json; \
+  d=json.load(sys.stdin); \
+  r=d.get('AuthenticationResult',{}); \
+  print(r.get('RefreshToken',''))" 2>/dev/null)
+
+if [ ! -z "$ID_TOKEN" ] && \
+   [ "$ID_TOKEN" != "None" ]; then
+  echo "✅ Authentication successful"
+  echo "   ID Token (first 50 chars): ${ID_TOKEN:0:50}..."
+  echo "   Access Token: ${ACCESS_TOKEN:0:50}..."
+  echo "export ID_TOKEN=\"$ID_TOKEN\"" \
+    >> /tmp/lab103-env.sh
+  echo "export ACCESS_TOKEN=\"$ACCESS_TOKEN\"" \
+    >> /tmp/lab103-env.sh
+  echo "export REFRESH_TOKEN=\"$REFRESH_TOKEN\"" \
+    >> /tmp/lab103-env.sh
+else
+  echo "ℹ️  Auth requires MFA challenge (TOTP enabled)"
+  echo "   In production: user would scan QR code"
+  echo "   and enter TOTP code"
+fi
+
+# Step 3: Decode JWT token (inspect claims)
+echo ""
+echo "[3] Decoding JWT token claims..."
+if [ ! -z "$ID_TOKEN" ] && \
+   [ "$ID_TOKEN" != "None" ]; then
+  python3 << PYEOF
+import base64
+import json
+
+token = "$ID_TOKEN"
+parts = token.split('.')
+
+def decode_part(part):
+    # Add padding
+    padding = 4 - len(part) % 4
+    if padding != 4:
+        part += '=' * padding
+    return json.loads(base64.urlsafe_b64decode(part))
+
+try:
+    header = decode_part(parts[0])
+    payload = decode_part(parts[1])
+
+    print("=== JWT Header ===")
+    print(json.dumps(header, indent=2))
+    print("\n=== JWT Payload (Claims) ===")
+    print(json.dumps(payload, indent=2))
+    print("\nKey claims:")
+    print(f"  sub (user ID): {payload.get('sub')}")
+    print(f"  email: {payload.get('email')}")
+    print(f"  groups: {payload.get('cognito:groups')}")
+    print(f"  department: {payload.get('department','not set')}")
+    print(f"  app_role: {payload.get('app_role','not set')}")
+    print(f"  permissions: {payload.get('permissions','not set')}")
+except Exception as e:
+    print(f"Could not decode token: {e}")
+PYEOF
+else
+  echo "No token to decode (MFA challenge active)"
+  echo "Showing token structure reference:"
+  cat << 'EOF'
+=== ID Token Claims (typical structure) ===
+{
+  "sub": "uuid-of-user",
+  "email": "user@lab103.com",
+  "cognito:groups": ["BasicUsers"],
+  "custom:department": "Engineering",
+  "custom:employee_id": "EMP002",
+  "department": "Engineering",        ← added by pre-token Lambda
+  "app_role": "basic",               ← added by pre-token Lambda
+  "permissions": "read",             ← added by pre-token Lambda
+  "token_use": "id",
+  "iss": "https://cognito-idp.region.amazonaws.com/pool-id",
+  "aud": "app-client-id",
+  "exp": 1234567890,
+  "iat": 1234567890
+}
+EOF
+fi
+
+# Step 4: Get user details via admin API
+echo ""
+echo "[4] Getting user details via Admin API..."
+aws cognito-idp admin-get-user \
+  --user-pool-id $USER_POOL_ID \
+  --username "user@lab103.com" \
+  --query '{
+    Username:Username,
+    Status:UserStatus,
+    Enabled:Enabled,
+    Attributes:UserAttributes
+  }' \
+  --output json 2>/dev/null | \
+  python3 -m json.tool
+
+# Step 5: Test token refresh
+echo ""
+echo "[5] Testing token refresh flow..."
+if [ ! -z "$REFRESH_TOKEN" ] && \
+   [ "$REFRESH_TOKEN" != "None" ]; then
+  REFRESH_RESULT=$(aws cognito-idp initiate-auth \
+    --auth-flow REFRESH_TOKEN_AUTH \
+    --client-id $MOBILE_CLIENT_ID \
+    --auth-parameters \
+      REFRESH_TOKEN=$REFRESH_TOKEN \
+    --output json 2>/dev/null)
+
+  NEW_ACCESS_TOKEN=$(echo $REFRESH_RESULT | \
+    python3 -c \
+    "import sys,json; \
+    d=json.load(sys.stdin); \
+    r=d.get('AuthenticationResult',{}); \
+    print(r.get('AccessToken',''))" 2>/dev/null)
+
+  [ ! -z "$NEW_ACCESS_TOKEN" ] && \
+    echo "✅ Token refresh successful" && \
+    echo "   New Access Token: ${NEW_ACCESS_TOKEN:0:50}..." || \
+    echo "⚠️  Token refresh failed"
+else
+  echo "ℹ️  No refresh token available (MFA active)"
+fi
+
+# Step 6: List users in User Pool
+echo ""
+echo "[6] Listing users in User Pool..."
+aws cognito-idp list-users \
+  --user-pool-id $USER_POOL_ID \
+  --query 'Users[*].{
+    Username:Username,
+    Status:UserStatus,
+    Enabled:Enabled,
+    Created:UserCreateDate
+  }' \
+  --output table 2>/dev/null
+
+echo ""
+echo "================================================"
+echo "Part 5 Complete!"
+echo "Authentication flow tested:"
+echo "  - SRP auth flow initiated"
+echo "  - JWT token decoded and inspected"
+echo "  - Custom claims verified from Lambda"
+echo "  - Token refresh tested"
+echo "================================================"
+```
+
+---
+
+## Part 6 — Monitoring & Audit
+
+```bash
+#!/bin/bash
+# Lab 103 - Part 6: Monitoring & Audit
+# Day 38 - AWS Security Specialist Study Plan
+
+source /tmp/lab103-env.sh
+
+echo "================================================"
+echo "  Part 6: Monitoring & Audit"
+echo "================================================"
+
+# Step 1: Search CloudTrail for Cognito events
+echo ""
+echo "[1] Searching CloudTrail for Cognito events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventSource,\
+AttributeValue=cognito-idp.amazonaws.com \
+  --max-results 20 \
+  --query 'Events[*].{
+    Time:EventTime,
+    Event:EventName,
+    User:Username
+  }' \
+  --output table 2>/dev/null
+
+# Step 2: Create EventBridge rules for Cognito
+echo ""
+echo "[2] Creating EventBridge monitoring rules..."
+
+# Monitor user account changes
+aws events put-rule \
+  --name "Lab103-CognitoUserChanges" \
+  --event-pattern '{
+    "source": ["aws.cognito-idp"],
+    "detail-type": ["AWS API Call via CloudTrail"],
+    "detail": {
+      "eventSource": [
+        "cognito-idp.amazonaws.com"
+      ],
+      "eventName": [
+        "AdminCreateUser",
+        "AdminDeleteUser",
+        "AdminDisableUser",
+        "AdminEnableUser",
+        "AdminResetUserPassword",
+        "AdminSetUserPassword"
+      ]
+    }
+  }' \
+  --state ENABLED \
+  --description "Monitor Cognito user changes" \
+  --output table 2>/dev/null && \
+  echo "✅ User change monitoring rule created"
+
+# Monitor security events
+aws events put-rule \
+  --name "Lab103-CognitoSecurityEvents" \
+  --event-pattern '{
+    "source": ["aws.cognito-idp"],
+    "detail-type": ["AWS API Call via CloudTrail"],
+    "detail": {
+      "eventSource": [
+        "cognito-idp.amazonaws.com"
+      ],
+      "eventName": [
+        "CreateUserPool",
+        "DeleteUserPool",
+        "UpdateUserPool",
+        "CreateUserPoolClient",
+        "DeleteUserPoolClient"
+      ]
+    }
+  }' \
+  --state ENABLED \
+  --description "Monitor Cognito config changes" \
+  --output table 2>/dev/null && \
+  echo "✅ Security events monitoring rule created"
+
+# Step 3: CloudWatch metrics reference
+echo ""
+echo "[3] Key CloudWatch metrics for Cognito..."
+cat << 'EOF'
+Cognito User Pool Metrics (namespace: AWS/Cognito):
+┌──────────────────────────────┬──────────────────────────────┐
+│ Metric                       │ What it monitors             │
+├──────────────────────────────┼──────────────────────────────┤
+│ SignInSuccesses              │ Successful sign-ins          │
+│ SignInThrottles              │ Throttled sign-in attempts   │
+│ SignUpSuccesses              │ Successful registrations     │
+│ TokenRefreshSuccesses        │ Successful token refreshes   │
+│ FederationSuccesses          │ Federated sign-ins           │
+│ RiskDetectedTotal            │ Risk events detected         │
+│ AccountTakeoverRisk          │ High-risk login attempts     │
+│ CompromisedCredentialsRisk   │ Breached credential attempts │
+└──────────────────────────────┴──────────────────────────────┘
+EOF
+
+# Step 4: Create CloudWatch alarm for failed logins
+echo ""
+echo "[4] Creating CloudWatch alarm for sign-in throttles..."
+aws cloudwatch put-metric-alarm \
+  --alarm-name "Lab103-CognitoSignInThrottles" \
+  --alarm-description \
+    "High sign-in throttle rate detected" \
+  --metric-name SignInThrottles \
+  --namespace AWS/Cognito \
+  --dimensions \
+    Name=UserPool,Value=$USER_POOL_ID \
+    Name=UserPoolClient,Value=$MOBILE_CLIENT_ID \
+  --statistic Sum \
+  --period 300 \
+  --threshold 10 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --treat-missing-data notBreaching \
+  2>/dev/null && \
+  echo "✅ Sign-in throttle alarm created"
+
+# Step 5: Key audit events summary
+echo ""
+echo "[5] Key CloudTrail events to audit..."
+cat << 'EOF'
+┌──────────────────────────────────┬─────────────────────────┐
+│ Cognito CloudTrail Event         │ Security Significance   │
+├──────────────────────────────────┼─────────────────────────┤
+│ CreateUserPool                   │ New pool created        │
+│ DeleteUserPool                   │ Pool deleted            │
+│ UpdateUserPool                   │ Pool config changed     │
+│ AdminCreateUser                  │ User added by admin     │
+│ AdminDeleteUser                  │ User deleted            │
+│ AdminDisableUser                 │ User disabled           │
+│ AdminResetUserPassword           │ Password reset by admin │
+│ CreateUserPoolClient             │ New app client added    │
+│ DeleteUserPoolClient             │ App client deleted      │
+│ SetUICustomization               │ Login UI changed        │
+│ CreateIdentityPool               │ Identity pool created   │
+│ SetIdentityPoolRoles             │ IAM roles changed       │
+└──────────────────────────────────┴─────────────────────────┘
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 6 Complete!"
+echo "Monitoring configured:"
+echo "  - CloudTrail events searched"
+echo "  - EventBridge user change monitoring"
+echo "  - EventBridge security event monitoring"
+echo "  - CloudWatch sign-in throttle alarm"
+echo "================================================"
+```
+
+---
+
+## Part 7 — Cleanup
+
+```bash
+#!/bin/bash
+# Lab 103 - Part 7: Cleanup
+# Day 38 - AWS Security Specialist Study Plan
+
+source /tmp/lab103-env.sh
+
+echo "================================================"
+echo "  Part 7: Lab Cleanup"
+echo "================================================"
+
+# Step 1: Delete Cognito domain
+echo ""
+echo "[1] Deleting Cognito domain..."
+aws cognito-idp delete-user-pool-domain \
+  --user-pool-id $USER_POOL_ID \
+  --domain $DOMAIN_PREFIX \
+  2>/dev/null && \
+  echo "✅ Cognito domain deleted"
+
+# Step 2: Delete Identity Pool
+echo ""
+echo "[2] Deleting Identity Pool..."
+aws cognito-identity delete-identity-pool \
+  --identity-pool-id $IDENTITY_POOL_ID \
+  2>/dev/null && \
+  echo "✅ Identity Pool deleted"
+
+# Step 3: Delete User Pool
+echo ""
+echo "[3] Deleting User Pool..."
+aws cognito-idp delete-user-pool \
+  --user-pool-id $USER_POOL_ID \
+  2>/dev/null && \
+  echo "✅ User Pool deleted" || \
+  echo "⚠️  Could not delete User Pool"
+
+# Step 4: Delete Lambda functions
+echo ""
+echo "[4] Deleting Lambda functions..."
+for FUNC in \
+  "Lab103-PreTokenGeneration" \
+  "Lab103-PreAuthentication"; do
+  aws lambda delete-function \
+    --function-name $FUNC \
+    2>/dev/null && \
+    echo "✅ Deleted: $FUNC"
+done
+
+# Step 5: Delete IAM roles
+echo ""
+echo "[5] Cleaning up IAM roles..."
+
+# Lambda role
+aws iam detach-role-policy \
+  --role-name "Lab103-CognitoLambdaRole" \
+  --policy-arn \
+    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" \
+  2>/dev/null
+
+aws iam delete-role \
+  --role-name "Lab103-CognitoLambdaRole" \
+  2>/dev/null && echo "✅ Lambda role deleted"
+
+# Identity Pool roles
+for ROLE in \
+  "Lab103-CognitoAuthRole" \
+  "Lab103-CognitoUnauthRole" \
+  "Lab103-CognitoAdminRole"; do
+  POLICY_NAME="${ROLE#Lab103-Cognito}Policy"
+  aws iam delete-role-policy \
+    --role-name $ROLE \
+    --policy-name "Lab103-${POLICY_NAME}" \
+    2>/dev/null
+  aws iam delete-role \
+    --role-name $ROLE \
+    2>/dev/null && \
+    echo "✅ Deleted role: $ROLE"
+done
+
+# Step 6: Delete EventBridge rules
+echo ""
+echo "[6] Deleting EventBridge rules..."
+for RULE in \
+  "Lab103-CognitoUserChanges" \
+  "Lab103-CognitoSecurityEvents"; do
+  aws events delete-rule \
+    --name $RULE \
+    --force 2>/dev/null && \
+    echo "✅ Deleted rule: $RULE"
+done
+
+# Step 7: Delete CloudWatch alarm
+echo ""
+echo "[7] Deleting CloudWatch alarm..."
+aws cloudwatch delete-alarms \
+  --alarm-names "Lab103-CognitoSignInThrottles" \
+  2>/dev/null && echo "✅ Alarm deleted"
+
+# Step 8: Cleanup temp files
+echo ""
+echo "[8] Cleaning up temp files..."
+rm -f /tmp/lab103-env.sh \
+      /tmp/auth-trust-policy.json \
+      /tmp/unauth-trust-policy.json \
+      /tmp/auth-role-policy.json \
+      /tmp/unauth-role-policy.json \
+      /tmp/admin-role-policy.json \
+      /tmp/lambda-cognito-trust.json \
+      /tmp/dns-validation.json
+rm -rf /tmp/lab103-lambda/
+echo "✅ Temp files cleaned"
+
+echo ""
+echo "================================================"
+echo "Lab 103 Cleanup Complete!"
+echo "All resources deleted."
+echo "================================================"
+```
+
+---
+
+## ✅ Lab 103 Verification Checklist
+
+```
+Lab 103 — Completion Checklist
+│
+├── Prerequisites
+│     ├── [ ] Verified identity and region
+│     └── [ ] Checked existing pools
+│
+├── Part 1: User Pool
+│     ├── [ ] Created User Pool with MFA REQUIRED
+│     ├── [ ] Configured password policy (12 chars+)
+│     ├── [ ] Created custom attributes (dept, emp_id)
+│     ├── [ ] Created groups (Admins, Premium, Basic)
+│     └── [ ] Created test users and assigned groups
+│
+├── Part 2: App Clients
+│     ├── [ ] Created server client (confidential)
+│     ├── [ ] Created mobile client (public, no secret)
+│     ├── [ ] Created M2M client (client credentials)
+│     └── [ ] Created Cognito Hosted UI domain
+│
+├── Part 3: Lambda Triggers
+│     ├── [ ] Created Pre-token generation Lambda
+│     ├── [ ] Created Pre-authentication Lambda
+│     ├── [ ] Granted Cognito invoke permissions
+│     └── [ ] Attached triggers to User Pool
+│
+├── Part 4: Identity Pool
+│     ├── [ ] Created Auth/Unauth/Admin IAM roles
+│     ├── [ ] Auth role uses cognito sub for S3 path
+│     ├── [ ] Created Identity Pool
+│     └── [ ] Configured role mapping (Admins → AdminRole)
+│
+├── Part 5: Testing
+│     ├── [ ] Initiated authentication flow
+│     ├── [ ] Decoded JWT token claims
+│     ├── [ ] Verified custom Lambda claims in token
+│     └── [ ] Tested token refresh
+│
+├── Part 6: Monitoring
+│     ├── [ ] Searched CloudTrail events
+│     ├── [ ] Created EventBridge rules
+│     └── [ ] Created CloudWatch alarm
+│
+└── Part 7: Cleanup
+      └── [ ] All resources deleted
+```
+
+---
+
+## 🔑 Lab 103 Key Takeaways
+
+| Concept | What You Practiced |
+|---|---|
+| User Pool creation | MFA REQUIRED, password policy, custom attributes |
+| App Client types | Confidential (server), Public (mobile), M2M |
+| No secret for mobile | Public client — prevents secret exposure |
+| Pre-token generation | Add department, role, permissions to JWT |
+| Pre-authentication | Block users, log attempts before login |
+| Identity Pool roles | Auth role, Unauth role, Admin role |
+| Fine-grained S3 | `${cognito-identity.amazonaws.com:sub}` in policy |
+| Role mapping rules | Admins group → AdminRole automatically |
+| JWT decoding | Header, payload, claims inspection |
+| CloudTrail audit | Every Cognito API call logged |
+
+---
+
+# 🎉 Day 38 — Fully Complete!
+
+All sections done at full depth with new format:
+- ✅ **Section 1** — Theory Block (Parts A + B)
+- ✅ **Section 2** — Exam Deep Dive (Parts A + B)
+- ✅ **Section 3** — Lab 103 (Parts A + B)
+
+---
+
+## 📅 Day 39 Preview
+```
+Day 39: API Gateway Security (3 hours)
+├── API Gateway types (REST, HTTP, WebSocket)
+├── Authentication methods (Cognito, Lambda, IAM)
+├── Resource policies and throttling
+├── WAF integration
+├── Private APIs and VPC endpoints
+└── Lab 104: Secure API Gateway setup
+```
+
+Ready when you are Pradeep! 💪

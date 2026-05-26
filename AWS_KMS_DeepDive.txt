@@ -555,11 +555,9 @@ If context doesn't match → DECRYPT FAILS
 
 #### Two-Step Process
 ```
-Step 1: Key Policy in Key Owner Account (Account A)
-        Must allow the external account (Account B)
+Step 1: Key Policy in Key Owner Account (Account A) must allow the external account (Account B)
 
-Step 2: IAM Policy in External Account (Account B)
-        Must allow the role/user to use the key
+Step 2: IAM Policy in External Account (Account B) must allow the role/user to use the key
 ```
 
 #### Step 1 — Key Policy (Account A — key owner)

@@ -1,0 +1,1420 @@
+# 📅 Day 34 — Section 3: Lab 99
+## AWS KMS — Full Exploration & Encryption Operations
+
+---
+
+## 🎯 Lab Objective
+In this lab you will:
+- Create and configure Customer Managed Keys (CMKs)
+- Set up key policies with least privilege
+- Practice envelope encryption end-to-end
+- Configure key rotation
+- Create and manage grants
+- Use encryption context
+- Cross-account key usage setup
+- Audit KMS via CloudTrail
+- Cleanup all resources
+
+---
+
+## Prerequisites Check
+
+```bash
+#!/bin/bash
+# Lab 99 - Prerequisites Check
+# Day 34 - AWS Security Specialist Study Plan
+
+echo "================================================"
+echo "  Lab 99: AWS KMS - Prerequisites Check"
+echo "================================================"
+
+# Step 1: Verify identity
+echo ""
+echo "[1] Verifying AWS identity..."
+aws sts get-caller-identity --output table
+
+# Step 2: Capture account and region
+ACCOUNT_ID=$(aws sts get-caller-identity \
+  --query Account --output text)
+REGION=$(aws configure get region)
+CALLER_ARN=$(aws sts get-caller-identity \
+  --query Arn --output text)
+
+echo ""
+echo "Account ID : $ACCOUNT_ID"
+echo "Region     : $REGION"
+echo "Caller ARN : $CALLER_ARN"
+
+# Step 3: Check existing KMS keys
+echo ""
+echo "[2] Checking existing Customer Managed Keys..."
+aws kms list-keys \
+  --query 'Keys[*].{KeyId:KeyId,KeyArn:KeyArn}' \
+  --output table
+
+# Step 4: Check existing aliases
+echo ""
+echo "[3] Checking existing KMS aliases..."
+aws kms list-aliases \
+  --query 'Aliases[?!starts_with(AliasName,`alias/aws`)].{
+    AliasName:AliasName,
+    TargetKeyId:TargetKeyId
+  }' \
+  --output table
+
+# Step 5: Check KMS service limits
+echo ""
+echo "[4] KMS service limits reference..."
+cat << 'EOF'
+┌──────────────────────────────────────────┬──────────────┐
+│ Resource                                 │ Default Limit│
+├──────────────────────────────────────────┼──────────────┤
+│ CMKs per region                          │ 100,000      │
+│ Aliases per CMK                          │ 10           │
+│ Grants per CMK                           │ 50,000       │
+│ Key policy document size                 │ 32KB         │
+│ Encrypt API payload size                 │ 4KB          │
+│ GenerateDataKey key spec options         │ AES_128/256  │
+└──────────────────────────────────────────┴──────────────┘
+EOF
+
+# Step 6: Save environment
+cat > /tmp/lab99-env.sh << EOF
+export ACCOUNT_ID="$ACCOUNT_ID"
+export REGION="$REGION"
+export CALLER_ARN="$CALLER_ARN"
+EOF
+
+echo ""
+echo "✅ Environment saved to /tmp/lab99-env.sh"
+echo "================================================"
+echo "Prerequisites check complete!"
+echo "================================================"
+```
+
+---
+
+## Part 1 — Create Customer Managed Keys
+
+```bash
+#!/bin/bash
+# Lab 99 - Part 1: Create CMKs
+# Day 34 - AWS Security Specialist Study Plan
+
+source /tmp/lab99-env.sh
+
+echo "================================================"
+echo "  Part 1: Create Customer Managed Keys"
+echo "================================================"
+
+# Step 1: Create symmetric CMK with full key policy
+echo ""
+echo "[1] Creating symmetric CMK with custom key policy..."
+
+cat > /tmp/key-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EnableIAMUserPermissions",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::${ACCOUNT_ID}:root"
+      },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowKeyAdministrators",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "${CALLER_ARN}"
+      },
+      "Action": [
+        "kms:Create*",
+        "kms:Describe*",
+        "kms:Enable*",
+        "kms:List*",
+        "kms:Put*",
+        "kms:Update*",
+        "kms:Revoke*",
+        "kms:Disable*",
+        "kms:Get*",
+        "kms:Delete*",
+        "kms:ScheduleKeyDeletion",
+        "kms:CancelKeyDeletion",
+        "kms:TagResource",
+        "kms:UntagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowKeyUsage",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "${CALLER_ARN}"
+      },
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+# Create the key
+SYMMETRIC_KEY_ID=$(aws kms create-key \
+  --description "Lab99 Symmetric CMK - Day34 AWS Security Study" \
+  --key-usage ENCRYPT_DECRYPT \
+  --key-spec SYMMETRIC_DEFAULT \
+  --policy file:///tmp/key-policy.json \
+  --tags TagKey=Lab,TagValue=Lab99 \
+         TagKey=Day,TagValue=Day34 \
+         TagKey=Type,TagValue=Symmetric \
+  --query 'KeyMetadata.KeyId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$SYMMETRIC_KEY_ID" ]; then
+  echo "✅ Symmetric CMK created"
+  echo "   Key ID: $SYMMETRIC_KEY_ID"
+  echo "export SYMMETRIC_KEY_ID=\"$SYMMETRIC_KEY_ID\"" \
+    >> /tmp/lab99-env.sh
+else
+  echo "⚠️  Could not create symmetric key"
+fi
+
+# Step 2: Create alias for symmetric key
+echo ""
+echo "[2] Creating alias for symmetric CMK..."
+aws kms create-alias \
+  --alias-name "alias/lab99-symmetric-key" \
+  --target-key-id $SYMMETRIC_KEY_ID 2>/dev/null && \
+  echo "✅ Alias created: alias/lab99-symmetric-key" || \
+  echo "⚠️  Alias may already exist"
+
+# Step 3: Create asymmetric CMK for signing
+echo ""
+echo "[3] Creating asymmetric CMK (RSA for signing)..."
+ASYMMETRIC_KEY_ID=$(aws kms create-key \
+  --description "Lab99 Asymmetric CMK RSA - Signing" \
+  --key-usage SIGN_VERIFY \
+  --key-spec RSA_2048 \
+  --tags TagKey=Lab,TagValue=Lab99 \
+         TagKey=Type,TagValue=Asymmetric \
+  --query 'KeyMetadata.KeyId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$ASYMMETRIC_KEY_ID" ]; then
+  echo "✅ Asymmetric CMK (RSA_2048) created"
+  echo "   Key ID: $ASYMMETRIC_KEY_ID"
+  echo "export ASYMMETRIC_KEY_ID=\"$ASYMMETRIC_KEY_ID\"" \
+    >> /tmp/lab99-env.sh
+else
+  echo "⚠️  Could not create asymmetric key"
+fi
+
+# Step 4: Create alias for asymmetric key
+echo ""
+echo "[4] Creating alias for asymmetric CMK..."
+aws kms create-alias \
+  --alias-name "alias/lab99-asymmetric-key" \
+  --target-key-id $ASYMMETRIC_KEY_ID 2>/dev/null && \
+  echo "✅ Alias created: alias/lab99-asymmetric-key" || \
+  echo "⚠️  Alias may already exist"
+
+# Step 5: Describe both keys
+echo ""
+echo "[5] Describing created keys..."
+for KEY_ID in $SYMMETRIC_KEY_ID $ASYMMETRIC_KEY_ID; do
+  echo ""
+  echo "--- Key: $KEY_ID ---"
+  aws kms describe-key \
+    --key-id $KEY_ID \
+    --query 'KeyMetadata.{
+      KeyId:KeyId,
+      Description:Description,
+      KeyState:KeyState,
+      KeyUsage:KeyUsage,
+      KeySpec:KeySpec,
+      Origin:Origin,
+      CreationDate:CreationDate
+    }' \
+    --output table 2>/dev/null
+done
+
+echo ""
+echo "================================================"
+echo "Part 1 Complete!"
+echo "Two CMKs created:"
+echo "  1. Symmetric  (alias/lab99-symmetric-key)"
+echo "  2. Asymmetric (alias/lab99-asymmetric-key)"
+echo "================================================"
+```
+
+---
+
+## Part 2 — Key Policy Management
+
+```bash
+#!/bin/bash
+# Lab 99 - Part 2: Key Policy Management
+# Day 34 - AWS Security Specialist Study Plan
+
+source /tmp/lab99-env.sh
+
+echo "================================================"
+echo "  Part 2: Key Policy Management"
+echo "================================================"
+
+# Step 1: View current key policy
+echo ""
+echo "[1] Viewing current key policy..."
+aws kms get-key-policy \
+  --key-id $SYMMETRIC_KEY_ID \
+  --policy-name default \
+  --output text | python3 -m json.tool
+
+# Step 2: Create IAM role for app simulation
+echo ""
+echo "[2] Creating app IAM role for key usage..."
+cat > /tmp/app-trust-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+APP_ROLE_ARN=$(aws iam create-role \
+  --role-name "Lab99-AppRole" \
+  --assume-role-policy-document \
+    file:///tmp/app-trust-policy.json \
+  --description "Lab99 app role for KMS key usage" \
+  --query 'Role.Arn' \
+  --output text 2>/dev/null)
+
+echo "App Role ARN: $APP_ROLE_ARN"
+echo "export APP_ROLE_ARN=\"$APP_ROLE_ARN\"" \
+  >> /tmp/lab99-env.sh
+
+# Step 3: Update key policy to add app role
+echo ""
+echo "[3] Updating key policy to add app role..."
+cat > /tmp/updated-key-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EnableIAMUserPermissions",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::${ACCOUNT_ID}:root"
+      },
+      "Action": "kms:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowKeyAdministrators",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "${CALLER_ARN}"
+      },
+      "Action": [
+        "kms:Create*",
+        "kms:Describe*",
+        "kms:Enable*",
+        "kms:List*",
+        "kms:Put*",
+        "kms:Update*",
+        "kms:Revoke*",
+        "kms:Disable*",
+        "kms:Get*",
+        "kms:Delete*",
+        "kms:ScheduleKeyDeletion",
+        "kms:CancelKeyDeletion"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowKeyUsageWithContext",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "${CALLER_ARN}"
+      },
+      "Action": [
+        "kms:Encrypt",
+        "kms:Decrypt",
+        "kms:ReEncrypt*",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:EncryptionContext:App": "Lab99",
+          "kms:EncryptionContext:Env": "Development"
+        }
+      }
+    },
+    {
+      "Sid": "AllowAppRoleKeyUsage",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "${APP_ROLE_ARN}"
+      },
+      "Action": [
+        "kms:Decrypt",
+        "kms:GenerateDataKey",
+        "kms:DescribeKey"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws kms put-key-policy \
+  --key-id $SYMMETRIC_KEY_ID \
+  --policy-name default \
+  --policy file:///tmp/updated-key-policy.json 2>/dev/null && \
+  echo "✅ Key policy updated with app role and context" || \
+  echo "⚠️  Could not update key policy"
+
+# Step 4: Verify updated policy
+echo ""
+echo "[4] Verifying updated key policy..."
+aws kms get-key-policy \
+  --key-id $SYMMETRIC_KEY_ID \
+  --policy-name default \
+  --output text | python3 -m json.tool
+
+# Step 5: List all policies for the key
+echo ""
+echo "[5] Listing available key policies..."
+aws kms list-key-policies \
+  --key-id $SYMMETRIC_KEY_ID \
+  --output table
+
+echo ""
+echo "================================================"
+echo "Part 2 Complete!"
+echo "Key policy updated with:"
+echo "  - Root delegation (IAM enabled)"
+echo "  - Admin permissions for caller"
+echo "  - Usage with encryption context requirement"
+echo "  - App role with limited operations"
+echo "================================================"
+```
+
+---
+
+## Part 3 — Envelope Encryption End-to-End
+
+```bash
+#!/bin/bash
+# Lab 99 - Part 3: Envelope Encryption
+# Day 34 - AWS Security Specialist Study Plan
+
+source /tmp/lab99-env.sh
+
+echo "================================================"
+echo "  Part 3: Envelope Encryption End-to-End"
+echo "================================================"
+
+# Step 1: Create sample large data file
+echo ""
+echo "[1] Creating sample data file (simulating large data)..."
+cat > /tmp/sensitive-data.txt << 'EOF'
+=== SENSITIVE FINANCIAL DATA ===
+Account: 1234-5678-9012-3456
+Customer: Pradeep Kumar
+Balance: INR 5,00,000
+Transactions:
+  - 2024-01-01: Credit INR 50,000
+  - 2024-01-15: Debit INR 10,000
+  - 2024-01-30: Credit INR 25,000
+Classification: CONFIDENTIAL
+==============================
+EOF
+
+echo "✅ Sample data file created"
+echo "   File size: $(wc -c < /tmp/sensitive-data.txt) bytes"
+cat /tmp/sensitive-data.txt
+
+# Step 2: Generate data key from KMS
+echo ""
+echo "[2] Generating data key from KMS (envelope encryption)..."
+DATA_KEY_RESPONSE=$(aws kms generate-data-key \
+  --key-id "alias/lab99-symmetric-key" \
+  --key-spec AES_256 \
+  --encryption-context \
+    '{"App":"Lab99","Env":"Development"}' \
+  --output json 2>/dev/null)
+
+if [ ! -z "$DATA_KEY_RESPONSE" ]; then
+  echo "✅ Data key generated"
+
+  # Extract plaintext and encrypted data key
+  PLAINTEXT_KEY=$(echo $DATA_KEY_RESPONSE | \
+    python3 -c "import sys,json,base64; \
+    d=json.load(sys.stdin); \
+    print(d['Plaintext'])")
+
+  ENCRYPTED_DATA_KEY=$(echo $DATA_KEY_RESPONSE | \
+    python3 -c "import sys,json; \
+    d=json.load(sys.stdin); \
+    print(d['CiphertextBlob'])")
+
+  echo "   Plaintext key (base64): ${PLAINTEXT_KEY:0:20}..."
+  echo "   Encrypted key (base64): ${ENCRYPTED_DATA_KEY:0:20}..."
+
+  # Save encrypted data key (safe to store)
+  echo $ENCRYPTED_DATA_KEY > /tmp/encrypted-data-key.b64
+  echo "✅ Encrypted data key saved to /tmp/encrypted-data-key.b64"
+else
+  echo "⚠️  Could not generate data key"
+  echo "    Check encryption context matches key policy"
+fi
+
+# Step 3: Encrypt data locally using Python + data key
+echo ""
+echo "[3] Encrypting data locally with plaintext data key..."
+python3 << PYEOF
+import base64
+import os
+import json
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+# Decode the plaintext data key
+plaintext_key_b64 = "$PLAINTEXT_KEY"
+key_bytes = base64.b64decode(plaintext_key_b64)
+
+# Read the data to encrypt
+with open('/tmp/sensitive-data.txt', 'rb') as f:
+    plaintext_data = f.read()
+
+# Generate random nonce (96 bits for AES-GCM)
+nonce = os.urandom(12)
+
+# Encrypt using AES-256-GCM
+aesgcm = AESGCM(key_bytes)
+ciphertext = aesgcm.encrypt(nonce, plaintext_data, None)
+
+# Save: nonce + ciphertext
+encrypted_payload = {
+    'nonce': base64.b64encode(nonce).decode(),
+    'ciphertext': base64.b64encode(ciphertext).decode()
+}
+
+with open('/tmp/encrypted-data.json', 'w') as f:
+    json.dump(encrypted_payload, f, indent=2)
+
+print("✅ Data encrypted locally using AES-256-GCM")
+print(f"   Original size:  {len(plaintext_data)} bytes")
+print(f"   Encrypted size: {len(ciphertext)} bytes")
+print("   IMPORTANT: Plaintext key now discarded from memory")
+PYEOF
+
+# Install cryptography if needed
+pip install cryptography --quiet 2>/dev/null || \
+  pip3 install cryptography --quiet 2>/dev/null
+
+# Re-run after install
+python3 << PYEOF
+import base64, os, json
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    plaintext_key_b64 = "$PLAINTEXT_KEY"
+    key_bytes = base64.b64decode(plaintext_key_b64)
+
+    with open('/tmp/sensitive-data.txt', 'rb') as f:
+        plaintext_data = f.read()
+
+    nonce = os.urandom(12)
+    aesgcm = AESGCM(key_bytes)
+    ciphertext = aesgcm.encrypt(nonce, plaintext_data, None)
+
+    encrypted_payload = {
+        'nonce': base64.b64encode(nonce).decode(),
+        'ciphertext': base64.b64encode(ciphertext).decode()
+    }
+
+    with open('/tmp/encrypted-data.json', 'w') as f:
+        json.dump(encrypted_payload, f, indent=2)
+
+    print("✅ Data encrypted successfully")
+    print(f"   Original size:  {len(plaintext_data)} bytes")
+    print(f"   Encrypted size: {len(ciphertext)} bytes")
+except Exception as e:
+    print(f"⚠️  Encryption error: {e}")
+PYEOF
+
+# Step 4: Show what gets stored (encrypted data + encrypted key)
+echo ""
+echo "[4] What gets stored (both safe to store anywhere)..."
+echo "--- Encrypted Data Key ---"
+cat /tmp/encrypted-data-key.b64
+echo ""
+echo "--- Encrypted Data ---"
+cat /tmp/encrypted-data.json
+
+# Step 5: Decrypt — retrieve and decrypt data key from KMS
+echo ""
+echo "[5] DECRYPTION: Retrieving plaintext data key from KMS..."
+ENCRYPTED_KEY_BLOB=$(cat /tmp/encrypted-data-key.b64)
+
+DECRYPTED_KEY_RESPONSE=$(aws kms decrypt \
+  --ciphertext-blob $ENCRYPTED_KEY_BLOB \
+  --encryption-context \
+    '{"App":"Lab99","Env":"Development"}' \
+  --key-id "alias/lab99-symmetric-key" \
+  --output json 2>/dev/null)
+
+if [ ! -z "$DECRYPTED_KEY_RESPONSE" ]; then
+  RECOVERED_KEY=$(echo $DECRYPTED_KEY_RESPONSE | \
+    python3 -c "import sys,json; \
+    print(json.load(sys.stdin)['Plaintext'])")
+  echo "✅ KMS decrypted the data key successfully"
+  echo "   Recovered key: ${RECOVERED_KEY:0:20}..."
+else
+  echo "⚠️  KMS decryption failed — check encryption context"
+fi
+
+# Step 6: Decrypt data locally with recovered key
+echo ""
+echo "[6] DECRYPTION: Decrypting data locally with recovered key..."
+python3 << PYEOF
+import base64, json
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    # Load recovered key
+    recovered_key_b64 = "$RECOVERED_KEY"
+    key_bytes = base64.b64decode(recovered_key_b64)
+
+    # Load encrypted payload
+    with open('/tmp/encrypted-data.json', 'r') as f:
+        payload = json.load(f)
+
+    nonce = base64.b64decode(payload['nonce'])
+    ciphertext = base64.b64decode(payload['ciphertext'])
+
+    # Decrypt
+    aesgcm = AESGCM(key_bytes)
+    plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+
+    print("✅ Data decrypted successfully!")
+    print("=" * 40)
+    print(plaintext.decode())
+    print("=" * 40)
+except Exception as e:
+    print(f"⚠️  Decryption error: {e}")
+PYEOF
+
+# Step 7: Test wrong context fails
+echo ""
+echo "[7] Testing that wrong encryption context FAILS..."
+aws kms decrypt \
+  --ciphertext-blob $ENCRYPTED_KEY_BLOB \
+  --encryption-context \
+    '{"App":"Lab99","Env":"Production"}' \
+  --key-id "alias/lab99-symmetric-key" \
+  --output json 2>/dev/null && \
+  echo "⚠️  Unexpected: decryption succeeded with wrong context" || \
+  echo "✅ Expected: decryption FAILED with wrong context"
+echo "   Proof: encryption context is enforced!"
+
+echo ""
+echo "================================================"
+echo "Part 3 Complete!"
+echo "Envelope Encryption demonstrated:"
+echo "  1. GenerateDataKey → plaintext + encrypted key"
+echo "  2. Encrypt data locally with plaintext key"
+echo "  3. Discard plaintext key"
+echo "  4. Store: encrypted data + encrypted key"
+echo "  5. Decrypt: KMS recovers plaintext key"
+echo "  6. Decrypt data locally"
+echo "  7. Wrong context = decrypt fails"
+echo "================================================"
+```
+
+---
+
+## Part 4 — Key Rotation Configuration
+
+```bash
+#!/bin/bash
+# Lab 99 - Part 4: Key Rotation
+# Day 34 - AWS Security Specialist Study Plan
+
+source /tmp/lab99-env.sh
+
+echo "================================================"
+echo "  Part 4: Key Rotation Configuration"
+echo "================================================"
+
+# Step 1: Check current rotation status
+echo ""
+echo "[1] Checking key rotation status..."
+aws kms get-key-rotation-status \
+  --key-id $SYMMETRIC_KEY_ID \
+  --query 'KeyRotationEnabled' \
+  --output text
+
+# Step 2: Enable automatic rotation
+echo ""
+echo "[2] Enabling automatic key rotation..."
+aws kms enable-key-rotation \
+  --key-id $SYMMETRIC_KEY_ID 2>/dev/null && \
+  echo "✅ Automatic key rotation ENABLED" || \
+  echo "⚠️  Could not enable rotation"
+
+# Step 3: Verify rotation enabled
+echo ""
+echo "[3] Verifying rotation is now enabled..."
+ROTATION_STATUS=$(aws kms get-key-rotation-status \
+  --key-id $SYMMETRIC_KEY_ID \
+  --query 'KeyRotationEnabled' \
+  --output text)
+echo "Rotation enabled: $ROTATION_STATUS"
+
+# Step 4: Check rotation for asymmetric key (should fail)
+echo ""
+echo "[4] Attempting rotation on asymmetric key (expected to fail)..."
+aws kms enable-key-rotation \
+  --key-id $ASYMMETRIC_KEY_ID 2>/dev/null && \
+  echo "⚠️  Unexpected: rotation enabled on asymmetric key" || \
+  echo "✅ Expected: asymmetric keys do NOT support auto-rotation"
+
+# Step 5: Check rotation status for AWS managed keys
+echo ""
+echo "[5] Checking AWS managed key rotation..."
+AWS_MANAGED_KEY=$(aws kms list-aliases \
+  --query 'Aliases[?AliasName==`alias/aws/s3`].TargetKeyId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$AWS_MANAGED_KEY" ] && \
+   [ "$AWS_MANAGED_KEY" != "None" ]; then
+  aws kms get-key-rotation-status \
+    --key-id $AWS_MANAGED_KEY \
+    --query 'KeyRotationEnabled' \
+    --output text 2>/dev/null && \
+    echo "AWS managed key rotation status shown above" || \
+    echo "✅ AWS managed key rotation is managed by AWS"
+fi
+
+# Step 6: Manual rotation reference
+echo ""
+echo "[6] Manual rotation process reference..."
+cat << 'EOF'
+# Manual rotation steps:
+
+# Step 1: Create new CMK
+NEW_KEY_ID=$(aws kms create-key \
+  --description "Rotated key - $(date +%Y%m%d)" \
+  --key-usage ENCRYPT_DECRYPT \
+  --key-spec SYMMETRIC_DEFAULT \
+  --query 'KeyMetadata.KeyId' \
+  --output text)
+
+# Step 2: Enable rotation on new key
+aws kms enable-key-rotation --key-id $NEW_KEY_ID
+
+# Step 3: Update alias to point to new key
+aws kms update-alias \
+  --alias-name "alias/lab99-symmetric-key" \
+  --target-key-id $NEW_KEY_ID
+
+# Step 4: Keep old key to decrypt historical data
+# (do NOT delete old key until all data is re-encrypted)
+
+# Step 5: Optionally re-encrypt existing data
+aws kms re-encrypt \
+  --source-key-id <old-key-id> \
+  --destination-key-id $NEW_KEY_ID \
+  --ciphertext-blob <existing-ciphertext>
+
+# Step 6: Eventually schedule old key deletion
+aws kms schedule-key-deletion \
+  --key-id <old-key-id> \
+  --pending-window-in-days 30
+EOF
+
+# Step 7: List key rotation history
+echo ""
+echo "[7] Checking key details including creation date..."
+aws kms describe-key \
+  --key-id $SYMMETRIC_KEY_ID \
+  --query 'KeyMetadata.{
+    KeyId:KeyId,
+    CreationDate:CreationDate,
+    KeyState:KeyState,
+    Origin:Origin
+  }' \
+  --output table
+
+echo ""
+echo "================================================"
+echo "Part 4 Complete!"
+echo "Key rotation configured:"
+echo "  Symmetric CMK: auto-rotation ENABLED (annual)"
+echo "  Asymmetric CMK: auto-rotation NOT supported"
+echo "================================================"
+```
+
+---
+
+## Part 5 — KMS Grants
+
+```bash
+#!/bin/bash
+# Lab 99 - Part 5: KMS Grants
+# Day 34 - AWS Security Specialist Study Plan
+
+source /tmp/lab99-env.sh
+
+echo "================================================"
+echo "  Part 5: KMS Grants"
+echo "================================================"
+
+# Step 1: Create a grant for the app role
+echo ""
+echo "[1] Creating grant for app role..."
+GRANT_TOKEN=$(aws kms create-grant \
+  --key-id $SYMMETRIC_KEY_ID \
+  --grantee-principal $APP_ROLE_ARN \
+  --operations Decrypt GenerateDataKey DescribeKey \
+  --retiring-principal $CALLER_ARN \
+  --name "lab99-app-role-grant" \
+  --constraints '{
+    "EncryptionContextSubset": {
+      "App": "Lab99"
+    }
+  }' \
+  --query 'GrantToken' \
+  --output text 2>/dev/null)
+
+GRANT_ID=$(aws kms create-grant \
+  --key-id $SYMMETRIC_KEY_ID \
+  --grantee-principal $APP_ROLE_ARN \
+  --operations Decrypt GenerateDataKey DescribeKey \
+  --retiring-principal $CALLER_ARN \
+  --name "lab99-app-role-grant-2" \
+  --query 'GrantId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$GRANT_ID" ]; then
+  echo "✅ Grant created"
+  echo "   Grant ID: $GRANT_ID"
+  echo "export GRANT_ID=\"$GRANT_ID\"" >> /tmp/lab99-env.sh
+else
+  echo "⚠️  Could not create grant"
+fi
+
+# Step 2: List all grants on the key
+echo ""
+echo "[2] Listing all grants on symmetric key..."
+aws kms list-grants \
+  --key-id $SYMMETRIC_KEY_ID \
+  --query 'Grants[*].{
+    GrantId:GrantId,
+    Name:Name,
+    GranteePrincipal:GranteePrincipal,
+    Operations:Operations,
+    IssuingAccount:IssuingAccount
+  }' \
+  --output table 2>/dev/null
+
+# Step 3: Get grant details
+echo ""
+echo "[3] Getting grant details..."
+aws kms list-grants \
+  --key-id $SYMMETRIC_KEY_ID \
+  --grant-id $GRANT_ID \
+  --output json | python3 -m json.tool 2>/dev/null
+
+# Step 4: List grants by grantee
+echo ""
+echo "[4] Listing grants by grantee principal..."
+aws kms list-grants \
+  --key-id $SYMMETRIC_KEY_ID \
+  --query "Grants[?GranteePrincipal=='$APP_ROLE_ARN'].{
+    GrantId:GrantId,
+    Name:Name,
+    Operations:Operations
+  }" \
+  --output table 2>/dev/null
+
+# Step 5: Revoke a grant
+echo ""
+echo "[5] Revoking the grant..."
+aws kms revoke-grant \
+  --key-id $SYMMETRIC_KEY_ID \
+  --grant-id $GRANT_ID 2>/dev/null && \
+  echo "✅ Grant revoked successfully" || \
+  echo "⚠️  Could not revoke grant"
+
+# Step 6: Verify grant is gone
+echo ""
+echo "[6] Verifying grant revocation..."
+REMAINING_GRANTS=$(aws kms list-grants \
+  --key-id $SYMMETRIC_KEY_ID \
+  --query 'Grants[*].GrantId' \
+  --output text 2>/dev/null)
+echo "Remaining grants: ${REMAINING_GRANTS:-None}"
+
+# Step 7: Grant reference — what AWS services use internally
+echo ""
+echo "[7] How AWS services use grants internally..."
+cat << 'EOF'
+When you encrypt an EBS volume, AWS automatically creates a grant:
+├── Grantee: EC2 service principal
+├── Operations: Decrypt, GenerateDataKey, DescribeKey
+├── Retiring: EC2 service
+└── Auto-retires when volume is deleted
+
+This is why EC2 can start encrypted volumes even if
+your IAM role doesn't explicitly have KMS permissions —
+the grant handles it at the service level.
+
+Similarly for:
+├── RDS encrypted storage
+├── Lambda encrypted environment variables
+└── EFS encrypted file systems
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 5 Complete!"
+echo "Grants demonstrated:"
+echo "  - Created grant with context constraint"
+echo "  - Listed and inspected grants"
+echo "  - Revoked grant"
+echo "  - Understood AWS service grant pattern"
+echo "================================================"
+```
+
+---
+
+## Part 6 — Direct Encrypt/Decrypt & Signing
+
+```bash
+#!/bin/bash
+# Lab 99 - Part 6: Direct Encrypt/Decrypt & Signing
+# Day 34 - AWS Security Specialist Study Plan
+
+source /tmp/lab99-env.sh
+
+echo "================================================"
+echo "  Part 6: Direct Encrypt/Decrypt & Signing"
+echo "================================================"
+
+# Step 1: Direct encrypt small data (under 4KB)
+echo ""
+echo "[1] Direct encrypt small data using KMS..."
+PLAINTEXT_MESSAGE="Pradeep-SecretMessage-Lab99"
+
+ENCRYPTED_BLOB=$(aws kms encrypt \
+  --key-id "alias/lab99-symmetric-key" \
+  --plaintext "$PLAINTEXT_MESSAGE" \
+  --encryption-context \
+    '{"App":"Lab99","Env":"Development"}' \
+  --query 'CiphertextBlob' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$ENCRYPTED_BLOB" ]; then
+  echo "✅ Message encrypted"
+  echo "   Original: $PLAINTEXT_MESSAGE"
+  echo "   Encrypted (base64): ${ENCRYPTED_BLOB:0:40}..."
+  echo $ENCRYPTED_BLOB > /tmp/direct-encrypted.b64
+else
+  echo "⚠️  Encryption failed — check context matches key policy"
+fi
+
+# Step 2: Decrypt the encrypted blob
+echo ""
+echo "[2] Decrypting the encrypted blob..."
+DECRYPTED_TEXT=$(aws kms decrypt \
+  --ciphertext-blob $(cat /tmp/direct-encrypted.b64) \
+  --encryption-context \
+    '{"App":"Lab99","Env":"Development"}' \
+  --query 'Plaintext' \
+  --output text 2>/dev/null | base64 --decode)
+
+if [ ! -z "$DECRYPTED_TEXT" ]; then
+  echo "✅ Message decrypted"
+  echo "   Decrypted: $DECRYPTED_TEXT"
+  if [ "$DECRYPTED_TEXT" == "$PLAINTEXT_MESSAGE" ]; then
+    echo "✅ Decrypted text matches original!"
+  fi
+else
+  echo "⚠️  Decryption failed"
+fi
+
+# Step 3: ReEncrypt (change key without exposing plaintext)
+echo ""
+echo "[3] ReEncrypt — change key without exposing plaintext..."
+
+# Create second key for reencryption demo
+SECOND_KEY_ID=$(aws kms create-key \
+  --description "Lab99 Second Key for ReEncrypt demo" \
+  --key-usage ENCRYPT_DECRYPT \
+  --key-spec SYMMETRIC_DEFAULT \
+  --query 'KeyMetadata.KeyId' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$SECOND_KEY_ID" ]; then
+  echo "✅ Second key created: $SECOND_KEY_ID"
+  echo "export SECOND_KEY_ID=\"$SECOND_KEY_ID\"" \
+    >> /tmp/lab99-env.sh
+
+  aws kms create-alias \
+    --alias-name "alias/lab99-second-key" \
+    --target-key-id $SECOND_KEY_ID 2>/dev/null
+
+  # ReEncrypt from key 1 to key 2
+  REENCRYPTED_BLOB=$(aws kms re-encrypt \
+    --ciphertext-blob \
+      $(cat /tmp/direct-encrypted.b64) \
+    --source-key-id $SYMMETRIC_KEY_ID \
+    --destination-key-id $SECOND_KEY_ID \
+    --source-encryption-context \
+      '{"App":"Lab99","Env":"Development"}' \
+    --destination-encryption-context \
+      '{"App":"Lab99","Env":"Development"}' \
+    --query 'CiphertextBlob' \
+    --output text 2>/dev/null)
+
+  if [ ! -z "$REENCRYPTED_BLOB" ]; then
+    echo "✅ Data re-encrypted with second key"
+    echo "   Plaintext was NEVER exposed during re-encryption"
+    echo "   Old key: alias/lab99-symmetric-key"
+    echo "   New key: alias/lab99-second-key"
+  fi
+fi
+
+# Step 4: Asymmetric signing
+echo ""
+echo "[4] Asymmetric signing with RSA key..."
+MESSAGE_TO_SIGN="This document is approved by Pradeep Kumar"
+echo $MESSAGE_TO_SIGN > /tmp/document-to-sign.txt
+
+# Sign the message
+SIGNATURE=$(aws kms sign \
+  --key-id $ASYMMETRIC_KEY_ID \
+  --message fileb:///tmp/document-to-sign.txt \
+  --message-type RAW \
+  --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256 \
+  --query 'Signature' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$SIGNATURE" ]; then
+  echo "✅ Document signed"
+  echo "   Message: $MESSAGE_TO_SIGN"
+  echo "   Signature: ${SIGNATURE:0:40}..."
+  echo $SIGNATURE > /tmp/signature.b64
+fi
+
+# Step 5: Verify the signature
+echo ""
+echo "[5] Verifying the signature..."
+VERIFY_RESULT=$(aws kms verify \
+  --key-id $ASYMMETRIC_KEY_ID \
+  --message fileb:///tmp/document-to-sign.txt \
+  --message-type RAW \
+  --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256 \
+  --signature $(cat /tmp/signature.b64) \
+  --query 'SignatureValid' \
+  --output text 2>/dev/null)
+
+echo "Signature valid: $VERIFY_RESULT"
+[ "$VERIFY_RESULT" == "true" ] && \
+  echo "✅ Signature verification PASSED" || \
+  echo "❌ Signature verification FAILED"
+
+# Step 6: Tamper with document and verify again
+echo ""
+echo "[6] Tampering with document and re-verifying..."
+echo "TAMPERED DOCUMENT" > /tmp/tampered-document.txt
+
+TAMPERED_RESULT=$(aws kms verify \
+  --key-id $ASYMMETRIC_KEY_ID \
+  --message fileb:///tmp/tampered-document.txt \
+  --message-type RAW \
+  --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256 \
+  --signature $(cat /tmp/signature.b64) \
+  --query 'SignatureValid' \
+  --output text 2>/dev/null)
+
+[ "$TAMPERED_RESULT" == "true" ] && \
+  echo "⚠️  Unexpected: tampered document verified" || \
+  echo "✅ Expected: tampered document FAILED verification"
+echo "   Proof: signing detects document tampering!"
+
+# Step 7: Get public key of asymmetric CMK
+echo ""
+echo "[7] Getting public key of asymmetric CMK..."
+aws kms get-public-key \
+  --key-id $ASYMMETRIC_KEY_ID \
+  --query '{
+    KeyId:KeyId,
+    KeyUsage:KeyUsage,
+    KeySpec:KeySpec,
+    SigningAlgorithms:SigningAlgorithms
+  }' \
+  --output table 2>/dev/null
+
+echo ""
+echo "================================================"
+echo "Part 6 Complete!"
+echo "Operations demonstrated:"
+echo "  - Direct encrypt/decrypt (under 4KB)"
+echo "  - ReEncrypt (key rotation without plaintext)"
+echo "  - RSA signing and verification"
+echo "  - Tamper detection via signature"
+echo "  - Public key retrieval"
+echo "================================================"
+```
+
+---
+
+## Part 7 — CloudTrail Audit & Monitoring
+
+```bash
+#!/bin/bash
+# Lab 99 - Part 7: CloudTrail Audit
+# Day 34 - AWS Security Specialist Study Plan
+
+source /tmp/lab99-env.sh
+
+echo "================================================"
+echo "  Part 7: CloudTrail Audit & Monitoring"
+echo "================================================"
+
+# Step 1: Search KMS events in CloudTrail
+echo ""
+echo "[1] Searching CloudTrail for KMS events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventSource,AttributeValue=kms.amazonaws.com \
+  --max-results 20 \
+  --query 'Events[*].{
+    Time:EventTime,
+    Event:EventName,
+    User:Username,
+    Region:AwsRegion
+  }' \
+  --output table 2>/dev/null
+
+# Step 2: Search for specific key events
+echo ""
+echo "[2] Searching for key creation events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventName,AttributeValue=CreateKey \
+  --query 'Events[*].{
+    Time:EventTime,
+    User:Username,
+    Event:EventName
+  }' \
+  --output table 2>/dev/null
+
+# Step 3: Search decrypt events
+echo ""
+echo "[3] Searching for Decrypt events (sensitive!)..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventName,AttributeValue=Decrypt \
+  --max-results 10 \
+  --query 'Events[*].{
+    Time:EventTime,
+    User:Username,
+    Event:EventName
+  }' \
+  --output table 2>/dev/null
+
+# Step 4: Create EventBridge rules for KMS monitoring
+echo ""
+echo "[4] Creating EventBridge rules for KMS monitoring..."
+
+# Rule for high-risk events
+aws events put-rule \
+  --name "Lab99-KMS-HighRisk-Monitor" \
+  --event-pattern '{
+    "source": ["aws.kms"],
+    "detail-type": ["AWS API Call via CloudTrail"],
+    "detail": {
+      "eventSource": ["kms.amazonaws.com"],
+      "eventName": [
+        "DisableKey",
+        "ScheduleKeyDeletion",
+        "PutKeyPolicy",
+        "DisableKeyRotation",
+        "DeleteImportedKeyMaterial"
+      ]
+    }
+  }' \
+  --state ENABLED \
+  --description "Alert on high-risk KMS operations" \
+  --output table 2>/dev/null && \
+  echo "✅ High-risk KMS monitoring rule created" || \
+  echo "⚠️  Could not create monitoring rule"
+
+# Rule for key usage monitoring
+aws events put-rule \
+  --name "Lab99-KMS-Usage-Monitor" \
+  --event-pattern '{
+    "source": ["aws.kms"],
+    "detail-type": ["AWS API Call via CloudTrail"],
+    "detail": {
+      "eventSource": ["kms.amazonaws.com"],
+      "eventName": [
+        "Decrypt",
+        "GenerateDataKey",
+        "Sign"
+      ]
+    }
+  }' \
+  --state ENABLED \
+  --description "Monitor KMS key usage operations" \
+  --output table 2>/dev/null && \
+  echo "✅ KMS usage monitoring rule created"
+
+# Step 5: Key usage summary
+echo ""
+echo "[5] Key usage audit summary..."
+cat << 'EOF'
+┌────────────────────────────────┬────────────────────────────────┐
+│ CloudTrail Event               │ What to Monitor                │
+├────────────────────────────────┼────────────────────────────────┤
+│ CreateKey                      │ New keys being created         │
+│ DisableKey                     │ Key disabled - investigate     │
+│ ScheduleKeyDeletion            │ Key marked for deletion        │
+│ CancelKeyDeletion              │ Deletion cancelled             │
+│ PutKeyPolicy                   │ Key policy changed             │
+│ DisableKeyRotation             │ Rotation disabled - HIGH RISK  │
+│ EnableKeyRotation              │ Rotation enabled - good        │
+│ CreateGrant                    │ New grant created              │
+│ RevokeGrant                    │ Grant revoked                  │
+│ Decrypt                        │ Who is decrypting what data    │
+│ GenerateDataKey                │ Data key generation            │
+│ Encrypt                        │ Encryption operations          │
+│ Sign                           │ Document signing               │
+│ DeleteImportedKeyMaterial      │ Imported material deleted      │
+└────────────────────────────────┴────────────────────────────────┘
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 7 Complete!"
+echo "KMS audit configured:"
+echo "  - CloudTrail events searched"
+echo "  - High-risk EventBridge rule created"
+echo "  - Usage monitoring rule created"
+echo "================================================"
+```
+
+---
+
+## Part 8 — Cleanup
+
+```bash
+#!/bin/bash
+# Lab 99 - Part 8: Cleanup
+# Day 34 - AWS Security Specialist Study Plan
+
+source /tmp/lab99-env.sh
+
+echo "================================================"
+echo "  Part 8: Lab Cleanup"
+echo "================================================"
+
+# Step 1: Delete aliases
+echo ""
+echo "[1] Deleting key aliases..."
+for ALIAS in \
+  "alias/lab99-symmetric-key" \
+  "alias/lab99-asymmetric-key" \
+  "alias/lab99-second-key"; do
+  aws kms delete-alias \
+    --alias-name $ALIAS 2>/dev/null && \
+    echo "✅ Deleted: $ALIAS" || \
+    echo "⚠️  Not found: $ALIAS"
+done
+
+# Step 2: Schedule key deletions (7-day minimum window)
+echo ""
+echo "[2] Scheduling KMS keys for deletion..."
+echo "    (7-day minimum window — use CancelKeyDeletion if needed)"
+
+for KEY_ID in \
+  $SYMMETRIC_KEY_ID \
+  $ASYMMETRIC_KEY_ID \
+  $SECOND_KEY_ID; do
+  if [ ! -z "$KEY_ID" ] && [ "$KEY_ID" != "None" ]; then
+    aws kms schedule-key-deletion \
+      --key-id $KEY_ID \
+      --pending-window-in-days 7 2>/dev/null && \
+      echo "✅ Scheduled deletion: $KEY_ID (7 days)" || \
+      echo "⚠️  Could not schedule: $KEY_ID"
+  fi
+done
+
+# Step 3: Delete IAM role
+echo ""
+echo "[3] Cleaning up IAM role..."
+aws iam delete-role \
+  --role-name "Lab99-AppRole" 2>/dev/null && \
+  echo "✅ IAM role deleted" || \
+  echo "⚠️  Could not delete role"
+
+# Step 4: Delete EventBridge rules
+echo ""
+echo "[4] Deleting EventBridge rules..."
+for RULE in \
+  "Lab99-KMS-HighRisk-Monitor" \
+  "Lab99-KMS-Usage-Monitor"; do
+  aws events delete-rule \
+    --name $RULE \
+    --force 2>/dev/null && \
+    echo "✅ Deleted rule: $RULE" || \
+    echo "⚠️  Could not delete: $RULE"
+done
+
+# Step 5: Clean up temp files
+echo ""
+echo "[5] Cleaning up temp files..."
+rm -f /tmp/lab99-env.sh \
+      /tmp/key-policy.json \
+      /tmp/updated-key-policy.json \
+      /tmp/app-trust-policy.json \
+      /tmp/sensitive-data.txt \
+      /tmp/encrypted-data.json \
+      /tmp/encrypted-data-key.b64 \
+      /tmp/direct-encrypted.b64 \
+      /tmp/document-to-sign.txt \
+      /tmp/tampered-document.txt \
+      /tmp/signature.b64
+echo "✅ Temp files cleaned"
+
+echo ""
+echo "================================================"
+echo "Lab 99 Cleanup Complete!"
+echo ""
+echo "⚠️  Note: KMS keys are in Pending Deletion state"
+echo "    (7-day window). To cancel:"
+echo "    aws kms cancel-key-deletion --key-id <key-id>"
+echo "================================================"
+```
+
+---
+
+## ✅ Lab 99 Verification Checklist
+
+```
+Lab 99 — Completion Checklist
+│
+├── Prerequisites
+│     ├── [ ] Verified identity and region
+│     └── [ ] Listed existing keys and aliases
+│
+├── Part 1: Create CMKs
+│     ├── [ ] Created symmetric CMK with custom policy
+│     ├── [ ] Created asymmetric RSA CMK
+│     └── [ ] Created aliases for both keys
+│
+├── Part 2: Key Policy Management
+│     ├── [ ] Viewed current key policy
+│     ├── [ ] Created app IAM role
+│     ├── [ ] Updated policy with context condition
+│     └── [ ] Added app role to policy
+│
+├── Part 3: Envelope Encryption
+│     ├── [ ] Generated data key (GenerateDataKey)
+│     ├── [ ] Encrypted data locally with AES-256
+│     ├── [ ] Stored encrypted data + encrypted key
+│     ├── [ ] Decrypted data key via KMS
+│     ├── [ ] Decrypted data locally
+│     └── [ ] Verified wrong context fails
+│
+├── Part 4: Key Rotation
+│     ├── [ ] Enabled auto-rotation on symmetric CMK
+│     ├── [ ] Confirmed asymmetric rotation not supported
+│     └── [ ] Understood manual rotation process
+│
+├── Part 5: Grants
+│     ├── [ ] Created grant with context constraint
+│     ├── [ ] Listed grants on key
+│     ├── [ ] Revoked grant
+│     └── [ ] Understood AWS service grant pattern
+│
+├── Part 6: Encrypt/Decrypt & Signing
+│     ├── [ ] Direct encrypt/decrypt (under 4KB)
+│     ├── [ ] ReEncrypt between keys
+│     ├── [ ] Signed document with RSA key
+│     ├── [ ] Verified valid signature
+│     └── [ ] Confirmed tampered doc fails
+│
+├── Part 7: CloudTrail Audit
+│     ├── [ ] Searched KMS events
+│     ├── [ ] Created high-risk monitoring rule
+│     └── [ ] Created usage monitoring rule
+│
+└── Part 8: Cleanup
+      └── [ ] All resources cleaned up
+```
+
+---
+
+## 🔑 Lab 99 Key Takeaways
+
+| Concept | What You Practiced |
+|---|---|
+| CMK creation | Symmetric + Asymmetric with custom policies |
+| Key policy | Root delegation, admin, usage with context |
+| Envelope encryption | Full end-to-end GenerateDataKey flow |
+| Encryption context | Enforced at decrypt time — wrong context fails |
+| Key rotation | Auto-rotation enabled; asymmetric not supported |
+| Grants | Created, listed, revoked with context constraints |
+| ReEncrypt | Key rotation without exposing plaintext |
+| Signing | RSA sign/verify + tamper detection |
+| CloudTrail | Every KMS call logged + EventBridge alerting |
+| Cost awareness | Keys in pending deletion — cancel if needed |
+
+---
+
+# 🎉 Day 34 — Fully Complete!
+
+All three sections done at full depth:
+- ✅ **Section 1** — Full Theory (1.1 to 1.6)
+- ✅ **Section 2** — 20 Exam Q&A + Traps + Cheat Sheet
+- ✅ **Section 3** — Lab 99 (8 parts, full scripts)
+
+---
+
+## 📅 Day 35 Preview
+```
+Day 35: AWS Secrets Manager & Parameter Store (3 hours)
+├── Secrets Manager architecture
+├── Automatic secret rotation
+├── Cross-account secret sharing
+├── Parameter Store tiers (Standard vs Advanced)
+├── Secrets Manager vs Parameter Store
+├── Integration with RDS, Lambda, ECS
+└── Lab 100: Secret creation, rotation & retrieval
+```
+
+Ready when you are Pradeep! 💪

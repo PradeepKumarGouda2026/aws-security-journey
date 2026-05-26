@@ -1,0 +1,1289 @@
+# 📅 Day 38 — Amazon Cognito
+
+---
+
+# SECTION 1 — THEORY BLOCK
+
+---
+
+## 1.1 Service Overview & Purpose
+
+### What is Amazon Cognito?
+Amazon Cognito is a fully managed **customer identity and access management (CIAM)** service that provides **authentication, authorization, and user management** for web and mobile applications. It lets you add user sign-up, sign-in, and access control to your applications quickly and easily.
+
+Think of Cognito as your **application's identity layer** — it handles everything related to who your users are, how they prove their identity, and what they are allowed to do inside your application.
+
+### Two Core Components
+```
+Amazon Cognito
+├── User Pools
+│     └── Authentication — WHO is the user?
+│           Manages user directory, sign-up, sign-in,
+│           MFA, password policies, social federation
+│
+└── Identity Pools (Federated Identities)
+      └── Authorization — WHAT can the user do?
+            Exchanges tokens for temporary AWS credentials
+            Grants access to AWS services directly
+```
+
+### Why Does It Exist? (Problem It Solves)
+```
+Without Cognito:
+├── Build your own user registration system
+├── Build your own login/logout flows
+├── Implement MFA from scratch
+├── Handle password reset flows
+├── Integrate with Google/Facebook/SAML manually
+├── Manage JWT tokens yourself
+	JSON Web Tokens (JWTs) are compact, URL-safe tokens used to securely transmit information between parties. They are widely used in authentication and authorization systems because they can be digitally signed and optionally encrypted, ensuring integrity and trust.
+├── Grant AWS access to app users manually
+└── Scale user directory infrastructure yourself
+
+With Cognito:
+├── Managed user directory (millions of users)
+├── Pre-built UI (Hosted UI) for auth flows
+├── Built-in MFA (TOTP, SMS)
+├── Social federation (Google, Facebook, Apple)
+├── Enterprise federation (SAML 2.0, OIDC)
+├── JWT tokens automatically issued
+├── Temporary AWS credentials via Identity Pools
+└── Scales automatically — no infrastructure to manage
+```
+
+### Cognito vs IAM Identity Center (Exam Critical)
+```
+Cognito:
+├── Customer-facing applications
+├── Your app's end users (millions of external users)
+├── Consumer identity (B2C)
+└── Provides tokens for app access + AWS resource access
+
+IAM Identity Center:
+├── Workforce identity
+├── Your employees accessing AWS accounts
+├── Enterprise identity (B2E)
+└── Provides SSO to AWS accounts and enterprise apps
+```
+
+> ⚠️ **Most tested Cognito distinction:** Cognito = **customer/app users**. IAM Identity Center = **employees/workforce**. This distinction appears in almost every identity scenario question.
+
+### Exam Weight & Importance
+- Appears in **Domain 2: Identity & Access Management** (16%)
+- Expect **3–5 questions** directly involving Cognito
+- Commonly tested: User Pools vs Identity Pools, federation patterns, token types, MFA enforcement, resource server configuration
+
+---
+
+## 1.2 Core Architecture
+
+### Full Cognito Architecture
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Amazon Cognito                              │
+│                                                                  │
+│  ┌──────────────────────────┐  ┌──────────────────────────┐    │
+│  │       USER POOL           │  │     IDENTITY POOL         │    │
+│  │                           │  │  (Federated Identities)   │    │
+│  │  User Directory           │  │                           │    │
+│  │  ├── Username/Password    │  │  Token Exchange           │    │
+│  │  ├── Social Logins        │  │  ├── User Pool token      │    │
+│  │  ├── SAML/OIDC IdPs       │  │  ├── Google token         │    │
+│  │  ├── MFA                  │  │  ├── Facebook token        │    │
+│  │  ├── Password Policy      │  │  └── SAML assertion        │    │
+│  │  ├── User Attributes      │  │           │                │    │
+│  │  └── Lambda Triggers      │  │           ▼                │    │
+│  │           │               │  │  AWS STS AssumeRoleWith   │    │
+│  │           ▼               │  │  WebIdentity              │    │
+│  │  Issues JWT Tokens:       │  │           │                │    │
+│  │  ├── ID Token             │  │           ▼                │    │
+│  │  ├── Access Token         │  │  Temporary AWS Creds:     │    │
+│  │  └── Refresh Token        │  │  ├── Access Key           │    │
+│  └──────────────────────────┘  │  ├── Secret Key            │    │
+│                                 │  └── Session Token         │    │
+│                                 └──────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Authentication Flow (User Pool)
+```
+Step 1: User enters credentials in your app
+Step 2: App calls Cognito User Pool
+Step 3: Cognito validates credentials
+Step 4: MFA challenge (if enabled)
+Step 5: Cognito issues three JWT tokens:
+        ├── ID Token (who the user is — claims)
+        ├── Access Token (what the user can do in app)
+        └── Refresh Token (get new tokens without re-login)
+Step 6: App uses tokens to:
+        ├── Call your backend APIs (ID/Access token)
+        └── Exchange for AWS credentials (Identity Pool)
+```
+
+### Authorization Flow (Identity Pool)
+```
+Step 1: App has JWT token from User Pool (or social IdP)
+Step 2: App calls Identity Pool with the token
+Step 3: Identity Pool validates token with issuer
+Step 4: Identity Pool calls STS AssumeRoleWithWebIdentity
+Step 5: STS returns temporary AWS credentials
+Step 6: App uses credentials to directly access:
+        ├── S3 (user-specific folder)
+        ├── DynamoDB (user-specific records)
+        ├── API Gateway (authenticated calls)
+        └── Any AWS service
+```
+
+---
+
+## 1.3 Deep Dive — Every Sub-Topic
+
+### A. User Pools — Full Detail
+
+#### User Pool Features
+```
+Core features:
+├── User Directory
+│     ├── Store millions of users
+│     ├── Standard attributes: email, phone, name, etc.
+│     ├── Custom attributes: up to 25 per pool
+│     └── Immutable attributes: set once, cannot change
+│
+├── Authentication
+│     ├── Username/password (SRP protocol)
+│     ├── Passwordless (magic link, OTP)
+│     └── Social federation (Google, Facebook, Apple, Amazon)
+│
+├── Multi-Factor Authentication (MFA)
+│     ├── SMS-based OTP
+│     ├── TOTP (Google Authenticator, Authy)
+│     ├── MFA modes:
+│     │     ├── OFF — no MFA
+│     │     ├── OPTIONAL — user can enable
+│     │     └── REQUIRED — always enforced
+│     └── Adaptive authentication (risk-based MFA)
+│
+├── Password Policies
+│     ├── Minimum length (8-99 characters)
+│     ├── Complexity requirements
+│     ├── Temporary password expiry
+│     └── Password history (prevent reuse)
+│
+├── Account Recovery
+│     ├── Email verification
+│     ├── SMS verification
+│     └── Admin-only reset option
+│
+└── Advanced Security Features
+      ├── Compromised credential checking
+      ├── Adaptive authentication
+      └── Risk-based challenges
+```
+
+#### User Pool App Clients
+```
+App Client = your application's identity within Cognito
+
+Each app client has:
+├── Client ID (public)
+├── Client Secret (optional, for confidential clients)
+├── Allowed OAuth flows:
+│     ├── Authorization Code (server-side apps)
+│     ├── Implicit (deprecated — avoid)
+│     └── Client Credentials (machine-to-machine)
+├── Allowed OAuth scopes:
+│     ├── openid, email, profile (standard)
+│     └── Custom resource server scopes
+├── Callback URLs (redirect after login)
+├── Sign-out URLs
+└── Token validity settings:
+      ├── Access token: 5 min - 24 hours
+      ├── ID token: 5 min - 24 hours
+      └── Refresh token: 60 min - 10 years
+```
+
+#### Hosted UI
+```
+Cognito provides a pre-built, customizable login UI:
+├── Available at: https://<domain>.auth.<region>.amazoncognito.com
+├── Handles: sign-up, sign-in, MFA, password reset
+├── Customizable: logo, CSS styling
+├── Supports: social login buttons, SAML federation
+└── No UI code needed — Cognito hosts it
+
+OAuth 2.0 flows supported:
+├── /oauth2/authorize → starts auth flow
+├── /oauth2/token     → exchange code for tokens
+├── /oauth2/userInfo  → get user claims
+└── /oauth2/revoke    → revoke tokens
+```
+
+#### User Pool Lambda Triggers (Exam Critical)
+```
+Lambda triggers let you customize auth flows:
+
+Pre-signup trigger:
+├── Validate/reject new registrations
+└── Custom validation before user created
+
+Post-confirmation trigger:
+├── Send welcome email
+└── Add user to database after confirmed
+
+Pre-authentication trigger:
+├── Custom checks before login
+└── Block specific users from logging in
+
+Post-authentication trigger:
+├── Log authentication events
+└── Trigger workflows after login
+
+Pre-token generation trigger:
+├── ADD custom claims to JWT tokens
+├── MODIFY existing claims
+└── Most powerful trigger for authorization
+
+Custom authentication triggers:
+├── Define custom challenge (CAPTCHA, security question)
+├── Create auth challenge
+├── Verify auth challenge response
+└── Build completely custom auth flows
+
+User migration trigger:
+└── Migrate users from legacy system to Cognito
+    on first successful login
+```
+
+> ⚠️ **Exam critical:** The **Pre-token generation trigger** is the way to add custom claims to JWT tokens. This is heavily tested — "how do you add custom data to a Cognito token?" → Pre-token generation Lambda.
+
+---
+
+### B. Identity Pools — Full Detail
+
+#### What Identity Pools Do
+```
+Identity Pool = bridge between external identities
+                and AWS IAM roles
+
+Supported identity providers:
+├── Cognito User Pools (most common)
+├── Social IdPs: Google, Facebook, Apple, Amazon
+├── SAML identity providers
+├── OpenID Connect (OIDC) providers
+├── Developer authenticated identities
+└── Unauthenticated (guest) access
+```
+
+#### Authenticated vs Unauthenticated Roles
+```
+Identity Pool maps users to IAM roles:
+
+Authenticated role:
+├── Assigned to users who have logged in
+├── Can access AWS resources based on role policy
+└── Example: s3:GetObject on users own folder
+
+Unauthenticated role (guest):
+├── Assigned to users with no identity token
+├── Very limited permissions (or none)
+└── Example: read-only public S3 content
+
+Role selection based on:
+├── Default role (all authenticated users get same role)
+├── Rules-based role selection:
+│     ├── Match on token claim value
+│     ├── Example: if groups=admin → AdminRole
+│     └── Example: if groups=user → UserRole
+└── Token-based role selection (preferred_role claim)
+```
+
+#### Fine-Grained Access Control with IAM
+```
+Pattern: user accesses ONLY their own S3 data
+
+IAM role policy using Cognito variables:
+{
+  "Effect": "Allow",
+  "Action": ["s3:GetObject", "s3:PutObject"],
+  "Resource": [
+    "arn:aws:s3:::my-bucket/${cognito-identity.amazonaws.com:sub}/*"
+  ]
+}
+
+${cognito-identity.amazonaws.com:sub} = unique user ID
+Each user can only access their own prefix in S3
+
+Other available variables:
+├── ${cognito-identity.amazonaws.com:aud} = Identity Pool ID
+└── ${cognito-identity.amazonaws.com:amr} = auth method
+```
+
+---
+
+### C. Federation Patterns (Full Detail)
+
+#### Pattern 1: Social Federation (User Pool)
+```
+User clicks "Sign in with Google"
+        │
+        ▼
+Cognito redirects to Google OAuth
+        │
+        ▼
+User authenticates with Google
+        │
+        ▼
+Google returns authorization code to Cognito
+        │
+        ▼
+Cognito exchanges code for Google tokens
+        │
+        ▼
+Cognito creates/updates user in User Pool
+        │
+        ▼
+Cognito issues its own JWT tokens to app
+        │
+        ▼
+App receives Cognito tokens (not Google tokens)
+```
+
+> ⚠️ **Key point:** App always receives **Cognito tokens** regardless of which IdP was used. Social login details are abstracted away.
+
+#### Pattern 2: Enterprise SAML Federation
+```
+Corporate user visits your app
+        │
+        ▼
+App redirects to Cognito Hosted UI
+        │
+        ▼
+User selects corporate login (SAML IdP)
+        │
+        ▼
+Cognito redirects to corporate IdP (Okta/ADFS)
+        │
+        ▼
+User authenticates with corporate credentials
+        │
+        ▼
+SAML assertion returned to Cognito
+        │
+        ▼
+Cognito maps SAML attributes to user pool attributes
+        │
+        ▼
+Cognito issues JWT tokens to app
+```
+
+#### Pattern 3: User Pool + Identity Pool (Combined)
+```
+Most complete pattern:
+
+User logs in via User Pool → gets JWT tokens
+        │
+        ▼
+App passes ID token to Identity Pool
+        │
+        ▼
+Identity Pool validates token
+        │
+        ▼
+Identity Pool calls STS for AWS credentials
+        │
+        ▼
+App gets temporary AWS credentials
+        │
+        ▼
+App directly accesses S3/DynamoDB/etc.
+with user-specific permissions
+```
+
+#### Pattern 4: Machine-to-Machine (Client Credentials)
+```
+Backend service needs API access (no user):
+
+Service calls Cognito with client ID + secret
+        │
+        ▼
+Cognito validates client credentials
+        │
+        ▼
+Cognito issues Access Token (no ID token)
+        │
+        ▼
+Service calls API Gateway with Access Token
+        │
+        ▼
+API Gateway Cognito Authorizer validates token
+        │
+        ▼
+API call authorized
+```
+
+---
+
+### D. Cognito Advanced Security Features
+
+#### Adaptive Authentication
+```
+Cognito analyzes each login attempt for risk:
+├── New device detected
+├── Unusual location
+├── Impossible travel (login from two distant locations)
+├── Known malicious IP
+└── Unusual time of day
+
+Based on risk level:
+├── Low risk → Allow
+├── Medium risk → Require MFA
+└── High risk → Block + notify user/admin
+```
+
+#### Compromised Credential Protection
+```
+Cognito checks credentials against:
+├── Known breached credential databases
+├── Internal threat intelligence
+└── Real-time monitoring
+
+If compromised credentials detected:
+├── Block sign-in
+├── Force password reset
+└── Notify user
+```
+
+#### Advanced Security Modes
+```
+├── Audit mode:
+│     └── Log risky events but don't block
+│           (use to understand traffic before enforcing)
+│
+└── Enforced mode:
+      └── Actively block high-risk logins
+            (production recommended)
+```
+
+---
+
+### E. Resource Servers & Custom Scopes
+
+#### What is a Resource Server?
+```
+Resource Server = your protected API
+
+Defined in Cognito User Pool:
+├── Identifier: https://api.myapp.com
+├── Custom scopes:
+│     ├── api.myapp.com/read
+│     ├── api.myapp.com/write
+│     └── api.myapp.com/admin
+
+App clients request specific scopes:
+├── Service A gets: api.myapp.com/read only
+├── Service B gets: api.myapp.com/read + write
+└── Admin service: api.myapp.com/admin
+
+API validates Access Token contains required scope
+```
+
+#### OAuth 2.0 Scopes Flow
+```
+Client requests token with scope:
+  POST /oauth2/token
+  grant_type=client_credentials
+  scope=api.myapp.com/read
+
+Cognito issues Access Token with scope claim:
+  {
+    "scope": "api.myapp.com/read",
+    "client_id": "abc123",
+    "exp": 1234567890
+  }
+
+API checks token contains required scope
+→ Allow or deny based on scope
+```
+
+---
+
+### F. Cognito Token Deep Dive
+
+#### Three Token Types
+```
+ID Token:
+├── Contains user identity claims
+├── Audience (aud) = App Client ID
+├── Claims: sub, email, name, custom attributes
+├── Use: tell your app WHO the user is
+└── Signed with RS256
+
+Access Token:
+├── Contains authorization information
+├── Contains OAuth scopes
+├── Use: authorize API calls
+├── Validated by API Gateway Cognito Authorizer
+└── Does NOT contain user attributes (by default)
+
+Refresh Token:
+├── Long-lived token (up to 10 years)
+├── Use: get new ID + Access tokens silently
+├── Should be stored securely
+└── Can be revoked via GlobalSignOut API
+```
+
+#### Token Validation
+```
+Validating Cognito JWT tokens:
+
+Step 1: Decode JWT header → get kid (key ID)
+Step 2: Download JWKS from Cognito:
+        https://cognito-idp.<region>.amazonaws.com/
+        <userPoolId>/.well-known/jwks.json
+Step 3: Find public key matching kid
+Step 4: Verify token signature
+Step 5: Verify token not expired (exp claim)
+Step 6: Verify aud matches your App Client ID
+Step 7: Verify iss matches your User Pool URL
+```
+
+---
+
+### G. Cognito with API Gateway
+
+#### Cognito Authorizer for API Gateway
+```
+API Gateway → Cognito User Pool Authorizer:
+
+Client sends request with token in Authorization header
+        │
+        ▼
+API Gateway Cognito Authorizer validates:
+├── Token signature (via Cognito JWKS)
+├── Token expiry
+├── Token issuer (correct User Pool)
+└── Token audience (correct App Client)
+        │
+        ▼
+If valid → request proceeds to backend
+If invalid → 401 Unauthorized returned
+
+Configuration:
+├── Token source: Header, Query param, or Stage var
+├── Token validation: ID token or Access token
+└── Authorization caching: 0-3600 seconds
+```
+
+---
+
+## 1.4 Comparison Tables
+
+### User Pool vs Identity Pool
+
+| Feature | User Pool | Identity Pool |
+|---|---|---|
+| **Purpose** | Authentication (who) | Authorization (what AWS resources) |
+| **Manages** | User directory | IAM role mapping |
+| **Issues** | JWT tokens | Temporary AWS credentials |
+| **Users** | App users | Any identity (User Pool, social, SAML) |
+| **MFA** | ✅ Built-in | ❌ Handled by IdP |
+| **Social login** | ✅ Yes | ✅ Yes (direct) |
+| **Guest access** | ❌ No | ✅ Unauthenticated role |
+| **AWS resource access** | ❌ No | ✅ Yes (via STS) |
+
+### Cognito vs IAM Identity Center vs IAM Federation
+
+| Feature | Cognito | IAM Identity Center | Direct IAM Federation |
+|---|---|---|---|
+| **Use case** | App users (B2C) | Employees (B2E) | Single account federation |
+| **Scale** | Millions of users | Thousands of employees | Hundreds |
+| **User directory** | ✅ Built-in | ✅ Built-in / external | External only |
+| **MFA** | ✅ Built-in | ✅ Built-in | Via IdP |
+| **Social login** | ✅ Yes | ❌ No | ❌ No |
+| **Multi-account SSO** | ❌ | ✅ Native | ❌ Complex |
+| **App integration** | ✅ OAuth/OIDC | ✅ SAML/OIDC | ✅ SAML |
+| **AWS credentials** | Via Identity Pool | Via Permission Sets | Via IAM roles |
+
+### Token Comparison
+
+| Token | Purpose | Lifetime | Contains |
+|---|---|---|---|
+| **ID Token** | User identity | 5min–24hr | User claims, attributes |
+| **Access Token** | API authorization | 5min–24hr | Scopes, permissions |
+| **Refresh Token** | Get new tokens | 60min–10yr | Session reference |
+
+---
+
+## 1.5 Security & Compliance Angles
+
+### IAM Permissions for Cognito
+
+```
+cognito-idp:CreateUserPool          → Create user pool
+cognito-idp:AdminCreateUser         → Create user (admin)
+cognito-idp:AdminSetUserPassword    → Set password
+cognito-idp:AdminEnableUser         → Enable user
+cognito-idp:AdminDisableUser        → Disable user
+cognito-idp:AdminDeleteUser         → Delete user
+cognito-idp:ListUsers               → List all users
+cognito-idp:AdminInitiateAuth       → Initiate auth
+cognito-identity:GetCredentialsForIdentity → Get AWS creds
+```
+
+### Common Misconfigurations
+
+| Misconfiguration | Risk | Fix |
+|---|---|---|
+| MFA set to OPTIONAL | Users skip MFA | Set to REQUIRED for sensitive apps |
+| No advanced security features | Credential stuffing succeeds | Enable compromised credential checking |
+| Refresh token never expires | Stolen token = permanent access | Set appropriate refresh token expiry |
+| Client secret exposed in mobile app | Client secret compromise | Use public clients (no secret) for mobile |
+| No token revocation on logout | Sessions persist after logout | Call GlobalSignOut on logout |
+| Unauthenticated role too permissive | Guest users access sensitive data | Grant minimal/no permissions to unauth role |
+| Custom attributes not validated | Malicious attribute injection | Validate in Pre-signup Lambda trigger |
+| ID token used for API auth without validation | Token forgery | Always validate token signature and claims |
+
+### Compliance Relevance
+
+| Framework | Cognito Relevance |
+|---|---|
+| **PCI DSS** | MFA for admin access, secure authentication |
+| **HIPAA** | User authentication for PHI access |
+| **ISO 27001** | Access control, identity management |
+| **SOC 2** | User authentication, access management |
+| **GDPR** | User data management, consent, deletion |
+
+---
+
+## 1.6 Integration Patterns
+
+### Pattern 1: Web App with Hosted UI
+```
+User → App → Cognito Hosted UI → Login
+          ← JWT tokens ←
+     → Backend API (with Access Token)
+          → API Gateway Cognito Authorizer
+          → Lambda / ECS
+```
+
+### Pattern 2: Mobile App with Direct SDK
+```
+Mobile App → Cognito SDK → User Pool
+                        ← JWT tokens
+           → Identity Pool (exchange for AWS creds)
+                        ← Temporary credentials
+           → S3 (user-specific folder)
+           → DynamoDB (user-specific records)
+```
+
+### Pattern 3: Microservices with Custom Scopes
+```
+Service A (read scope)  ──▶ API Gateway ──▶ Resource Server
+Service B (write scope) ──▶ API Gateway ──▶ Resource Server
+Admin (admin scope)     ──▶ API Gateway ──▶ Resource Server
+
+Each service gets different access based on scope in token
+```
+
+### Pattern 4: Legacy User Migration
+```
+User logs in for first time after migration
+        │
+        ▼
+Cognito User Migration Lambda trigger fires
+        │
+        ▼
+Lambda checks legacy user store
+        │
+        ▼
+If valid → creates user in Cognito + migrates
+        │
+        ▼
+User continues with Cognito going forward
+Gradual migration — no big-bang cutover
+```
+
+### Pattern 5: B2B Multi-Tenant SaaS
+```
+Tenant A users → User Pool with Tenant A SAML IdP
+Tenant B users → User Pool with Tenant B SAML IdP
+
+Or:
+Single User Pool with multiple SAML IdPs
+Custom attribute: tenant_id
+Pre-token generation Lambda adds tenant_id to token
+API uses tenant_id claim for data isolation
+```
+
+---
+
+Section 1 complete Pradeep! Full theory at exam depth covering all 6 sub-sections.
+
+Shall I move to **Section 2 — Exam Deep Dive**? 🎯
+
+
+# 📅 Day 38 — Section 2: Exam Deep Dive
+
+---
+
+## 2.1 Scenario-Based Q&A (20 Questions)
+
+---
+
+### Question 1
+**A company is building a mobile app where users can sign in with their Google or Facebook accounts. After signing in, users need to upload photos directly to their own S3 folder. Which Cognito components are needed?**
+
+A) User Pool only — it handles both authentication and S3 access
+B) Identity Pool only — it handles social login and AWS credentials
+C) User Pool for authentication + Identity Pool for AWS credentials
+D) IAM Identity Center for social login + Identity Pool for S3 access
+
+**Answer: C**
+
+**Explanation:**
+- User Pool handles social federation (Google, Facebook) and issues JWT tokens
+- Identity Pool exchanges those JWT tokens for temporary AWS credentials
+- IAM role policy uses `${cognito-identity.amazonaws.com:sub}` to restrict each user to their own S3 prefix
+- User Pool alone cannot issue AWS credentials
+- Identity Pool can handle social login directly but combining both gives cleaner token management and user directory
+- IAM Identity Center is for workforce/employees — not consumer app users
+
+---
+
+### Question 2
+**A developer needs to add a user's department and employee ID to the JWT tokens issued by Cognito so that backend APIs can make authorization decisions based on these values. Which Lambda trigger achieves this?**
+
+A) Post-confirmation trigger
+B) Pre-authentication trigger
+C) Pre-token generation trigger
+D) Post-authentication trigger
+
+**Answer: C**
+
+**Explanation:**
+- Pre-token generation trigger fires just before Cognito issues tokens
+- It can ADD, MODIFY, or SUPPRESS claims in ID and Access tokens
+- This is the only trigger that directly modifies token content
+- Post-confirmation fires after signup confirmation — too early, tokens not being issued
+- Pre-authentication fires before login check — cannot modify tokens
+- Post-authentication fires after successful login — tokens already generated
+- Pre-token generation is the exam answer for ANY "add custom claims to token" scenario
+
+---
+
+### Question 3
+**A company requires all users of their financial application to use MFA. Some users are bypassing MFA by using older app versions. Which Cognito configuration enforces MFA for ALL users without exception?**
+
+A) Set MFA to OPTIONAL and send reminder emails
+B) Set MFA to REQUIRED in the User Pool settings
+C) Enable adaptive authentication to require MFA
+D) Add a Pre-authentication Lambda to check MFA status
+
+**Answer: B**
+
+**Explanation:**
+- Setting MFA to REQUIRED in User Pool forces MFA for every authentication attempt
+- No user can bypass this — it is enforced at the Cognito service level
+- OPTIONAL allows users to choose — some will skip it
+- Adaptive authentication applies MFA based on risk signals — not guaranteed for every login
+- Pre-authentication Lambda can check but cannot directly enforce MFA — it would need to block the login entirely which disrupts legitimate users
+- REQUIRED is the definitive, exam-correct answer for mandatory MFA enforcement
+
+---
+
+### Question 4
+**A user logs out of a web application. The developer calls the Cognito logout endpoint but the user's Refresh Token is still valid for 30 days. An attacker who obtained the Refresh Token can still get new Access Tokens. What should the developer also call to fully invalidate the session?**
+
+A) DeleteUser API to remove the user
+B) AdminDisableUser API to disable the account
+C) GlobalSignOut API to revoke all tokens for the user
+D) RevokeToken API with the Refresh Token
+
+**Answer: D**
+
+**Explanation:**
+- RevokeToken API specifically revokes a Refresh Token and all Access Tokens issued from it
+- GlobalSignOut revokes ALL refresh tokens and access tokens for the user across ALL devices
+- Both D and C are valid depending on the scenario — but D is more targeted (specific token)
+- For a single device logout: RevokeToken (revoke specific refresh token)
+- For logout from all devices: GlobalSignOut (revoke all sessions)
+- DeleteUser permanently removes the user — too destructive for logout
+- AdminDisableUser prevents new logins but doesn't invalidate existing tokens
+- The exam typically asks for GlobalSignOut for complete session invalidation
+
+---
+
+### Question 5
+**A company uses Cognito User Pool for their SaaS application. They want different API permissions for regular users versus admin users. Regular users can only read data, admins can read and write. Which approach is MOST scalable?**
+
+A) Create two separate User Pools — one for users one for admins
+B) Use Cognito Groups — assign users to Regular or Admin group, use Pre-token generation Lambda to add group claims, API checks claims
+C) Create two App Clients with different scopes for users and admins
+D) Use Identity Pool role mapping — map admin users to AdminRole, regular users to UserRole
+
+**Answer: B**
+
+**Explanation:**
+- Cognito Groups allow organizing users into logical categories (Regular, Admin)
+- Groups are automatically included in the ID token as `cognito:groups` claim
+- Pre-token generation Lambda can enrich tokens with group-based permissions
+- Backend API reads group claims from token to make authorization decisions
+- Two User Pools doubles management overhead unnecessarily
+- Two App Clients with scopes works for machine-to-machine but not user role differentiation
+- Identity Pool role mapping works but is less flexible for fine-grained API authorization
+- Groups + token claims is the recommended, scalable pattern
+
+---
+
+### Question 6
+**An application uses API Gateway with a Cognito User Pool Authorizer. A user complains that after changing their password, they can still access the API for up to 1 hour using their old token. What explains this and how should it be fixed?**
+
+A) Cognito token signature verification has a 1-hour delay
+B) API Gateway Cognito Authorizer caches authorization results — reduce or disable caching TTL
+C) The Access Token is valid until expiry regardless of password changes
+D) Both B and C contribute — disable caching AND implement token blacklisting
+
+**Answer: D**
+
+**Explanation:**
+- Access tokens remain cryptographically valid until their expiry time even after password change
+- API Gateway Authorizer caching (default 300 seconds) means old tokens are accepted from cache
+- Both issues compound — token validity + cache TTL
+- Fix 1: Reduce Authorizer cache TTL to 0 (disables caching — higher latency)
+- Fix 2: After password change, call GlobalSignOut to revoke tokens
+- Fix 3: Implement token blacklist in backend (DynamoDB) checked on each request
+- The most complete answer is D — both caching and token validity contribute
+- For exam: if only one answer allowed → B (caching is the more immediate fix)
+
+---
+
+### Question 7
+**A company is migrating 500,000 users from their legacy authentication system to Cognito. They cannot force all users to reset passwords and want seamless migration. Which approach achieves this?**
+
+A) Export all passwords from legacy system and import to Cognito
+B) Create all users in Cognito with temporary passwords and force reset on first login
+C) Implement the User Migration Lambda trigger to migrate users on first successful login
+D) Use the AdminCreateUser API to bulk create all users before migration
+
+**Answer: C**
+
+**Explanation:**
+- User Migration Lambda trigger fires when a user tries to log in and is NOT found in Cognito
+- Lambda validates credentials against the legacy system
+- If valid → Cognito creates the user automatically and lets them log in
+- Migration is gradual — users migrate as they log in, no big-bang cutover
+- Passwords cannot be exported from most systems (hashed) — Option A is usually impossible
+- Temporary passwords force all users to take action — poor user experience
+- AdminCreateUser bulk creation requires knowing passwords — same problem as Option A
+- User Migration Lambda is the AWS-recommended zero-disruption migration pattern
+
+---
+
+### Question 8
+**A Cognito Identity Pool is configured with both authenticated and unauthenticated roles. A guest user (not logged in) opens a mobile app and the app tries to load a public product catalog from S3. The request fails with AccessDenied. What is the MOST likely cause?**
+
+A) Identity Pools do not support unauthenticated access
+B) The unauthenticated IAM role does not have S3 read permissions for the product catalog bucket
+C) Guest users must complete CAPTCHA before accessing AWS resources
+D) The S3 bucket policy blocks Identity Pool credentials
+
+**Answer: B**
+
+**Explanation:**
+- Identity Pools DO support unauthenticated (guest) access — it is a valid feature
+- The unauthenticated role is a regular IAM role — it needs explicit S3 permissions
+- If the role policy doesn't include s3:GetObject on the product catalog bucket → AccessDenied
+- Fix: add s3:GetObject permission to the unauthenticated IAM role for the specific bucket/prefix
+- No CAPTCHA requirement exists for unauthenticated Identity Pool access
+- S3 bucket policy could also be the issue but question says "most likely cause" → role permissions
+- Always check BOTH role policy AND S3 bucket policy for complete access control
+
+---
+
+### Question 9
+**A company wants to allow users to sign in with their corporate Active Directory credentials in their customer-facing app built with Cognito. The AD is connected to ADFS (Active Directory Federation Services). Which Cognito feature enables this?**
+
+A) Connect AD directly to Cognito User Pool via LDAP
+B) Configure ADFS as a SAML 2.0 identity provider in the Cognito User Pool
+C) Use IAM Identity Center to bridge AD and Cognito
+D) Configure AWS Managed AD as a Cognito identity source
+
+**Answer: B**
+
+**Explanation:**
+- ADFS supports SAML 2.0 — Cognito User Pool accepts SAML 2.0 IdPs
+- Configure ADFS metadata URL or XML in Cognito User Pool as external IdP
+- Users click "Sign in with Corporate AD" → redirected to ADFS → authenticate → Cognito issues tokens
+- Cognito does not support direct LDAP connections — no native AD integration
+- IAM Identity Center is for workforce/employees accessing AWS accounts — not consumer apps
+- AWS Managed AD is a directory service — not a Cognito identity source directly
+- SAML 2.0 federation is the standard pattern for ADFS + Cognito
+
+---
+
+### Question 10
+**An API Gateway uses a Cognito User Pool Authorizer. A backend service (not a human user) needs to call this API. The service cannot go through a login flow. Which OAuth grant type should be used?**
+
+A) Authorization Code grant — most secure grant type
+B) Implicit grant — designed for machine clients
+C) Client Credentials grant — designed for machine-to-machine
+D) Refresh Token grant — long-lived access for services
+
+**Answer: C**
+
+**Explanation:**
+- Client Credentials grant is specifically designed for machine-to-machine (M2M) communication
+- Service authenticates with Client ID + Client Secret (no user involved)
+- Cognito issues an Access Token with the requested scopes
+- API Gateway validates the Access Token
+- Authorization Code requires user interaction (browser redirect) — not suitable for services
+- Implicit grant is deprecated and was for browser-based apps — not M2M
+- Refresh Token grant requires a prior authorization — not applicable for initial service auth
+- Client Credentials is the standard OAuth 2.0 pattern for service accounts
+
+---
+
+### Question 11
+**A Cognito User Pool has Advanced Security Features enabled in ENFORCED mode. A user in a known high-risk IP range tries to log in with valid credentials. What happens?**
+
+A) Login succeeds — valid credentials always override risk signals
+B) Login is blocked immediately with no option to proceed
+C) Cognito challenges the user with additional MFA or blocks based on risk score
+D) Cognito sends an email to admin and allows login to proceed
+
+**Answer: C**
+
+**Explanation:**
+- Advanced Security in ENFORCED mode actively intervenes based on risk assessment
+- High-risk signals (malicious IP, impossible travel, new device) trigger responses:
+  - Medium risk → require MFA challenge
+  - High risk → block login entirely
+- Valid credentials alone do not override risk-based controls in ENFORCED mode
+- In AUDIT mode → logs the risk but allows login (Option D is closer to audit mode behavior)
+- The specific action depends on the risk score — could be MFA challenge or full block
+- This is the key difference between AUDIT mode (observe) and ENFORCED mode (act)
+
+---
+
+### Question 12
+**A developer stores the Cognito App Client Secret in a mobile application's code. A security auditor flags this as a critical vulnerability. Why is this a security issue and what is the fix?**
+
+A) Client secrets in mobile apps can be extracted by reverse engineering — use public clients (no client secret) for mobile apps
+B) Client secrets must be stored in AWS Secrets Manager — retrieve at runtime
+C) Client secrets in mobile apps should be encrypted using KMS
+D) Mobile apps should use IAM roles instead of Cognito App Clients
+
+**Answer: A**
+
+**Explanation:**
+- Mobile app binaries can be decompiled/reverse-engineered exposing hardcoded secrets
+- OAuth 2.0 specification defines two client types:
+  - Confidential clients (server-side): CAN use client secrets securely
+  - Public clients (mobile/SPA): CANNOT keep secrets — use PKCE instead
+- Fix: create App Client WITHOUT client secret, use PKCE (Proof Key for Code Exchange)
+- PKCE generates a code verifier/challenge per auth request — cannot be stolen from binary
+- Secrets Manager doesn't help — secret still needs to be in the app to retrieve it
+- KMS encryption in mobile app still exposes the KMS key — same problem
+- Mobile apps must always use public client configuration with PKCE
+
+---
+
+### Question 13
+**What is the correct Cognito token to use when calling your own backend API to verify the user's identity and get their profile information?**
+
+A) Refresh Token — it's the most long-lived
+B) Access Token — it's designed for API authorization
+C) ID Token — it contains user identity claims and attributes
+D) Either ID Token or Access Token — they are interchangeable
+
+**Answer: C**
+
+**Explanation:**
+- ID Token contains user identity claims: sub, email, name, custom attributes, groups
+- It answers "WHO is this user" — perfect for backend to identify the user
+- Access Token is for authorizing API calls — contains scopes, not user attributes by default
+- Refresh Token is only for getting new tokens — never sent to APIs
+- They are NOT interchangeable:
+  - ID Token → user identity → your backend API
+  - Access Token → authorization → resource servers with defined scopes
+- Pre-token generation Lambda can add claims to both tokens
+- For API Gateway Cognito Authorizer: validates Access Token (checks scopes)
+
+---
+
+### Question 14
+**A company has a Cognito User Pool with 1 million users. They need to temporarily disable all users in a specific group due to a security incident. What is the MOST efficient approach?**
+
+A) Call AdminDisableUser for each of the 1 million users individually
+B) Delete the Cognito User Pool and recreate it
+C) Use AdminDisableUser in a Lambda function with pagination iterating through group members
+D) Remove the compromised group and all its permissions — users remain but lose access
+
+**Answer: C**
+
+**Explanation:**
+- AdminDisableUser prevents the user from logging in immediately
+- Lambda with ListUsersInGroup (paginated) + AdminDisableUser per user is most efficient programmatic approach
+- Individual manual calls to AdminDisableUser don't scale to millions
+- Deleting User Pool destroys all user data — catastrophic and irreversible
+- Removing the group removes permissions but existing valid tokens still work until expiry
+- Lambda approach with batch processing and pagination is the correct scalable solution
+- Also call GlobalSignOut per user to immediately invalidate existing tokens
+
+---
+
+### Question 15
+**A company wants to implement passwordless authentication where users receive a one-time code via email to log in. Which Cognito feature supports this?**
+
+A) Cognito does not support passwordless — use a third-party service
+B) Custom authentication flow using Lambda triggers (Create/Define/Verify auth challenge)
+C) Enable Magic Link in Cognito Advanced Security Features
+D) Configure email OTP in the User Pool MFA settings
+
+**Answer: B**
+
+**Explanation:**
+- Custom authentication challenge Lambda triggers enable fully custom auth flows
+- Three triggers work together:
+  - Define Auth Challenge: decide what challenge to present
+  - Create Auth Challenge: generate the OTP and send via email (SES)
+  - Verify Auth Challenge Response: validate the OTP entered by user
+- Cognito does support passwordless via this custom flow
+- No native "Magic Link" feature exists in Cognito Advanced Security
+- MFA OTP requires password first — it's a second factor, not passwordless
+- Custom auth challenge triggers are the exam answer for ANY custom/passwordless auth scenario
+
+---
+
+### Question 16
+**A Cognito Identity Pool has role mapping configured. Users with `cognito:groups` claim containing "premium" should get PremiumRole, all others get BasicRole. A premium user logs in but gets BasicRole credentials. What is the MOST likely cause?**
+
+A) Identity Pools cannot read User Pool group claims
+B) The role mapping rule is evaluating in wrong order — BasicRole rule matches first
+C) PremiumRole trust policy does not trust Identity Pool
+D) The ID Token was used instead of Access Token for Identity Pool
+
+**Answer: C**
+
+**Explanation:**
+- Identity Pool assumes IAM roles via STS AssumeRoleWithWebIdentity
+- The IAM role's trust policy MUST allow the Identity Pool to assume it
+- Trust policy must include: `cognito-identity.amazonaws.com` as principal
+- Also must include condition: `cognito-identity.amazonaws.com:aud` = Identity Pool ID
+- If PremiumRole trust policy is missing this → STS rejects assumption → fallback to BasicRole
+- Identity Pools CAN read User Pool group claims via token
+- Role mapping order could be an issue but trust policy is the most common cause
+- Both ID Token and Access Token can be used for Identity Pool authentication
+
+---
+
+### Question 17
+**Which statement about Cognito User Pool custom attributes is TRUE?**
+
+A) Custom attributes can be modified by users themselves by default
+B) Custom attributes can be marked as mutable or immutable at creation time
+C) Custom attributes are automatically included in the Access Token
+D) Maximum 50 custom attributes per User Pool
+
+**Answer: B**
+
+**Explanation:**
+- Custom attributes have a mutable/immutable flag set at creation time
+- Immutable attributes: set once during sign-up, cannot be changed afterwards
+- Mutable attributes: can be updated after creation
+- By default users CANNOT modify their own attributes — admin must enable read/write permissions per attribute per App Client
+- Custom attributes are NOT automatically in Access Token — they appear in ID Token
+- Pre-token generation Lambda can add them to Access Token if needed
+- Maximum is **25 custom attributes** per User Pool — not 50
+
+---
+
+### Question 18
+**A company's Cognito-based application is experiencing account takeover attacks. Attackers are using credential stuffing with lists of breached username/password combinations. Which Cognito feature specifically detects and blocks this?**
+
+A) Rate-based rules in WAF attached to the Cognito User Pool endpoint
+B) Advanced Security Features with compromised credential detection enabled
+C) Pre-authentication Lambda checking login frequency
+D) MFA enforcement on all accounts
+
+**Answer: B**
+
+**Explanation:**
+- Cognito Advanced Security Features includes compromised credential detection
+- Checks credentials against known breached credential databases in real-time
+- Blocks sign-in attempts using known compromised username/password pairs
+- WAF rate limiting slows down attacks but doesn't detect compromised credentials specifically
+- Pre-authentication Lambda can add rate limiting but not breach database checking
+- MFA helps but attackers with valid credentials + MFA bypass still succeed
+- Compromised credential detection is the purpose-built solution for credential stuffing
+
+---
+
+### Question 19
+**A developer is building a React SPA (Single Page Application) that uses Cognito for authentication. Which OAuth flow should they use and why?**
+
+A) Client Credentials — simplest flow for web apps
+B) Implicit — designed specifically for SPAs
+C) Authorization Code with PKCE — secure flow for public clients
+D) Resource Owner Password — direct credential submission
+
+**Answer: C**
+
+**Explanation:**
+- SPAs are public clients — cannot securely store client secrets
+- Authorization Code flow with PKCE (Proof Key for Code Exchange) is the current standard
+- PKCE generates a code verifier and challenge per auth request
+- Even if authorization code is intercepted, attacker cannot exchange it without code verifier
+- Implicit flow is deprecated by OAuth 2.0 Security BCP — tokens in URL fragment are risky
+- Client Credentials is for M2M — no user interaction
+- Resource Owner Password submits credentials directly to app — defeats purpose of federation
+- Authorization Code + PKCE is the exam answer for ANY browser-based/SPA scenario
+
+---
+
+### Question 20
+**A company uses Cognito User Pools with multiple SAML identity providers for different enterprise customers (multi-tenant B2B SaaS). Each customer should only see their own IdP on the login page. Which feature enables per-customer IdP selection?**
+
+A) Create separate User Pools per customer
+B) Use identifier-first login — user enters email, Cognito redirects to correct IdP based on email domain
+C) Show all IdPs on login page and let users choose
+D) Use custom domain per customer pointing to same User Pool
+
+**Answer: B**
+
+**Explanation:**
+- Cognito supports identifier-first authentication flow
+- User enters email address first
+- Cognito matches email domain to the registered IdP for that domain
+- User is automatically redirected to their company's IdP — seamless experience
+- Separate User Pools per customer is operationally expensive at scale
+- Showing all IdPs exposes customer list — security and UX issue
+- Custom domain doesn't solve IdP selection — just branding
+- Identifier-first / email domain matching is the elegant multi-tenant solution
+
+---
+
+## 2.2 Common Exam Traps & Distractors
+
+### Trap 1: Cognito for Workforce Identity
+> ❌ **Wrong:** "Use Cognito for employee SSO to AWS accounts"
+> ✅ **Right:** Cognito = customer/app users. IAM Identity Center = workforce/employees
+
+### Trap 2: User Pool Issues AWS Credentials
+> ❌ **Wrong:** "User Pool issues temporary AWS credentials for S3 access"
+> ✅ **Right:** User Pool issues JWT tokens. **Identity Pool** issues AWS credentials
+
+### Trap 3: Access Token Contains User Attributes
+> ❌ **Wrong:** "Access Token contains email, name, custom attributes"
+> ✅ **Right:** **ID Token** contains user attributes. Access Token contains scopes
+
+### Trap 4: Post-Authentication Trigger Modifies Tokens
+> ❌ **Wrong:** "Use Post-authentication trigger to add claims to JWT"
+> ✅ **Right:** **Pre-token generation** trigger is the only one that modifies tokens
+
+### Trap 5: Client Secret Safe in Mobile Apps
+> ❌ **Wrong:** "Store Cognito App Client secret in mobile app securely"
+> ✅ **Right:** Mobile apps are public clients — use NO client secret + PKCE
+
+### Trap 6: Implicit Flow Recommended for SPAs
+> ❌ **Wrong:** "Use Implicit flow for Single Page Applications"
+> ✅ **Right:** Implicit is deprecated — use **Authorization Code + PKCE** for SPAs
+
+### Trap 7: GlobalSignOut Needed for Complete Logout
+> ❌ **Wrong:** "Calling logout endpoint fully invalidates all user sessions"
+> ✅ **Right:** Must call **GlobalSignOut or RevokeToken** to invalidate refresh tokens
+
+### Trap 8: Custom Attributes Auto-Appear in Access Token
+> ❌ **Wrong:** "Custom attributes automatically included in Access Token"
+> ✅ **Right:** Custom attributes in ID Token only — use **Pre-token generation** Lambda for Access Token
+
+### Trap 9: Maximum Custom Attributes = 50
+> ❌ **Wrong:** "Cognito supports up to 50 custom attributes per User Pool"
+> ✅ **Right:** Maximum is **25 custom attributes** per User Pool
+
+### Trap 10: MFA OPTIONAL Enforces MFA
+> ❌ **Wrong:** "Setting MFA to OPTIONAL ensures all users have MFA"
+> ✅ **Right:** OPTIONAL means users can choose — set to **REQUIRED** for mandatory enforcement
+
+---
+
+## 2.3 Key Facts Cheat Sheet
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│              AMAZON COGNITO — EXAM CHEAT SHEET                 │
+├──────────────────────────────────┬─────────────────────────────┤
+│ Cognito use case                 │ Customer/app users (B2C)    │
+│ IAM Identity Center use case     │ Workforce/employees (B2E)   │
+│ User Pool purpose                │ Authentication (JWT tokens) │
+│ Identity Pool purpose            │ AWS credentials (via STS)   │
+│ ID Token contains                │ User claims + attributes    │
+│ Access Token contains            │ Scopes + permissions        │
+│ Refresh Token purpose            │ Get new tokens silently     │
+│ Max refresh token validity       │ 10 years                    │
+│ Max access/ID token validity     │ 24 hours                    │
+│ Max custom attributes            │ 25 per User Pool            │
+│ Trigger to modify tokens         │ Pre-token generation        │
+│ Trigger for passwordless auth    │ Custom auth challenge       │
+│ Trigger for user migration       │ User Migration trigger      │
+│ MFA enforcement setting          │ REQUIRED (not OPTIONAL)     │
+│ Mobile app client type           │ Public (no secret) + PKCE   │
+│ SPA OAuth flow                   │ Auth Code + PKCE            │
+│ M2M OAuth flow                   │ Client Credentials          │
+│ Complete logout API              │ GlobalSignOut / RevokeToken │
+│ Compromised credential check     │ Advanced Security Features  │
+│ Risk-based MFA                   │ Adaptive authentication     │
+│ Enterprise ADFS integration      │ SAML 2.0 IdP in User Pool   │
+│ LDAP/direct AD integration       │ ❌ Not supported            │
+│ Multi-tenant IdP selection       │ Identifier-first login      │
+│ User group claims in token       │ cognito:groups              │
+│ User Pool + API Gateway          │ Cognito Authorizer          │
+│ JWKS endpoint                    │ /.well-known/jwks.json      │
+│ Guest/unauthenticated access     │ Identity Pool unauth role   │
+│ Custom attribute mutability      │ Set at creation time        │
+│ Audit vs Enforced security mode  │ Audit=log, Enforced=block   │
+│ Resource server purpose          │ Define API + custom scopes  │
+└──────────────────────────────────┴─────────────────────────────┘
+```
+
+---
+
+## 2.4 Elimination Strategies
+
+### Strategy 1: Workforce vs Customer
+**Employees/workforce/SSO to AWS** → eliminate Cognito → IAM Identity Center
+**App users/customers/consumer app** → eliminate IAM Identity Center → Cognito
+
+### Strategy 2: JWT vs AWS Credentials
+Need **JWT tokens for API calls** → User Pool
+Need **AWS credentials for S3/DynamoDB** → Identity Pool
+
+### Strategy 3: Token Modification = Pre-Token Generation
+Any "add custom data to token" scenario → eliminate all other triggers → **Pre-token generation**
+
+### Strategy 4: Mobile/SPA = No Secret + PKCE
+**Mobile app or browser SPA** → eliminate client secret → **Public client + PKCE**
+
+### Strategy 5: M2M = Client Credentials
+**Service-to-service, no user** → eliminate Authorization Code → **Client Credentials grant**
+
+### Strategy 6: Mandatory MFA = REQUIRED Setting
+**Force MFA for all users** → eliminate OPTIONAL → set MFA to **REQUIRED**
+
+### Strategy 7: Passwordless = Custom Auth Challenge
+**OTP, magic link, custom auth** → eliminate standard flows → **Custom authentication challenge triggers**
+
+### Strategy 8: User Migration = Migration Lambda
+**Migrate users without password reset** → eliminate bulk create/export → **User Migration trigger**
+
+### Strategy 9: Complete Session Invalidation = GlobalSignOut
+**Revoke all sessions on logout** → eliminate just calling logout URL → **GlobalSignOut API**
+
+### Strategy 10: Compromised Credentials = Advanced Security
+**Credential stuffing / breached passwords** → eliminate WAF rate limiting, MFA → **Advanced Security Features + compromised credential detection**
+
+---
+
+Section 2 complete Pradeep! 20 scenario questions, 10 traps, full cheat sheet and elimination strategies all locked in. ✅
+
+Ready for **Section 3 — Lab 103**? 🧪

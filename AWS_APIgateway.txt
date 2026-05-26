@@ -1,0 +1,1377 @@
+# 📅 Day 39 — API Gateway Security
+
+---
+
+# SECTION 1 — THEORY BLOCK — Part A
+
+---
+
+## 1.1 Service Overview & Purpose
+
+### What is AWS API Gateway?
+AWS API Gateway is a fully managed service that enables you to **create, publish, maintain, monitor, and secure APIs** at any scale. It acts as the **front door** for applications to access backend services such as Lambda, EC2, ECS, or any HTTP endpoint.
+
+Think of API Gateway as a **highly configurable security checkpoint** — every API call passes through it, giving you centralized control over authentication, authorization, throttling, logging, and transformation.
+
+### Three API Types
+```
+API Gateway offers three types:
+
+REST API:
+├── Most feature-rich option
+├── Full request/response transformation
+├── All authentication methods supported
+├── Usage plans and API keys
+├── Caching support
+└── Higher cost
+
+HTTP API:
+├── Newer, simpler, cheaper (~70% less than REST)
+├── Lower latency
+├── JWT authorizers (Cognito/OIDC natively)
+├── No API keys or usage plans
+├── No request/response transformation
+└── Best for: Lambda proxy, JWT auth
+
+WebSocket API:
+├── Persistent two-way connections
+├── Real-time applications (chat, gaming)
+├── Connection management
+└── Route selection based on message content
+```
+
+### Why It Matters for Security Exam
+```
+API Gateway is a central security control point:
+├── Authentication (who can call the API)
+├── Authorization (what they can do)
+├── Throttling (rate limiting)
+├── WAF integration (attack protection)
+├── TLS enforcement (encryption in transit)
+├── Resource policies (network-level control)
+├── Logging (CloudWatch, X-Ray)
+└── Private APIs (VPC-only access)
+```
+
+### Exam Weight & Importance
+- Appears in **Domain 2: Identity & Access Management** and **Domain 3: Infrastructure Security**
+- Expect **3–5 questions** directly involving API Gateway security
+- Commonly tested: authorizer types, resource policies, private APIs, throttling, WAF integration
+
+---
+
+## 1.2 Core Architecture
+
+### API Gateway Security Architecture
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    API Gateway Security Layers                  │
+│                                                                 │
+│  Layer 1: Network                                               │
+│  ├── Public endpoint (default)                                  │
+│  ├── Private endpoint (VPC only)                                │
+│  └── Edge-optimized (CloudFront)                                │
+│                                                                  │
+│  Layer 2: WAF (optional)                                        │
+│  ├── SQL injection blocking                                     │
+│  ├── Rate limiting                                              │
+│  └── IP blocking                                                │
+│                                                                  │
+│  Layer 3: Resource Policy                                        │
+│  ├── Allow/deny by IP                                           │
+│  ├── Allow/deny by VPC                                          │
+│  └── Allow/deny by account                                      │
+│                                                                  │
+│  Layer 4: Authentication                                        │
+│  ├── IAM authorization (SigV4)                                  │
+│  ├── Cognito User Pool Authorizer                               │
+│  ├── Lambda Authorizer (custom)                                 │
+│  └── API Keys (usage plans)                                     │
+│                                                                  │
+│  Layer 5: Backend                                               │
+│  ├── Lambda function                                            │
+│  ├── HTTP endpoint                                              │
+│  └── AWS service                                                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Request Flow with Security Checks
+```
+Client Request
+      │
+      ▼
+WAF (if attached) → BLOCK if attack detected
+      │
+      ▼
+Resource Policy → DENY if IP/VPC not allowed
+      │
+      ▼
+Authorizer check:
+├── IAM: verify SigV4 signature
+├── Cognito: validate JWT token
+├── Lambda: custom validation logic
+└── API Key: verify key in usage plan
+      │
+      ▼
+Throttling check → 429 if over limit
+      │
+      ▼
+Backend integration → Lambda/HTTP/AWS
+      │
+      ▼
+Response to client
+```
+
+---
+
+## 1.3 Deep Dive — Sub-Topics Part A
+
+### A. Authentication Methods (Full Detail)
+
+#### Method 1: IAM Authorization
+```
+How it works:
+├── Client signs request with AWS SigV4 signature
+├── API Gateway validates signature against IAM
+├── IAM policies control access to API methods
+└── Best for: AWS services, server-to-server, CLI
+
+IAM policy to allow API call:
+{
+  "Effect": "Allow",
+  "Action": "execute-api:Invoke",
+  "Resource": "arn:aws:execute-api:region:account:api-id/stage/METHOD/resource"
+}
+
+Resource ARN format:
+arn:aws:execute-api:{region}:{account}:{api-id}/{stage}/{method}/{resource}
+
+Examples:
+├── arn:aws:execute-api:*:*:abc123/prod/GET/users
+├── arn:aws:execute-api:*:*:abc123/prod/*/users/*
+└── arn:aws:execute-api:*:*:abc123/*/*/*  (all methods)
+```
+
+> ⚠️ **Exam critical:** IAM authorization uses **SigV4 signing** — the client must have valid AWS credentials. Good for service-to-service but NOT for browser/mobile clients who cannot have IAM credentials.
+
+#### Method 2: Cognito User Pool Authorizer
+```
+How it works:
+├── Client obtains JWT from Cognito User Pool
+├── Client sends JWT in Authorization header
+├── API Gateway validates JWT against User Pool
+├── Valid token → request proceeds
+└── Invalid/expired token → 401 Unauthorized
+
+Configuration:
+├── Token source: Header (Authorization)
+├── User Pool ARN: your Cognito User Pool
+├── Token validation: ID token or Access token
+└── Authorization caching: 0–3600 seconds
+
+What API Gateway validates:
+├── Token signature (using User Pool public keys)
+├── Token expiry (exp claim)
+├── Token issuer (iss = User Pool URL)
+└── Token audience (aud = App Client ID)
+
+What it does NOT validate:
+└── Custom business logic — use Lambda authorizer for that
+```
+
+#### Method 3: Lambda Authorizer
+```
+Two types:
+
+TOKEN authorizer:
+├── Receives token from header/query param
+├── Lambda validates token
+├── Returns IAM policy (allow/deny)
+└── Use for: custom tokens, third-party JWT, API keys
+
+REQUEST authorizer:
+├── Receives full request context
+│     (headers, query params, path, stage vars)
+├── Lambda validates any combination of inputs
+├── Returns IAM policy
+└── Use for: complex auth logic, multiple inputs
+
+Lambda Authorizer response format:
+{
+  "principalId": "user-identifier",
+  "policyDocument": {
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Action": "execute-api:Invoke",
+      "Effect": "Allow",
+      "Resource": "arn:aws:execute-api:..."
+    }]
+  },
+  "context": {
+    "userId": "123",
+    "role": "admin"
+  }
+}
+```
+
+> ⚠️ **Exam critical:** Lambda Authorizer returns an **IAM policy** — not just allow/deny. The policy is cached and reused for subsequent calls. Context values are passed to backend Lambda.
+
+#### Method 4: API Keys & Usage Plans
+```
+API Keys:
+├── 40-character alphanumeric strings
+├── Passed in x-api-key header
+├── Used for: identifying callers, not authentication
+├── NOT a security mechanism alone
+└── Must be combined with Usage Plans
+
+Usage Plans:
+├── Define throttling limits per API key:
+│     ├── Rate: requests per second
+│     └── Burst: maximum concurrent requests
+├── Define quota: max requests per day/week/month
+├── Associate API keys with usage plans
+└── Use for: monetization, rate limiting per client
+```
+
+> ⚠️ **Exam trap:** API Keys are for **identification and throttling** — NOT for security/authentication. Never use API keys as your only security mechanism.
+
+---
+
+### B. Resource Policies (Full Detail)
+
+#### What is a Resource Policy?
+A resource policy is a **JSON policy attached to the API** that controls which principals (AWS accounts, IP addresses, VPCs) can invoke the API.
+
+```
+Resource policy use cases:
+├── Allow access from specific AWS accounts
+├── Allow access from specific IP ranges
+├── Allow access from specific VPC
+├── Deny access from specific countries (with WAF)
+└── Restrict private API access to specific VPC
+```
+
+#### Cross-Account API Access
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::ACCOUNT_B:root"
+      },
+      "Action": "execute-api:Invoke",
+      "Resource": "arn:aws:execute-api:region:ACCOUNT_A:api-id/*"
+    }
+  ]
+}
+```
+
+#### IP-Based Restriction
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "execute-api:Invoke",
+      "Resource": "arn:aws:execute-api:*:*:api-id/*",
+      "Condition": {
+        "IpAddress": {
+          "aws:SourceIp": [
+            "203.0.113.0/24",
+            "198.51.100.0/24"
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+#### Private API VPC Restriction
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "execute-api:Invoke",
+      "Resource": "arn:aws:execute-api:*:*:api-id/*",
+      "Condition": {
+        "StringNotEquals": {
+          "aws:SourceVpc": "vpc-12345678"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "execute-api:Invoke",
+      "Resource": "arn:aws:execute-api:*:*:api-id/*"
+    }
+  ]
+}
+```
+
+> ⚠️ **Exam critical:** Private API resource policies need **both a DENY and ALLOW statement**. DENY for wrong VPC + ALLOW for all (VPC check handles restriction). Just having ALLOW with VPC condition is NOT sufficient.
+
+---
+
+Section 1 Part A complete! Shall I continue with **Part B** (Throttling, Private APIs, Logging, Integrations)? 🎯
+
+# 📅 Day 39 — API Gateway Security
+# SECTION 1 — THEORY BLOCK — Part B
+
+---
+
+## 1.3 Deep Dive — Sub-Topics Part B
+
+### C. Throttling & Rate Limiting (Full Detail)
+
+#### Throttling Levels
+```
+API Gateway throttling works at multiple levels:
+
+Level 1: Account Level (default limits)
+├── 10,000 requests per second (RPS) per region
+├── 5,000 burst limit per region
+└── Shared across ALL APIs in account/region
+
+Level 2: Stage Level
+├── Override account defaults per stage
+├── Example: prod=10,000 RPS, dev=100 RPS
+└── Set in Stage settings
+
+Level 3: Method Level
+├── Override per HTTP method per resource
+├── Example: POST /login = 10 RPS
+│           GET /products = 1000 RPS
+└── Most granular throttling control
+
+Level 4: Usage Plan Level
+├── Per API key throttling
+├── Rate: sustained requests per second
+├── Burst: token bucket — short spikes allowed
+└── Quota: total requests per time period
+```
+
+#### Token Bucket Algorithm
+```
+How burst throttling works:
+
+Token Bucket:
+├── Bucket fills at RATE tokens per second
+├── Bucket capacity = BURST limit
+├── Each request consumes one token
+├── If bucket empty → 429 Too Many Requests
+└── Burst allows short spikes above sustained rate
+
+Example:
+├── Rate: 1000 RPS
+├── Burst: 5000
+├── Scenario: 5000 requests arrive simultaneously
+│     → First 5000 served (bucket full)
+│     → Bucket refills at 1000/second
+│     → Next second: another 1000 served
+└── Without burst: first 1001+ requests throttled
+```
+
+> ⚠️ **Exam critical:** When throttled, API Gateway returns **HTTP 429 Too Many Requests**. This is different from 403 (forbidden) or 401 (unauthorized).
+
+#### Throttling Response
+```
+Throttled request response:
+├── Status code: 429
+├── Body: {"message": "Too Many Requests"}
+├── Headers: X-Amzn-RequestId, x-amzn-ErrorType
+└── Retry-After header (optional)
+
+Client should implement:
+├── Exponential backoff
+├── Jitter (randomize retry timing)
+└── Circuit breaker pattern
+```
+
+---
+
+### D. Private APIs & VPC Endpoints (Full Detail)
+
+#### API Endpoint Types
+```
+Three endpoint types:
+
+Edge-Optimized (default):
+├── Deployed to CloudFront edge locations
+├── Reduced latency for global clients
+├── Certificate must be in us-east-1
+├── WAF attached at CloudFront level
+└── Best for: public-facing global APIs
+
+Regional:
+├── Deployed in specific region only
+├── Lower latency for same-region clients
+├── Certificate in same region as API
+├── WAF attached directly to API
+└── Best for: regional apps, cross-region replication
+
+Private:
+├── Accessible ONLY from within VPC
+├── Requires VPC Interface Endpoint
+├── Not accessible from internet
+├── Resource policy controls VPC access
+└── Best for: internal microservices
+```
+
+#### Private API Setup
+```
+Step 1: Create VPC Interface Endpoint
+        Service: com.amazonaws.region.execute-api
+        VPC: your VPC
+        Subnets: private subnets
+        Private DNS: enabled
+
+Step 2: Create Private API in API Gateway
+        Endpoint Type: PRIVATE
+
+Step 3: Attach Resource Policy to API
+        Allow only from specific VPC endpoint:
+        {
+          "Condition": {
+            "StringEquals": {
+              "aws:SourceVpce": "vpce-12345678"
+            }
+          }
+        }
+
+Step 4: DNS resolution
+        With private DNS enabled on endpoint:
+        execute-api.region.amazonaws.com
+        → resolves to private IP inside VPC
+```
+
+> ⚠️ **Exam critical:** Private APIs require **both** a VPC Interface Endpoint AND a resource policy. Without the resource policy, the API is still inaccessible. Without the VPC endpoint, there's no private path to reach the API.
+
+#### VPC Endpoint Policy
+```json
+{
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "execute-api:Invoke",
+      "Resource": [
+        "arn:aws:execute-api:region:account:api-id/*"
+      ]
+    }
+  ]
+}
+```
+
+> ⚠️ VPC Endpoint policies and API Resource policies work together — **both** must allow the call.
+
+---
+
+### E. Logging & Monitoring (Full Detail)
+
+#### CloudWatch Logs Integration
+```
+Two types of API Gateway logs:
+
+Execution Logs:
+├── Detailed request/response logging
+├── Includes: request ID, IP, method, resource
+├── Includes: authorizer response
+├── Includes: integration request/response
+├── Use for: debugging, troubleshooting
+└── Cost: CloudWatch Logs charges apply
+
+Access Logs:
+├── Custom format (JSON, CLF, XML)
+├── Logged to specific CloudWatch Log Group
+├── Configurable fields:
+│     ├── $context.requestId
+│     ├── $context.identity.sourceIp
+│     ├── $context.httpMethod
+│     ├── $context.resourcePath
+│     ├── $context.status
+│     ├── $context.responseLength
+│     ├── $context.authorizer.principalId
+│     └── $context.error.message
+└── Use for: security auditing, analytics
+```
+
+#### Access Log Format Example
+```json
+{
+  "requestId": "$context.requestId",
+  "ip": "$context.identity.sourceIp",
+  "caller": "$context.identity.caller",
+  "user": "$context.identity.user",
+  "requestTime": "$context.requestTime",
+  "httpMethod": "$context.httpMethod",
+  "resourcePath": "$context.resourcePath",
+  "status": "$context.status",
+  "protocol": "$context.protocol",
+  "responseLength": "$context.responseLength",
+  "authorizerError": "$context.authorizer.error",
+  "principalId": "$context.authorizer.principalId"
+}
+```
+
+#### CloudWatch Metrics
+```
+Key API Gateway metrics:
+
+Count:          Total API requests
+Latency:        Full round-trip time (ms)
+IntegrationLatency: Backend response time (ms)
+4XXError:       Client errors (auth, validation)
+5XXError:       Server errors (backend failures)
+CacheHitCount:  Responses from cache
+CacheMissCount: Responses from backend
+
+Security-relevant metrics:
+├── 4XXError spike → possible attack/misconfiguration
+├── 5XXError spike → backend overwhelmed (DDoS?)
+└── Latency spike → possible slow loris attack
+```
+
+#### AWS X-Ray Integration
+```
+X-Ray tracing for API Gateway:
+├── Enable active tracing on stage
+├── Traces full request path:
+│     Client → API GW → Lambda → DynamoDB
+├── Identifies latency bottlenecks
+├── Shows error rates per service
+└── Service map visualization
+
+X-Ray sampling rules:
+├── Default: 5% of requests sampled
+├── Custom rules: sample by path/method/rate
+└── 100% sampling for debugging (high cost)
+```
+
+---
+
+### F. Additional Security Features
+
+#### Mutual TLS (mTLS) for API Gateway
+```
+mTLS configuration:
+├── Upload truststore to S3
+│     (PEM file with CA certificates)
+├── Enable mTLS on custom domain
+├── Clients must present valid certificate
+├── API Gateway validates client cert
+│     against truststore
+└── Use for: B2B APIs, high-security scenarios
+
+Truststore S3 URI format:
+s3://bucket-name/truststore.pem
+
+Client certificate requirements:
+├── Signed by CA in truststore
+├── Not expired
+├── Not revoked
+└── Certificate chain valid
+```
+
+#### Request Validation
+```
+API Gateway can validate requests before
+they reach your backend:
+
+Validation options:
+├── Validate request body (against JSON schema)
+├── Validate required headers
+├── Validate required query parameters
+└── Reject invalid requests with 400
+
+Benefits:
+├── Offloads validation from backend Lambda
+├── Saves Lambda invocation costs
+├── Returns clear error to client
+└── Prevents malformed data reaching backend
+
+Model example (JSON Schema):
+{
+  "type": "object",
+  "properties": {
+    "email": {
+      "type": "string",
+      "format": "email"
+    },
+    "age": {
+      "type": "integer",
+      "minimum": 18
+    }
+  },
+  "required": ["email", "age"]
+}
+```
+
+#### CORS Configuration
+```
+Cross-Origin Resource Sharing (CORS):
+
+Why it matters for security:
+├── Browser enforces same-origin policy
+├── CORS headers tell browser which
+│     origins are allowed
+├── Misconfigured CORS = security risk
+
+Secure CORS configuration:
+├── Access-Control-Allow-Origin:
+│     specific domain (not *)
+├── Access-Control-Allow-Methods:
+│     only needed methods
+├── Access-Control-Allow-Headers:
+│     only needed headers
+└── Access-Control-Max-Age:
+      cache preflight response
+
+Dangerous CORS misconfiguration:
+├── Access-Control-Allow-Origin: *
+│     + Access-Control-Allow-Credentials: true
+└── Allows any site to make credentialed requests
+```
+
+---
+
+## 1.4 Comparison Tables
+
+### Authorizer Comparison
+
+| Feature | IAM Auth | Cognito Authorizer | Lambda Authorizer |
+|---|---|---|---|
+| **Token type** | SigV4 | JWT | Any (token/request) |
+| **Best for** | AWS services | App users | Custom logic |
+| **Caching** | N/A | ✅ Up to 1hr | ✅ Up to 1hr |
+| **User info in context** | IAM principal | JWT claims | Custom context |
+| **Extra cost** | ❌ | ❌ | ✅ Lambda invocation |
+| **Third-party tokens** | ❌ | ❌ | ✅ Yes |
+| **Custom validation** | ❌ | ❌ | ✅ Full control |
+
+### REST API vs HTTP API Security
+
+| Feature | REST API | HTTP API |
+|---|---|---|
+| **Lambda Authorizer** | ✅ TOKEN + REQUEST | ✅ REQUEST only |
+| **Cognito Authorizer** | ✅ Yes | ✅ JWT Authorizer |
+| **IAM Authorization** | ✅ Yes | ✅ Yes |
+| **API Keys** | ✅ Yes | ❌ No |
+| **Resource Policy** | ✅ Yes | ❌ No |
+| **WAF** | ✅ Yes | ❌ No |
+| **mTLS** | ✅ Yes | ✅ Yes |
+| **Request Validation** | ✅ Yes | ❌ No |
+| **Caching** | ✅ Yes | ❌ No |
+| **Cost** | Higher | ~70% less |
+
+> ⚠️ **Exam critical:** HTTP APIs do NOT support resource policies or WAF. If a scenario requires IP-based restriction or WAF on an HTTP API → use REST API or put CloudFront + WAF in front.
+
+---
+
+## 1.5 Security & Compliance Angles
+
+### Common Misconfigurations
+
+| Misconfiguration | Risk | Fix |
+|---|---|---|
+| API Key as only auth | Anyone with key = full access | Add IAM or Lambda Authorizer |
+| Authorizer cache too long | Revoked tokens still work | Reduce TTL or disable cache |
+| No request validation | Malformed data hits backend | Enable request validation with model |
+| CORS Allow-Origin: * | Cross-site request forgery risk | Specify exact allowed origins |
+| No throttling configured | DoS via API flooding | Set rate + burst limits per stage/method |
+| Execution logs disabled | Cannot debug or audit | Enable CloudWatch logging |
+| Private API without resource policy | VPC endpoint alone insufficient | Always add resource policy |
+| mTLS truststore in public S3 | Truststore exposed | Use private S3 bucket |
+| No WAF on public API | OWASP attacks succeed | Attach WAF Web ACL |
+
+### IAM Permissions for API Gateway
+
+```
+apigateway:GET          → View API config
+apigateway:POST         → Create resources
+apigateway:PUT          → Update resources
+apigateway:DELETE       → Delete resources
+apigateway:PATCH        → Partial updates
+execute-api:Invoke      → Call the API
+execute-api:ManageConnections → WebSocket mgmt
+```
+
+### Compliance Relevance
+
+| Framework | API Gateway Relevance |
+|---|---|
+| **PCI DSS** | TLS enforcement, auth for card data APIs |
+| **HIPAA** | Authentication, logging for PHI APIs |
+| **ISO 27001** | Access control, audit logging |
+| **SOC 2** | Availability (throttling), security controls |
+
+---
+
+## 1.6 Integration Patterns
+
+### Pattern 1: Public API with Cognito
+```
+Mobile App
+    │ JWT token in Authorization header
+    ▼
+API Gateway (REST)
+    │ Cognito User Pool Authorizer validates JWT
+    ▼
+Lambda Function
+    │ Reads user context from token
+    ▼
+DynamoDB (user-specific data)
+```
+
+### Pattern 2: Internal API (Private)
+```
+ECS Service (in VPC)
+    │ HTTP call via VPC Endpoint
+    ▼
+VPC Interface Endpoint (execute-api)
+    │ Private network path
+    ▼
+API Gateway (Private REST API)
+    │ Resource policy: allow only this VPC
+    │ IAM auth: SigV4 signed request
+    ▼
+Lambda Function
+```
+
+### Pattern 3: B2B API with mTLS
+```
+Partner System
+    │ Client certificate presented
+    ▼
+API Gateway (custom domain + mTLS)
+    │ Validates cert against truststore in S3
+    │ Lambda Authorizer for additional checks
+    ▼
+Backend Service
+```
+
+### Pattern 4: Public API with Full Security Stack
+```
+Internet
+    │
+    ▼
+Route 53 → CloudFront
+    │ WAF Web ACL (OWASP rules + rate limiting)
+    │ ACM certificate (us-east-1)
+    ▼
+API Gateway (Edge-Optimized)
+    │ Lambda Authorizer (custom token validation)
+    │ Request validation (JSON schema)
+    │ Throttling (per method)
+    │ CloudWatch logging
+    ▼
+Lambda → DynamoDB
+```
+
+### Pattern 5: Microservices with IAM Auth
+```
+Service A (has IAM role)
+    │ Signs request with SigV4
+    ▼
+API Gateway
+    │ IAM Authorization
+    │ Resource policy: allow only Service A role
+    ▼
+Service B (Lambda)
+```
+
+---
+
+Section 1 fully complete Pradeep! Both Part A and Part B done at full depth.
+
+Shall I move to **Section 2 — Exam Deep Dive Part A (Q1–Q10)**? 🎯
+
+# 📅 Day 39 — API Gateway Security
+# SECTION 2 — EXAM DEEP DIVE — Part A (Q1–Q10)
+
+---
+
+### Question 1
+**A company has a REST API in API Gateway used by their mobile app. Users authenticate via Cognito User Pool. After a user is banned, they can still call the API for up to 5 minutes. What is the cause and fix?**
+
+A) Cognito takes 5 minutes to propagate user bans across regions
+B) API Gateway Cognito Authorizer has a 300-second authorization cache TTL
+C) The JWT token is valid for 5 minutes after user is banned
+D) Lambda backend caches user status for 5 minutes
+
+**Answer: B**
+
+**Explanation:**
+- API Gateway Cognito Authorizer caches authorization results by token
+- Default cache TTL is 300 seconds (5 minutes)
+- During cache period, banned user's old valid token still returns cached ALLOW
+- Fix: reduce authorizer cache TTL to 0 (disables caching — higher latency)
+- Better fix: combine with short token validity + GlobalSignOut on ban
+- JWT token may still be valid (up to 24hr) but authorizer cache is the immediate cause
+- Lambda backend caching is separate — not the primary cause here
+
+---
+
+### Question 2
+**A security team needs to restrict a public REST API so that only requests from their corporate IP range (203.0.113.0/24) are allowed. All other requests must be denied. Which is the CORRECT implementation?**
+
+A) Security Group on API Gateway allowing only corporate IP
+B) WAF IP set allowing corporate IP attached to API Gateway
+C) API Gateway Resource Policy with IP condition Allow for corporate IP and implicit deny for others
+D) NACLs blocking all non-corporate IPs at subnet level
+
+**Answer: C**
+
+**Explanation:**
+- API Gateway Resource Policy with IP condition is the native solution
+- Allow statement with `aws:SourceIp` condition for 203.0.113.0/24
+- All other IPs implicitly denied (no matching allow statement)
+- API Gateway does not have Security Groups — it's a managed service
+- WAF IP set works but is an additional layer — Resource Policy is simpler and native
+- NACLs cannot be applied to API Gateway — it's not in a VPC subnet
+- Resource Policy is the exam-correct answer for IP-based API restriction
+
+---
+
+### Question 3
+**An API Gateway Lambda Authorizer is configured with a 300-second cache TTL. The authorizer uses the Authorization header as the cache key. Two different users with different tokens call the same API method within 5 seconds. What happens?**
+
+A) Both users share the same cached authorization result
+B) Each user's token creates a separate cache entry — both get their own authorization result
+C) Second user's request is rejected because cache is busy
+D) Cache TTL resets to 600 seconds after second request
+
+**Answer: B**
+
+**Explanation:**
+- Lambda Authorizer cache key is the **token value** by default
+- Each unique token = separate cache entry
+- User A's token cached separately from User B's token
+- Both users get correct authorization results from their own cache entries
+- Cache collision only occurs if two users somehow have the same token (impossible with JWTs)
+- Cache TTL doesn't reset on subsequent requests — it's per-entry from first invocation
+- This is the correct behavior — caching is per-token, not per-resource
+
+---
+
+### Question 4
+**A company wants to expose their internal microservice API to a partner company in a different AWS account. The API should not be accessible from the internet. Which solution achieves this?**
+
+A) Public REST API with IAM authorization restricted to partner account
+B) Private REST API + VPC endpoint + resource policy allowing partner account
+C) HTTP API with JWT authorizer and partner account IP allowlist
+D) REST API with API key shared with partner company
+
+**Answer: B**
+
+**Explanation:**
+- Private REST API ensures no internet access — only reachable via VPC endpoint
+- Partner connects via VPC peering or AWS Transit Gateway to reach the VPC endpoint
+- Resource policy explicitly allows partner account's principal
+- Public REST API with IAM still exposed to internet — violates "not accessible from internet"
+- HTTP API does not support resource policies — cannot restrict to specific account
+- API keys are not secure for cross-account access — can be intercepted
+- Private API + VPC endpoint + resource policy is the complete, correct solution
+
+---
+
+### Question 5
+**A developer configures a REST API with a Lambda Authorizer. The Lambda returns an IAM policy allowing access to ALL methods on ALL resources (`arn:aws:execute-api:*:*:*`). A user calls GET /admin/users — an endpoint they should not access. What happens?**
+
+A) Request is denied — Lambda Authorizer checks per-endpoint permissions
+B) Request is allowed — the broad IAM policy from Lambda Authorizer permits it
+C) Request triggers another Lambda invocation to verify admin access
+D) API Gateway returns 403 because admin endpoint requires IAM authorization
+
+**Answer: B**
+
+**Explanation:**
+- Lambda Authorizer returns an IAM policy — API Gateway enforces that policy
+- Policy allowing `arn:aws:execute-api:*:*:*` = allow ALL methods on ALL resources
+- API Gateway sees ALLOW for the requested resource → permits the call
+- No additional check occurs — the cached policy covers all endpoints
+- This is a common Lambda Authorizer misconfiguration — too broad policy
+- Fix: return resource-specific policies (only allow endpoints the user should access)
+- Alternatively: let backend Lambda handle fine-grained authorization
+
+---
+
+### Question 6
+**A company's REST API is experiencing a sudden traffic spike of 15,000 RPS from a single IP address. The account-level throttle is 10,000 RPS. Legitimate users start receiving 429 errors. What is the BEST immediate mitigation?**
+
+A) Increase account-level throttle limit to 20,000 RPS via Service Quotas
+B) Add a WAF rate-based rule blocking the attacking IP after threshold exceeded
+C) Enable API Gateway caching to absorb the traffic spike
+D) Move to HTTP API which has higher default limits
+
+**Answer: B**
+
+**Explanation:**
+- WAF rate-based rule identifies the attacking IP and blocks it automatically
+- Once blocked, the 15,000 RPS drops to near zero — legitimate traffic flows freely
+- Increasing account limit helps legitimate traffic but doesn't stop the attacker
+- API Gateway caching serves cached responses but still counts against throttle limits
+- HTTP API has same account-level throttle limits — moving doesn't help
+- WAF is the correct targeted mitigation — blocks the source not just the traffic
+- Additionally: add the IP to a WAF IP block set for immediate blocking
+
+---
+
+### Question 7
+**A REST API uses IAM authorization. A Lambda function in Account B needs to call this API which is in Account A. The Lambda execution role has `execute-api:Invoke` permission on the API ARN. The API has no resource policy. Calls fail with 403. What is missing?**
+
+A) The Lambda function needs a Cognito token to call cross-account APIs
+B) A resource policy on the API in Account A must allow Account B's role
+C) VPC peering between Account A and Account B is required
+D) IAM authorization does not support cross-account API calls
+
+**Answer: B**
+
+**Explanation:**
+- Cross-account API Gateway calls with IAM auth require TWO things:
+- 1) IAM policy in Account B allowing execute-api:Invoke (already done)
+- 2) Resource policy on the API in Account A allowing Account B's role
+- Without resource policy, Account A's API rejects cross-account requests by default
+- This is the same pattern as cross-account KMS and Secrets Manager — both sides must allow
+- IAM auth absolutely supports cross-account — with proper resource policy
+- VPC peering is for private connectivity — not relevant for IAM auth mechanism
+- Fix: add resource policy allowing Account B's Lambda role to invoke the API
+
+---
+
+### Question 8
+**An API Gateway stage has throttling set to 1000 RPS with a burst of 2000. During a flash sale, traffic spikes to 3000 RPS for 10 seconds then returns to 500 RPS. What happens during the spike?**
+
+A) All 3000 RPS are blocked — burst only allows up to 2000 simultaneous connections
+B) First 2000 requests served from burst bucket, remaining 1000 throttled with 429, then rate recovers at 1000/second
+C) All 3000 RPS blocked until traffic returns to under 1000 RPS
+D) API Gateway automatically scales to handle 3000 RPS with no throttling
+
+**Answer: B**
+
+**Explanation:**
+- Burst bucket starts full at 2000 tokens
+- First 2000 requests consume burst bucket instantly
+- Remaining 1000 requests in that second → throttled (429)
+- Bucket refills at 1000 tokens/second (the rate limit)
+- Next second: 1000 new tokens available → 1000 requests served, rest throttled
+- After spike ends at 500 RPS: 500 below rate limit → bucket refills over time
+- API Gateway does NOT auto-scale beyond configured limits
+- This is the token bucket algorithm in action — exam frequently tests this
+
+---
+
+### Question 9
+**A company wants to implement mTLS for their B2B API Gateway. They upload their CA certificate to S3 as a truststore. Partners must present client certificates signed by this CA. Which API Gateway endpoint type supports mTLS?**
+
+A) Edge-optimized endpoint only
+B) Regional and Private endpoints only
+C) All endpoint types support mTLS
+D) mTLS is only supported on HTTP APIs not REST APIs
+
+**Answer: B**
+
+**Explanation:**
+- mTLS is supported on **Regional** and **Private** endpoints
+- Edge-optimized endpoints use CloudFront — mTLS termination would happen at CloudFront level not API Gateway
+- Both REST and HTTP APIs support mTLS — Option D is wrong
+- mTLS requires custom domain — cannot be configured on default execute-api domain
+- Truststore must be in S3 — API Gateway reads CA certificates from there
+- Partners generate CSRs, get certificates signed by the CA in truststore
+- Presented certificates validated against truststore on each connection
+
+---
+
+### Question 10
+**A security engineer notices that the API Gateway execution logs show full request bodies including credit card numbers. This violates PCI DSS. What should they configure to prevent sensitive data appearing in logs?**
+
+A) Disable execution logs entirely — no logging is safer than logging sensitive data
+B) Use data masking in CloudWatch Logs Insights queries
+C) Configure log filtering in the API Gateway stage settings to exclude body logging
+D) Enable field-level logging and exclude the body field from execution logs
+
+**Answer: C**
+
+**Explanation:**
+- API Gateway execution log level controls what is logged
+- Log levels: OFF, ERROR, INFO — INFO logs full request/response including body
+- Setting to ERROR level stops body logging while keeping error information
+- Alternatively: switch to Access Logs with custom format excluding body fields
+- Disabling logs entirely removes audit capability — violates PCI DSS audit requirements
+- CloudWatch Logs Insights masking is post-hoc — sensitive data already written to logs
+- Correct approach: configure logging level to ERROR or use Access Logs with selective fields
+- For PCI DSS: never log cardholder data — configure logging before data reaches logs
+
+---
+
+Section 2 Part A complete Pradeep! Q1–Q10 done.
+
+Ready for **Part B — Q11–Q20 + Traps + Cheat Sheet**? 🎯
+
+# 📅 Day 39 — API Gateway Security
+# SECTION 2 — EXAM DEEP DIVE — Part B (Q11–Q20)
+
+---
+
+### Question 11
+**A company uses HTTP API in API Gateway with a JWT authorizer pointing to their Cognito User Pool. They want to add IP-based restrictions so only corporate IPs can call the API. What is the BEST approach?**
+
+A) Add a resource policy to the HTTP API with IP conditions
+B) Put CloudFront with WAF in front of the HTTP API and apply IP restrictions in WAF
+C) Use a Lambda authorizer to check source IP in HTTP API
+D) Configure Security Groups on the HTTP API
+
+**Answer: B**
+
+**Explanation:**
+- HTTP APIs do NOT support resource policies — Option A is impossible
+- CloudFront + WAF provides IP-based restriction at the edge
+- WAF IP set blocks non-corporate IPs before reaching HTTP API
+- Lambda authorizer can check IP but `sourceIp` in HTTP API context can be spoofed — not reliable
+- API Gateway (managed service) has no Security Groups
+- CloudFront + WAF is the recommended pattern for adding IP restriction to HTTP APIs
+- This also adds OWASP protection and rate limiting as bonus security layers
+
+---
+
+### Question 12
+**An API Gateway REST API has both a Cognito Authorizer AND a resource policy. A request arrives with a valid Cognito JWT token but from an IP blocked by the resource policy. What happens?**
+
+A) Request allowed — Cognito authorizer takes precedence over resource policy
+B) Request blocked — resource policy evaluated first, denies before authorizer check
+C) Request allowed — valid JWT overrides resource policy restrictions
+D) Both checks run independently — result depends on which returns first
+
+**Answer: B**
+
+**Explanation:**
+- API Gateway evaluates security in a specific order:
+- 1) Resource policy (network-level check) → evaluated FIRST
+- 2) Authorizer (authentication check) → evaluated SECOND
+- Resource policy DENY stops the request before Cognito authorizer is even invoked
+- This is efficient — no Lambda invocation or Cognito check wasted on blocked IPs
+- Valid JWT cannot override resource policy restrictions
+- Checks are sequential not parallel — order matters
+- This is the correct API Gateway request evaluation order — frequently tested
+
+---
+
+### Question 13
+**A company exposes an API via API Gateway that invokes a Lambda function. They want to ensure that the Lambda function can ONLY be invoked by this specific API Gateway stage and not directly or from other API Gateway stages. Which control achieves this?**
+
+A) Lambda resource-based policy allowing only the specific API Gateway ARN including stage
+B) IAM role on Lambda restricting invocation to API Gateway
+C) VPC endpoint policy restricting Lambda invocations
+D) API Gateway resource policy restricting Lambda access
+
+**Answer: A**
+
+**Explanation:**
+- Lambda resource-based policy controls who can invoke the Lambda function
+- API Gateway automatically creates a permission when you add Lambda as integration
+- The ARN includes: `arn:aws:execute-api:region:account:api-id/stage/method/resource`
+- Specifying the exact stage in the ARN prevents other stages from invoking
+- Format: `arn:aws:execute-api:region:account:api-id/prod/*` (only prod stage)
+- IAM role on Lambda controls what Lambda CAN DO — not who can invoke it
+- VPC endpoint policies control VPC-level access — not Lambda invocation
+- API Gateway resource policy controls who calls the API — not Lambda invocation control
+
+---
+
+### Question 14
+**A REST API Gateway has request validation enabled with a JSON schema model. A client sends a request with a missing required field. What does API Gateway return WITHOUT invoking the backend Lambda?**
+
+A) 500 Internal Server Error — Lambda needed to validate
+B) 401 Unauthorized — validation failure treated as auth failure
+C) 400 Bad Request — API Gateway rejects invalid request before backend invocation
+D) 200 OK — API Gateway passes request and lets Lambda handle validation
+
+**Answer: C**
+
+**Explanation:**
+- Request validation in API Gateway runs BEFORE backend invocation
+- Invalid request (missing required field) returns 400 Bad Request immediately
+- Backend Lambda is never invoked — saves cost and reduces backend load
+- Error message: `{"message": "Invalid request body"}`
+- This is the primary benefit of request validation — offload from backend
+- 500 would mean backend error — Lambda not invoked here
+- 401 is auth-related — validation failure is a client error (4XX)
+- This pattern reduces Lambda costs and improves security posture
+
+---
+
+### Question 15
+**A company's API Gateway REST API is publicly accessible. They want to ensure all communication uses TLS 1.2 or higher and reject older TLS versions. Which configuration achieves this?**
+
+A) Security Group rule blocking TLS 1.0 and 1.1 connections
+B) Set minimum TLS version to TLS 1.2 in the API Gateway custom domain settings
+C) WAF rule blocking requests using older TLS versions
+D) API Gateway automatically enforces TLS 1.2 — no configuration needed
+
+**Answer: B**
+
+**Explanation:**
+- API Gateway custom domain settings allow specifying minimum TLS version
+- Options: TLS_1_0 or TLS_1_2 — set to TLS_1_2 to enforce modern TLS
+- Custom domain is required to configure TLS policy
+- Default execute-api domain uses TLS 1.2 minimum automatically
+- Security Groups cannot inspect TLS version — operates at TCP level
+- WAF operates at HTTP layer — connection already established before WAF sees request
+- Custom domain TLS policy is the correct configuration point
+- For CloudFront edge-optimized: set TLS policy on CloudFront distribution
+
+---
+
+### Question 16
+**An API Gateway Lambda Authorizer needs to pass user role information to the backend Lambda function. The backend should know if the user is "admin" or "user" without calling Cognito again. How does the authorizer pass this information?**
+
+A) The authorizer writes user role to DynamoDB which backend Lambda reads
+B── The authorizer includes role in the context object of the authorizer response
+C) The authorizer modifies the request headers to include role information
+D) The authorizer puts role in environment variables of backend Lambda
+
+**Answer: B**
+
+**Explanation:**
+- Lambda Authorizer response includes a `context` object for passing data
+- Context values are available in backend Lambda via `$context.authorizer.key`
+- Example authorizer response:
+  ```json
+  {
+    "principalId": "user123",
+    "policyDocument": {...},
+    "context": {
+      "role": "admin",
+      "userId": "123",
+      "department": "security"
+    }
+  }
+  ```
+- Backend Lambda accesses: `event.requestContext.authorizer.role`
+- DynamoDB lookup adds latency and cost — context is the efficient solution
+- Authorizer cannot modify request headers — it only returns policy + context
+- Environment variables are static — cannot pass per-request user data
+
+---
+
+### Question 17
+**A company wants to monetize their API by charging different customers different rate limits. Premium customers get 1000 RPS, basic customers get 100 RPS. Which API Gateway feature enables this?**
+
+A) Stage-level throttling with customer-specific stages
+B) Lambda Authorizer returning different throttle limits per customer
+C) Usage Plans with different throttle settings assigned to different API keys
+D) Resource policy with customer-specific rate conditions
+
+**Answer: C**
+
+**Explanation:**
+- Usage Plans are designed exactly for this monetization pattern
+- Create two usage plans: Premium (1000 RPS) and Basic (100 RPS)
+- Generate API keys for each customer
+- Assign Premium customers' keys to Premium Usage Plan
+- Assign Basic customers' keys to Basic Usage Plan
+- API Gateway enforces different limits per key automatically
+- Stage-level throttling applies to all users equally — cannot differentiate
+- Lambda Authorizer cannot control throttling — only allow/deny
+- Resource policies handle access control — not rate limiting per customer
+
+---
+
+### Question 18
+**A developer configures CORS on a REST API with `Access-Control-Allow-Origin: *` and enables API Gateway to pass credentials (`Access-Control-Allow-Credentials: true`). A security auditor flags this as critical. Why?**
+
+A) Wildcard origin with credentials is blocked by browsers — configuration has no effect
+B) This combination allows any website to make credentialed cross-origin requests to the API — CSRF risk
+C) Wildcard origin requires WAF to be enabled — missing security layer
+D) This configuration causes API Gateway to ignore all authentication
+
+**Answer: B**
+
+**Explanation:**
+- `Allow-Origin: *` + `Allow-Credentials: true` is a dangerous combination
+- Browsers normally block `*` with credentials — but some configurations bypass this
+- More importantly: this signals intent to allow any origin with credentials
+- A malicious website can make credentialed requests (cookies, auth headers) to your API
+- This enables Cross-Site Request Forgery (CSRF) attacks
+- Fix: specify exact allowed origins instead of wildcard
+- `Access-Control-Allow-Origin: https://app.company.com`
+- Browsers actually DO block `*` + credentials — but misconfigured apps may not check
+- Security auditor is correct to flag — principle of least privilege applies to CORS
+
+---
+
+### Question 19
+**A private REST API is deployed in us-east-1. An EC2 instance in a private subnet in us-east-1 tries to reach the API but gets a connection timeout. The VPC Interface Endpoint for execute-api exists. What is the MOST likely cause?**
+
+A) Private APIs can only be accessed from Lambda — not EC2
+B) The API resource policy is missing or does not allow the VPC/VPC endpoint
+C) The EC2 instance needs an Elastic IP to reach private APIs
+D) Private APIs require Direct Connect — VPC endpoint is insufficient
+
+**Answer: B**
+
+**Explanation:**
+- VPC Interface Endpoint for execute-api exists — network path is available
+- Connection timeout suggests the API itself is rejecting the connection
+- Private APIs REQUIRE a resource policy — without it, all access is denied
+- Resource policy must allow the VPC or VPC endpoint ID
+- Both VPC endpoint AND resource policy are required — having only endpoint = timeout
+- Private APIs work with EC2, Lambda, ECS — any compute in the VPC
+- Elastic IP is for internet access — private APIs use private IPs
+- Fix: add resource policy allowing `aws:SourceVpc` or `aws:SourceVpce`
+
+---
+
+### Question 20
+**A company uses API Gateway with a Lambda authorizer. The security team discovers that if the Lambda authorizer throws an unhandled exception, API Gateway returns 200 OK and lets the request through. What configuration is causing this behavior?**
+
+A) Lambda authorizer is configured with "effect: Allow" as default behavior on error
+B) The authorizer is configured with "On error" setting as ALLOW instead of DENY (default)
+C) Lambda timeout causes API Gateway to fail open — should increase Lambda timeout
+D) Unhandled exceptions always return 200 — use try/catch in Lambda
+
+**Answer: B**
+
+**Explanation:**
+- Lambda Authorizer has an "On error" configuration setting
+- Default behavior: on error → return 401 Unauthorized (fail closed — secure)
+- Misconfigured behavior: on error → ALLOW (fail open — insecure)
+- Fail open means any error in authorizer logic = all requests allowed = security bypass
+- Always configure authorizers to fail CLOSED (deny on error)
+- Lambda timeout also causes error — increasing timeout helps but fail-closed config is essential
+- try/catch in Lambda is good practice but doesn't fix the API GW configuration
+- This is a critical security misconfiguration — exam tests "fail open vs fail closed"
+
+---
+
+## 2.2 Common Exam Traps & Distractors
+
+### Trap 1: HTTP API Supports Resource Policies
+> ❌ **Wrong:** "Add resource policy to HTTP API for IP restriction"
+> ✅ **Right:** HTTP APIs do NOT support resource policies — use CloudFront + WAF
+
+### Trap 2: API Keys Provide Security
+> ❌ **Wrong:** "API key protects API from unauthorized access"
+> ✅ **Right:** API keys are for identification/throttling ONLY — not security
+
+### Trap 3: Cognito Authorizer Evaluated Before Resource Policy
+> ❌ **Wrong:** "Valid JWT overrides resource policy denial"
+> ✅ **Right:** Resource policy evaluated FIRST — denies before authorizer runs
+
+### Trap 4: Lambda Authorizer Blocks on Exception by Default
+> ❌ **Wrong:** "Lambda authorizer exception automatically blocks request"
+> ✅ **Right:** Depends on configuration — default is 401 but can be misconfigured to ALLOW
+
+### Trap 5: mTLS Supported on Edge-Optimized Endpoints
+> ❌ **Wrong:** "Configure mTLS on edge-optimized API Gateway endpoint"
+> ✅ **Right:** mTLS only on **Regional and Private** endpoints — not edge-optimized
+
+### Trap 6: Private API Only Needs VPC Endpoint
+> ❌ **Wrong:** "Create VPC endpoint — private API is accessible"
+> ✅ **Right:** Private API needs VPC endpoint AND resource policy — both required
+
+### Trap 7: Lambda Authorizer Returns Allow/Deny Only
+> ❌ **Wrong:** "Lambda authorizer returns simple allow or deny boolean"
+> ✅ **Right:** Returns full **IAM policy document** + optional context object
+
+### Trap 8: 429 Means Authentication Failed
+> ❌ **Wrong:** "429 response from API Gateway = invalid credentials"
+> ✅ **Right:** 429 = **Too Many Requests** (throttled). 401 = unauthorized, 403 = forbidden
+
+### Trap 9: Request Validation Invokes Lambda
+> ❌ **Wrong:** "Request validation Lambda checks body before backend Lambda"
+> ✅ **Right:** Request validation is native API Gateway — backend Lambda NOT invoked on invalid request
+
+### Trap 10: IAM Auth Works Without Resource Policy Cross-Account
+> ❌ **Wrong:** "IAM policy in Account B is enough to call Account A's API"
+> ✅ **Right:** Cross-account IAM auth needs IAM policy (Account B) AND resource policy (Account A)
+
+---
+
+## 2.3 Key Facts Cheat Sheet
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│           API GATEWAY SECURITY — EXAM CHEAT SHEET              │
+├──────────────────────────────────┬─────────────────────────────┤
+│ HTTP API resource policy         │ ❌ Not supported            │
+│ HTTP API WAF support             │ ❌ Not supported            │
+│ HTTP API API keys                │ ❌ Not supported            │
+│ REST API resource policy         │ ✅ Supported                │
+│ REST API WAF support             │ ✅ Supported                │
+│ REST API request validation      │ ✅ Supported                │
+│ mTLS endpoint types              │ Regional + Private only     │
+│ Edge-optimized cert region       │ us-east-1 only              │
+│ Private API requirements         │ VPC endpoint + resource pol │
+│ Throttle 429 response            │ Too Many Requests           │
+│ Auth 401 response                │ Unauthorized                │
+│ Forbidden 403 response           │ Access Denied               │
+│ Default authorizer cache TTL     │ 300 seconds                 │
+│ Max authorizer cache TTL         │ 3600 seconds                │
+│ API key header name              │ x-api-key                   │
+│ Authorizer cache key             │ Token value (by default)    │
+│ Lambda authorizer returns        │ IAM policy + context        │
+│ Context passed to backend        │ requestContext.authorizer.* │
+│ Request validation response      │ 400 Bad Request             │
+│ Resource policy eval order       │ Before authorizer           │
+│ Cross-account API auth           │ Resource policy + IAM policy│
+│ Fail open authorizer risk        │ All requests allowed        │
+│ Fail closed authorizer           │ 401 on error (secure)       │
+│ Burst limit algorithm            │ Token bucket                │
+│ CORS wildcard + credentials      │ CSRF risk — avoid           │
+│ Usage plans purpose              │ Per-key throttling + quota  │
+│ API key security level           │ Identification only         │
+│ SigV4 signing used by            │ IAM authorization           │
+│ CloudFront WAF for HTTP API      │ Put CF in front             │
+│ Lambda authorizer types          │ TOKEN and REQUEST           │
+└──────────────────────────────────┴─────────────────────────────┘
+```
+
+---
+
+## 2.4 Elimination Strategies
+
+### Strategy 1: HTTP API Limitations
+**HTTP API + resource policy/WAF/API keys/request validation** → all unsupported → use REST API or add CloudFront
+
+### Strategy 2: Evaluation Order
+**Valid JWT but blocked IP** → resource policy evaluated FIRST → request blocked before authorizer
+
+### Strategy 3: Cross-Account = Both Sides
+**Cross-account API call** → always need IAM policy (caller) AND resource policy (API) — both required
+
+### Strategy 4: Private API = Two Requirements
+**Private API not reachable** → check BOTH VPC endpoint AND resource policy — one alone is insufficient
+
+### Strategy 5: 429 vs 401 vs 403
+**Too many requests** → 429. **Bad/missing token** → 401. **Denied by policy** → 403
+
+### Strategy 6: mTLS Endpoint Type
+**mTLS requirement** → eliminate edge-optimized → Regional or Private only
+
+### Strategy 7: Fail Closed Security
+**Authorizer error behavior** → always fail CLOSED (401) — fail open = critical vulnerability
+
+### Strategy 8: API Keys = Throttling Not Security
+**API key as security control** → eliminate → API keys are identification only, not authentication
+
+### Strategy 9: Context Object for Data Passing
+**Pass user data from authorizer to backend** → context object in authorizer response
+
+### Strategy 10: Request Validation = No Lambda Invocation
+**Invalid request + request validation** → API Gateway returns 400, backend Lambda NOT invoked
+
+---
+
+Section 2 fully complete Pradeep! Both Part A and Part B done at full depth. ✅
+
+Ready for **Section 3 — Lab 104 Part A**? 🧪

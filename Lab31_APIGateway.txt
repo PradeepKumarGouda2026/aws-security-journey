@@ -1,0 +1,1705 @@
+# 📅 Day 39 — API Gateway Security
+# SECTION 3 — LAB 104 — Part A
+
+---
+
+## 🎯 Lab Objective
+In this lab you will:
+- Create REST API with multiple auth methods
+- Configure Cognito authorizer
+- Create Lambda authorizer
+- Set up resource policies
+- Configure request validation
+- Enable throttling and usage plans
+- Set up logging pipeline
+- Create private API reference
+- Cleanup all resources
+
+---
+
+## Prerequisites Check
+
+```bash
+#!/bin/bash
+# Lab 104 - Prerequisites Check
+# Day 39 - AWS Security Specialist Study Plan
+
+echo "================================================"
+echo "  Lab 104: API Gateway Security Prerequisites"
+echo "================================================"
+
+# Step 1: Verify identity
+echo ""
+echo "[1] Verifying AWS identity..."
+aws sts get-caller-identity --output table
+
+# Step 2: Capture environment
+ACCOUNT_ID=$(aws sts get-caller-identity \
+  --query Account --output text)
+REGION=$(aws configure get region)
+CALLER_ARN=$(aws sts get-caller-identity \
+  --query Arn --output text)
+
+echo ""
+echo "Account ID : $ACCOUNT_ID"
+echo "Region     : $REGION"
+echo "Caller ARN : $CALLER_ARN"
+
+# Step 3: Check existing APIs
+echo ""
+echo "[2] Checking existing REST APIs..."
+aws apigateway get-rest-apis \
+  --query 'items[*].{
+    Name:name,
+    Id:id,
+    CreatedDate:createdDate
+  }' \
+  --output table 2>/dev/null || \
+  echo "No existing REST APIs"
+
+# Step 4: Check existing User Pools
+echo ""
+echo "[3] Checking existing Cognito User Pools..."
+aws cognito-idp list-user-pools \
+  --max-results 5 \
+  --query 'UserPools[*].{
+    Name:Name,
+    Id:Id
+  }' \
+  --output table 2>/dev/null || \
+  echo "No existing User Pools"
+
+# Step 5: Check Lambda functions
+echo ""
+echo "[4] Checking existing Lambda functions..."
+aws lambda list-functions \
+  --query 'Functions[?starts_with(FunctionName,`Lab104`)].{
+    Name:FunctionName,
+    Runtime:Runtime
+  }' \
+  --output table 2>/dev/null || \
+  echo "No Lab104 Lambda functions"
+
+# Step 6: Save environment
+cat > /tmp/lab104-env.sh << EOF
+export ACCOUNT_ID="$ACCOUNT_ID"
+export REGION="$REGION"
+export CALLER_ARN="$CALLER_ARN"
+EOF
+
+echo ""
+echo "✅ Environment saved to /tmp/lab104-env.sh"
+echo "================================================"
+echo "Prerequisites check complete!"
+echo "================================================"
+```
+
+---
+
+## Part 1 — Create REST API with Resources
+
+```bash
+#!/bin/bash
+# Lab 104 - Part 1: Create REST API
+# Day 39 - AWS Security Specialist Study Plan
+
+source /tmp/lab104-env.sh
+
+echo "================================================"
+echo "  Part 1: Create REST API with Resources"
+echo "================================================"
+
+# Step 1: Create REST API
+echo ""
+echo "[1] Creating REST API..."
+API_ID=$(aws apigateway create-rest-api \
+  --name "Lab104-SecureAPI" \
+  --description "Lab104 API Gateway Security Demo" \
+  --endpoint-configuration \
+    types=REGIONAL \
+  --api-key-source HEADER \
+  --tags Lab=Lab104 Environment=Production \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$API_ID" ]; then
+  echo "✅ REST API created"
+  echo "   API ID: $API_ID"
+  echo "export API_ID=\"$API_ID\"" \
+    >> /tmp/lab104-env.sh
+else
+  echo "⚠️  Could not create REST API"
+fi
+
+# Step 2: Get root resource ID
+ROOT_RESOURCE_ID=$(aws apigateway \
+  get-resources \
+  --rest-api-id $API_ID \
+  --query 'items[?path==`/`].id' \
+  --output text 2>/dev/null)
+
+echo "   Root Resource ID: $ROOT_RESOURCE_ID"
+echo "export ROOT_RESOURCE_ID=\"$ROOT_RESOURCE_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Step 3: Create /users resource
+echo ""
+echo "[2] Creating API resources..."
+USERS_RESOURCE_ID=$(aws apigateway \
+  create-resource \
+  --rest-api-id $API_ID \
+  --parent-id $ROOT_RESOURCE_ID \
+  --path-part "users" \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+echo "✅ /users resource created: $USERS_RESOURCE_ID"
+echo "export USERS_RESOURCE_ID=\"$USERS_RESOURCE_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Create /admin resource
+ADMIN_RESOURCE_ID=$(aws apigateway \
+  create-resource \
+  --rest-api-id $API_ID \
+  --parent-id $ROOT_RESOURCE_ID \
+  --path-part "admin" \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+echo "✅ /admin resource created: $ADMIN_RESOURCE_ID"
+echo "export ADMIN_RESOURCE_ID=\"$ADMIN_RESOURCE_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Create /public resource
+PUBLIC_RESOURCE_ID=$(aws apigateway \
+  create-resource \
+  --rest-api-id $API_ID \
+  --parent-id $ROOT_RESOURCE_ID \
+  --path-part "public" \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+echo "✅ /public resource created: $PUBLIC_RESOURCE_ID"
+echo "export PUBLIC_RESOURCE_ID=\"$PUBLIC_RESOURCE_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Create /login resource for rate limiting demo
+LOGIN_RESOURCE_ID=$(aws apigateway \
+  create-resource \
+  --rest-api-id $API_ID \
+  --parent-id $ROOT_RESOURCE_ID \
+  --path-part "login" \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+echo "✅ /login resource created: $LOGIN_RESOURCE_ID"
+echo "export LOGIN_RESOURCE_ID=\"$LOGIN_RESOURCE_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Step 4: Create backend Lambda function
+echo ""
+echo "[3] Creating backend Lambda function..."
+
+mkdir -p /tmp/lab104-lambda
+
+cat > /tmp/lab104-lambda/backend.py << 'PYEOF'
+"""
+Lab 104 - Backend Lambda function
+Simulates API responses with user context
+"""
+import json
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def lambda_handler(event, context):
+    logger.info(f"Event: {json.dumps(event)}")
+
+    # Extract authorizer context
+    request_context = event.get(
+        'requestContext', {}
+    )
+    authorizer = request_context.get(
+        'authorizer', {}
+    )
+
+    # Get path
+    path = event.get('path', '/')
+    method = event.get('httpMethod', 'GET')
+
+    # Build response based on path
+    if '/users' in path:
+        body = {
+            'message': 'Users endpoint',
+            'authenticatedUser': authorizer.get(
+                'principalId', 'unknown'
+            ),
+            'userRole': authorizer.get(
+                'role', 'unknown'
+            ),
+            'userId': authorizer.get(
+                'userId', 'unknown'
+            )
+        }
+    elif '/admin' in path:
+        body = {
+            'message': 'Admin endpoint',
+            'adminUser': authorizer.get(
+                'principalId', 'unknown'
+            ),
+            'permissions': authorizer.get(
+                'permissions', 'none'
+            )
+        }
+    elif '/public' in path:
+        body = {
+            'message': 'Public endpoint - no auth needed',
+            'path': path
+        }
+    elif '/login' in path:
+        body = {
+            'message': 'Login endpoint',
+            'rateLimited': False
+        }
+    else:
+        body = {
+            'message': f'{method} {path}',
+            'context': authorizer
+        }
+
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin':
+                'https://app.lab104.com',
+            'Access-Control-Allow-Methods':
+                'GET,POST,OPTIONS',
+            'Access-Control-Allow-Headers':
+                'Authorization,Content-Type'
+        },
+        'body': json.dumps(body)
+    }
+PYEOF
+
+# Create IAM role for backend Lambda
+cat > /tmp/backend-trust.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+BACKEND_ROLE_ARN=$(aws iam create-role \
+  --role-name "Lab104-BackendLambdaRole" \
+  --assume-role-policy-document \
+    file:///tmp/backend-trust.json \
+  --query 'Role.Arn' \
+  --output text 2>/dev/null)
+
+aws iam attach-role-policy \
+  --role-name "Lab104-BackendLambdaRole" \
+  --policy-arn \
+    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" \
+  2>/dev/null
+
+echo "✅ Backend Lambda role created"
+echo "export BACKEND_ROLE_ARN=\"$BACKEND_ROLE_ARN\"" \
+  >> /tmp/lab104-env.sh
+
+sleep 10  # Wait for IAM propagation
+
+# Package and deploy backend Lambda
+cd /tmp/lab104-lambda
+zip backend.zip backend.py 2>/dev/null
+
+BACKEND_LAMBDA_ARN=$(aws lambda create-function \
+  --function-name "Lab104-BackendLambda" \
+  --runtime python3.11 \
+  --handler backend.lambda_handler \
+  --role $BACKEND_ROLE_ARN \
+  --zip-file fileb:///tmp/lab104-lambda/backend.zip \
+  --description "Lab104 backend API handler" \
+  --timeout 10 \
+  --tags Lab=Lab104 \
+  --query 'FunctionArn' \
+  --output text 2>/dev/null)
+
+echo "✅ Backend Lambda created: $BACKEND_LAMBDA_ARN"
+echo "export BACKEND_LAMBDA_ARN=\"$BACKEND_LAMBDA_ARN\"" \
+  >> /tmp/lab104-env.sh
+
+# Step 5: Add Lambda permission for API Gateway
+echo ""
+echo "[4] Granting API Gateway permission to invoke Lambda..."
+aws lambda add-permission \
+  --function-name "Lab104-BackendLambda" \
+  --statement-id "APIGatewayInvoke" \
+  --action lambda:InvokeFunction \
+  --principal apigateway.amazonaws.com \
+  --source-arn \
+    "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*" \
+  2>/dev/null && \
+  echo "✅ Lambda permission granted"
+
+# Step 6: Create GET methods on resources
+echo ""
+echo "[5] Creating GET methods on resources..."
+
+for RESOURCE_INFO in \
+  "$USERS_RESOURCE_ID:NONE" \
+  "$PUBLIC_RESOURCE_ID:NONE" \
+  "$LOGIN_RESOURCE_ID:NONE"; do
+
+  RESOURCE_ID=$(echo $RESOURCE_INFO | cut -d: -f1)
+  AUTH_TYPE=$(echo $RESOURCE_INFO | cut -d: -f2)
+
+  aws apigateway put-method \
+    --rest-api-id $API_ID \
+    --resource-id $RESOURCE_ID \
+    --http-method GET \
+    --authorization-type $AUTH_TYPE \
+    --api-key-required false \
+    2>/dev/null && \
+    echo "✅ GET method created on resource: $RESOURCE_ID"
+
+  # Add Lambda integration
+  aws apigateway put-integration \
+    --rest-api-id $API_ID \
+    --resource-id $RESOURCE_ID \
+    --http-method GET \
+    --type AWS_PROXY \
+    --integration-http-method POST \
+    --uri "arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/${BACKEND_LAMBDA_ARN}/invocations" \
+    2>/dev/null && \
+    echo "   ✅ Lambda integration added"
+done
+
+echo ""
+echo "================================================"
+echo "Part 1 Complete!"
+echo "REST API: $API_ID"
+echo "Resources created:"
+echo "  /users  (auth: to be configured)"
+echo "  /admin  (auth: to be configured)"
+echo "  /public (auth: NONE)"
+echo "  /login  (auth: NONE + rate limit)"
+echo "================================================"
+```
+
+---
+
+## Part 2 — Configure Authorizers
+
+```bash
+#!/bin/bash
+# Lab 104 - Part 2: Configure Authorizers
+# Day 39 - AWS Security Specialist Study Plan
+
+source /tmp/lab104-env.sh
+
+echo "================================================"
+echo "  Part 2: Configure Authorizers"
+echo "================================================"
+
+# Step 1: Create Lambda Authorizer function
+echo ""
+echo "[1] Creating Lambda Authorizer function..."
+
+cat > /tmp/lab104-lambda/authorizer.py << 'PYEOF'
+"""
+Lab 104 - Lambda Authorizer (TOKEN type)
+Validates custom bearer tokens
+"""
+import json
+import logging
+import re
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# Simulated token database
+# In production: validate against DB/cache/JWT library
+VALID_TOKENS = {
+    "admin-token-secret-123": {
+        "userId": "user-001",
+        "role": "admin",
+        "permissions": "read,write,delete,admin"
+    },
+    "user-token-secret-456": {
+        "userId": "user-002",
+        "role": "user",
+        "permissions": "read"
+    },
+    "premium-token-secret-789": {
+        "userId": "user-003",
+        "role": "premium",
+        "permissions": "read,write"
+    }
+}
+
+def lambda_handler(event, context):
+    logger.info(f"Authorizer event: {json.dumps(event)}")
+
+    token = event.get('authorizationToken', '')
+    method_arn = event.get('methodArn', '')
+
+    # Remove "Bearer " prefix if present
+    if token.startswith('Bearer '):
+        token = token[7:]
+
+    # Validate token
+    token_data = VALID_TOKENS.get(token)
+
+    if token_data:
+        logger.info(
+            f"Valid token for user: {token_data['userId']}"
+        )
+        return generate_policy(
+            principal_id=token_data['userId'],
+            effect='Allow',
+            resource=method_arn,
+            context={
+                'userId': token_data['userId'],
+                'role': token_data['role'],
+                'permissions': token_data['permissions']
+            }
+        )
+    else:
+        logger.warning(
+            f"Invalid token received"
+        )
+        # Fail closed — raise exception for 401
+        raise Exception('Unauthorized')
+
+def generate_policy(
+    principal_id, effect, resource, context=None
+):
+    """Generate IAM policy for API Gateway"""
+
+    # Allow/deny all methods for simplicity
+    # In production: be more specific about resources
+    resource_parts = resource.split(':')
+    region = resource_parts[3]
+    account = resource_parts[4]
+    api_gateway_arn = ':'.join(resource_parts[:6])
+    stage_arn = api_gateway_arn.split('/')[0]
+
+    policy = {
+        'principalId': principal_id,
+        'policyDocument': {
+            'Version': '2012-10-17',
+            'Statement': [
+                {
+                    'Action': 'execute-api:Invoke',
+                    'Effect': effect,
+                    'Resource': f"{stage_arn}/*"
+                }
+            ]
+        }
+    }
+
+    if context:
+        policy['context'] = context
+
+    logger.info(f"Generated policy: {json.dumps(policy)}")
+    return policy
+PYEOF
+
+# Package authorizer Lambda
+cd /tmp/lab104-lambda
+zip authorizer.zip authorizer.py 2>/dev/null
+
+AUTHORIZER_LAMBDA_ARN=$(aws lambda create-function \
+  --function-name "Lab104-LambdaAuthorizer" \
+  --runtime python3.11 \
+  --handler authorizer.lambda_handler \
+  --role $BACKEND_ROLE_ARN \
+  --zip-file \
+    fileb:///tmp/lab104-lambda/authorizer.zip \
+  --description "Lab104 Lambda TOKEN authorizer" \
+  --timeout 5 \
+  --tags Lab=Lab104 \
+  --query 'FunctionArn' \
+  --output text 2>/dev/null)
+
+echo "✅ Lambda Authorizer created: $AUTHORIZER_LAMBDA_ARN"
+echo "export AUTHORIZER_LAMBDA_ARN=\"$AUTHORIZER_LAMBDA_ARN\"" \
+  >> /tmp/lab104-env.sh
+
+# Grant API Gateway permission to invoke authorizer
+aws lambda add-permission \
+  --function-name "Lab104-LambdaAuthorizer" \
+  --statement-id "APIGatewayInvokeAuthorizer" \
+  --action lambda:InvokeFunction \
+  --principal apigateway.amazonaws.com \
+  --source-arn \
+    "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*" \
+  2>/dev/null && \
+  echo "✅ Authorizer Lambda permission granted"
+
+# Step 2: Create Lambda Authorizer in API Gateway
+echo ""
+echo "[2] Creating Lambda Authorizer in API Gateway..."
+LAMBDA_AUTHORIZER_ID=$(aws apigateway \
+  create-authorizer \
+  --rest-api-id $API_ID \
+  --name "Lab104-LambdaAuth" \
+  --type TOKEN \
+  --authorizer-uri \
+    "arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/${AUTHORIZER_LAMBDA_ARN}/invocations" \
+  --identity-source "method.request.header.Authorization" \
+  --authorizer-result-ttl-in-seconds 300 \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+echo "✅ Lambda Authorizer created in API GW"
+echo "   Authorizer ID: $LAMBDA_AUTHORIZER_ID"
+echo "export LAMBDA_AUTHORIZER_ID=\"$LAMBDA_AUTHORIZER_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Step 3: Apply Lambda Authorizer to /users GET
+echo ""
+echo "[3] Applying Lambda Authorizer to /users endpoint..."
+aws apigateway update-method \
+  --rest-api-id $API_ID \
+  --resource-id $USERS_RESOURCE_ID \
+  --http-method GET \
+  --patch-operations \
+    op=replace,path=/authorizationType,\
+value=CUSTOM \
+    op=replace,path=/authorizerId,\
+value=$LAMBDA_AUTHORIZER_ID \
+  2>/dev/null && \
+  echo "✅ Lambda Authorizer applied to /users GET"
+
+# Step 4: Create IAM Authorizer on /admin
+echo ""
+echo "[4] Applying IAM Authorization to /admin endpoint..."
+aws apigateway put-method \
+  --rest-api-id $API_ID \
+  --resource-id $ADMIN_RESOURCE_ID \
+  --http-method GET \
+  --authorization-type AWS_IAM \
+  --api-key-required false \
+  2>/dev/null && \
+  echo "✅ IAM Authorization applied to /admin GET"
+
+# Add Lambda integration to /admin
+aws apigateway put-integration \
+  --rest-api-id $API_ID \
+  --resource-id $ADMIN_RESOURCE_ID \
+  --http-method GET \
+  --type AWS_PROXY \
+  --integration-http-method POST \
+  --uri "arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/${BACKEND_LAMBDA_ARN}/invocations" \
+  2>/dev/null && \
+  echo "✅ Lambda integration added to /admin"
+
+# Step 5: List all authorizers
+echo ""
+echo "[5] Listing authorizers on API..."
+aws apigateway get-authorizers \
+  --rest-api-id $API_ID \
+  --query 'items[*].{
+    Name:name,
+    Id:id,
+    Type:type,
+    TTL:authorizerResultTtlInSeconds
+  }' \
+  --output table 2>/dev/null
+
+echo ""
+echo "================================================"
+echo "Part 2 Complete!"
+echo "Authorizers configured:"
+echo "  /users GET → Lambda Authorizer (TOKEN)"
+echo "  /admin GET → IAM Authorization (SigV4)"
+echo "  /public GET → NONE (open)"
+echo "  /login GET → NONE + rate limit (next part)"
+echo "================================================"
+```
+
+---
+
+## Part 3 — Resource Policy, Throttling & Validation
+
+```bash
+#!/bin/bash
+# Lab 104 - Part 3: Resource Policy, Throttling & Validation
+# Day 39 - AWS Security Specialist Study Plan
+
+source /tmp/lab104-env.sh
+
+echo "================================================"
+echo "  Part 3: Resource Policy, Throttling & Validation"
+echo "================================================"
+
+# Step 1: Create request model for validation
+echo ""
+echo "[1] Creating request validation model..."
+MODEL_ID=$(aws apigateway create-model \
+  --rest-api-id $API_ID \
+  --name "Lab104LoginModel" \
+  --content-type "application/json" \
+  --schema '{
+    "$schema": "http://json-schema.org/draft-04/schema#",
+    "title": "LoginRequest",
+    "type": "object",
+    "properties": {
+      "username": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 100
+      },
+      "password": {
+        "type": "string",
+        "minLength": 8
+      },
+      "mfaCode": {
+        "type": "string",
+        "pattern": "^[0-9]{6}$"
+      }
+    },
+    "required": ["username", "password"]
+  }' \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+echo "✅ Request model created: $MODEL_ID"
+echo "export MODEL_ID=\"$MODEL_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Step 2: Create request validator
+echo ""
+echo "[2] Creating request validator..."
+VALIDATOR_ID=$(aws apigateway \
+  create-request-validator \
+  --rest-api-id $API_ID \
+  --name "Lab104-BodyValidator" \
+  --validate-request-body \
+  --no-validate-request-parameters \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+echo "✅ Request validator created: $VALIDATOR_ID"
+echo "export VALIDATOR_ID=\"$VALIDATOR_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Step 3: Create POST method on /login with validation
+echo ""
+echo "[3] Creating POST /login with request validation..."
+aws apigateway put-method \
+  --rest-api-id $API_ID \
+  --resource-id $LOGIN_RESOURCE_ID \
+  --http-method POST \
+  --authorization-type NONE \
+  --request-validator-id $VALIDATOR_ID \
+  --request-models \
+    "application/json=$MODEL_ID" \
+  2>/dev/null && \
+  echo "✅ POST /login created with body validation"
+
+# Add Lambda integration
+aws apigateway put-integration \
+  --rest-api-id $API_ID \
+  --resource-id $LOGIN_RESOURCE_ID \
+  --http-method POST \
+  --type AWS_PROXY \
+  --integration-http-method POST \
+  --uri "arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/${BACKEND_LAMBDA_ARN}/invocations" \
+  2>/dev/null && \
+  echo "✅ Lambda integration added to POST /login"
+
+# Step 4: Deploy API to stage
+echo ""
+echo "[4] Deploying API to production stage..."
+DEPLOYMENT_ID=$(aws apigateway \
+  create-deployment \
+  --rest-api-id $API_ID \
+  --stage-name prod \
+  --stage-description "Lab104 Production Stage" \
+  --description "Lab104 initial deployment" \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+echo "✅ API deployed to prod stage"
+echo "   Deployment ID: $DEPLOYMENT_ID"
+echo "export DEPLOYMENT_ID=\"$DEPLOYMENT_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Step 5: Configure stage-level throttling
+echo ""
+echo "[5] Configuring stage-level throttling..."
+aws apigateway update-stage \
+  --rest-api-id $API_ID \
+  --stage-name prod \
+  --patch-operations \
+    op=replace,path=/defaultRouteSettings/throttlingRateLimit,\
+value=1000 \
+    op=replace,path=/defaultRouteSettings/throttlingBurstLimit,\
+value=2000 \
+  2>/dev/null || \
+  aws apigateway update-stage \
+    --rest-api-id $API_ID \
+    --stage-name prod \
+    --patch-operations \
+      "op=replace,path=/*/*/throttling/rateLimit,value=1000" \
+      "op=replace,path=/*/*/throttling/burstLimit,value=2000" \
+    2>/dev/null && \
+    echo "✅ Stage throttling configured (1000 RPS, 2000 burst)"
+
+# Step 6: Configure method-level throttling for /login
+echo ""
+echo "[6] Configuring stricter throttling for /login..."
+aws apigateway update-stage \
+  --rest-api-id $API_ID \
+  --stage-name prod \
+  --patch-operations \
+    "op=replace,path=/~1login/POST/throttling/rateLimit,value=10" \
+    "op=replace,path=/~1login/POST/throttling/burstLimit,value=20" \
+  2>/dev/null && \
+  echo "✅ /login throttling: 10 RPS, burst 20"
+
+# Step 7: Apply resource policy
+echo ""
+echo "[7] Applying resource policy to API..."
+cat > /tmp/api-resource-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowAllTraffic",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "execute-api:Invoke",
+      "Resource": "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*"
+    },
+    {
+      "Sid": "DenyBlockedIPs",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "execute-api:Invoke",
+      "Resource": "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*",
+      "Condition": {
+        "IpAddress": {
+          "aws:SourceIp": [
+            "192.0.2.0/24",
+            "198.51.100.0/24"
+          ]
+        }
+      }
+    }
+  ]
+}
+EOF
+
+aws apigateway update-rest-api \
+  --rest-api-id $API_ID \
+  --patch-operations \
+    op=replace,path=/policy,\
+value=$(python3 -c \
+  "import json,urllib.parse; \
+  print(urllib.parse.quote(open('/tmp/api-resource-policy.json').read()))" \
+  2>/dev/null) \
+  2>/dev/null && \
+  echo "✅ Resource policy applied" || \
+  echo "ℹ️  Resource policy reference created"
+echo "   Blocks: 192.0.2.0/24, 198.51.100.0/24"
+
+# Step 8: Create API Key and Usage Plan
+echo ""
+echo "[8] Creating API Key and Usage Plan..."
+
+# Create API Key
+API_KEY_ID=$(aws apigateway create-api-key \
+  --name "Lab104-PremiumKey" \
+  --description "Lab104 premium customer API key" \
+  --enabled \
+  --tags Lab=Lab104 \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+API_KEY_VALUE=$(aws apigateway get-api-key \
+  --api-key $API_KEY_ID \
+  --include-value \
+  --query 'value' \
+  --output text 2>/dev/null)
+
+echo "✅ API Key created: ${API_KEY_VALUE:0:10}..."
+echo "export API_KEY_ID=\"$API_KEY_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Create Usage Plan
+USAGE_PLAN_ID=$(aws apigateway \
+  create-usage-plan \
+  --name "Lab104-PremiumPlan" \
+  --description "Lab104 premium usage plan" \
+  --api-stages \
+    apiId=$API_ID,stage=prod \
+  --throttle \
+    rateLimit=500,burstLimit=1000 \
+  --quota \
+    limit=10000,period=DAY \
+  --tags Lab=Lab104 \
+  --query 'id' \
+  --output text 2>/dev/null)
+
+echo "✅ Usage Plan created: $USAGE_PLAN_ID"
+echo "   Rate: 500 RPS, Burst: 1000, Quota: 10k/day"
+echo "export USAGE_PLAN_ID=\"$USAGE_PLAN_ID\"" \
+  >> /tmp/lab104-env.sh
+
+# Add API key to usage plan
+aws apigateway create-usage-plan-key \
+  --usage-plan-id $USAGE_PLAN_ID \
+  --key-id $API_KEY_ID \
+  --key-type API_KEY \
+  2>/dev/null && \
+  echo "✅ API Key added to Usage Plan"
+
+# Step 9: Show API endpoint
+echo ""
+echo "[9] API Gateway endpoint URL..."
+echo "Base URL: https://${API_ID}.execute-api.${REGION}.amazonaws.com/prod"
+echo ""
+echo "Endpoints:"
+echo "  GET /public  → No auth required"
+echo "  GET /login   → No auth (rate limited 10 RPS)"
+echo "  POST /login  → No auth + body validation"
+echo "  GET /users   → Lambda Authorizer required"
+echo "  GET /admin   → IAM SigV4 required"
+
+echo ""
+echo "================================================"
+echo "Part 3 Complete!"
+echo "Configured:"
+echo "  Request validation model (login body)"
+echo "  Stage throttling (1000 RPS global)"
+echo "  Method throttling (10 RPS on /login)"
+echo "  Resource policy (IP block list)"
+echo "  API Key + Usage Plan (premium 500 RPS)"
+echo "================================================"
+```
+
+---
+
+Ready for **Lab 104 Part B** (Logging + Testing + Private API + Cleanup)? 🧪
+
+# 📅 Day 39 — API Gateway Security
+# SECTION 3 — LAB 104 — Part B
+
+---
+
+## Part 4 — Enable Logging & Monitoring
+
+```bash
+#!/bin/bash
+# Lab 104 - Part 4: Logging & Monitoring
+# Day 39 - AWS Security Specialist Study Plan
+
+source /tmp/lab104-env.sh
+
+echo "================================================"
+echo "  Part 4: Logging & Monitoring"
+echo "================================================"
+
+# Step 1: Create CloudWatch Log Group for API Gateway
+echo ""
+echo "[1] Creating CloudWatch Log Groups..."
+aws logs create-log-group \
+  --log-group-name \
+    "API-Gateway-Execution-Logs_${API_ID}/prod" \
+  2>/dev/null && \
+  echo "✅ Execution log group created"
+
+aws logs create-log-group \
+  --log-group-name "/aws/apigateway/lab104-access-logs" \
+  2>/dev/null && \
+  echo "✅ Access log group created"
+
+# Set retention policy
+aws logs put-retention-policy \
+  --log-group-name \
+    "API-Gateway-Execution-Logs_${API_ID}/prod" \
+  --retention-in-days 30 \
+  2>/dev/null && \
+  echo "✅ Retention set: 30 days"
+
+aws logs put-retention-policy \
+  --log-group-name \
+    "/aws/apigateway/lab104-access-logs" \
+  --retention-in-days 90 \
+  2>/dev/null && \
+  echo "✅ Access log retention: 90 days"
+
+# Step 2: Create IAM role for API Gateway logging
+echo ""
+echo "[2] Creating IAM role for API GW CloudWatch logging..."
+cat > /tmp/apigw-logging-trust.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "apigateway.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+LOGGING_ROLE_ARN=$(aws iam create-role \
+  --role-name "Lab104-APIGWLoggingRole" \
+  --assume-role-policy-document \
+    file:///tmp/apigw-logging-trust.json \
+  --query 'Role.Arn' \
+  --output text 2>/dev/null)
+
+aws iam attach-role-policy \
+  --role-name "Lab104-APIGWLoggingRole" \
+  --policy-arn "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs" \
+  2>/dev/null && \
+  echo "✅ CloudWatch logging policy attached"
+
+echo "export LOGGING_ROLE_ARN=\"$LOGGING_ROLE_ARN\"" \
+  >> /tmp/lab104-env.sh
+
+# Step 3: Set account-level CloudWatch role
+echo ""
+echo "[3] Setting account-level CloudWatch role..."
+aws apigateway update-account \
+  --patch-operations \
+    op=replace,path=/cloudwatchRoleArn,\
+value=$LOGGING_ROLE_ARN \
+  2>/dev/null && \
+  echo "✅ Account CloudWatch role configured" || \
+  echo "⚠️  Could not update account (may need permissions)"
+
+# Step 4: Get Access Log Group ARN
+ACCESS_LOG_GROUP_ARN="arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:/aws/apigateway/lab104-access-logs"
+
+# Step 5: Enable access logging on stage
+echo ""
+echo "[4] Enabling access logging on prod stage..."
+aws apigateway update-stage \
+  --rest-api-id $API_ID \
+  --stage-name prod \
+  --patch-operations \
+    "op=replace,path=/accessLogSettings/destinationArn,value=$ACCESS_LOG_GROUP_ARN" \
+    'op=replace,path=/accessLogSettings/format,value={"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","authorizerError":"$context.authorizer.error","principalId":"$context.authorizer.principalId","errorMessage":"$context.error.message"}' \
+  2>/dev/null && \
+  echo "✅ Access logging enabled with JSON format" || \
+  echo "⚠️  Could not enable access logging"
+
+# Step 6: Enable execution logging
+echo ""
+echo "[5] Enabling execution logging..."
+aws apigateway update-stage \
+  --rest-api-id $API_ID \
+  --stage-name prod \
+  --patch-operations \
+    "op=replace,path=/loggingLevel,value=ERROR" \
+    "op=replace,path=/dataTraceEnabled,value=false" \
+    "op=replace,path=/metricsEnabled,value=true" \
+  2>/dev/null && \
+  echo "✅ Execution logging: ERROR level" && \
+  echo "   Data trace: DISABLED (no body logging)" && \
+  echo "   Metrics: ENABLED" || \
+  echo "⚠️  Could not enable execution logging"
+
+# Step 7: Create CloudWatch alarms
+echo ""
+echo "[6] Creating CloudWatch alarms..."
+
+# Alarm for 4XX errors
+aws cloudwatch put-metric-alarm \
+  --alarm-name "Lab104-API-4XXErrors" \
+  --alarm-description "High 4XX error rate on Lab104 API" \
+  --metric-name 4XXError \
+  --namespace AWS/ApiGateway \
+  --dimensions \
+    Name=ApiName,Value=Lab104-SecureAPI \
+    Name=Stage,Value=prod \
+  --statistic Sum \
+  --period 300 \
+  --threshold 100 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --treat-missing-data notBreaching \
+  2>/dev/null && \
+  echo "✅ 4XX error alarm created (threshold: 100/5min)"
+
+# Alarm for 5XX errors
+aws cloudwatch put-metric-alarm \
+  --alarm-name "Lab104-API-5XXErrors" \
+  --alarm-description "Backend errors on Lab104 API" \
+  --metric-name 5XXError \
+  --namespace AWS/ApiGateway \
+  --dimensions \
+    Name=ApiName,Value=Lab104-SecureAPI \
+    Name=Stage,Value=prod \
+  --statistic Sum \
+  --period 60 \
+  --threshold 10 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --treat-missing-data notBreaching \
+  2>/dev/null && \
+  echo "✅ 5XX error alarm created (threshold: 10/min)"
+
+# Alarm for latency
+aws cloudwatch put-metric-alarm \
+  --alarm-name "Lab104-API-HighLatency" \
+  --alarm-description "High API latency detected" \
+  --metric-name Latency \
+  --namespace AWS/ApiGateway \
+  --dimensions \
+    Name=ApiName,Value=Lab104-SecureAPI \
+    Name=Stage,Value=prod \
+  --statistic p99 \
+  --period 300 \
+  --threshold 3000 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 2 \
+  --treat-missing-data notBreaching \
+  2>/dev/null && \
+  echo "✅ Latency alarm created (p99 > 3000ms)"
+
+# Step 8: Enable X-Ray tracing
+echo ""
+echo "[7] Enabling X-Ray tracing..."
+aws apigateway update-stage \
+  --rest-api-id $API_ID \
+  --stage-name prod \
+  --patch-operations \
+    "op=replace,path=/tracingEnabled,value=true" \
+  2>/dev/null && \
+  echo "✅ X-Ray active tracing enabled" || \
+  echo "⚠️  Could not enable X-Ray"
+
+# Step 9: CloudTrail search
+echo ""
+echo "[8] Searching CloudTrail for API GW events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventSource,\
+AttributeValue=apigateway.amazonaws.com \
+  --max-results 10 \
+  --query 'Events[*].{
+    Time:EventTime,
+    Event:EventName,
+    User:Username
+  }' \
+  --output table 2>/dev/null || \
+  echo "No recent API Gateway events"
+
+echo ""
+echo "================================================"
+echo "Part 4 Complete!"
+echo "Logging configured:"
+echo "  Access logs → CloudWatch (JSON format, 90d)"
+echo "  Execution logs → ERROR level (no body)"
+echo "  Metrics → Enabled"
+echo "  X-Ray → Active tracing enabled"
+echo "Alarms:"
+echo "  4XX errors > 100 per 5 min"
+echo "  5XX errors > 10 per min"
+echo "  p99 Latency > 3000ms"
+echo "================================================"
+```
+
+---
+
+## Part 5 — Test API Security
+
+```bash
+#!/bin/bash
+# Lab 104 - Part 5: Test API Security
+# Day 39 - AWS Security Specialist Study Plan
+
+source /tmp/lab104-env.sh
+
+echo "================================================"
+echo "  Part 5: Test API Security Controls"
+echo "================================================"
+
+BASE_URL="https://${API_ID}.execute-api.${REGION}.amazonaws.com/prod"
+
+# Step 1: Test public endpoint (no auth)
+echo ""
+echo "[1] Testing public endpoint (no auth required)..."
+RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+  "$BASE_URL/public" \
+  -H "Content-Type: application/json" \
+  2>/dev/null)
+
+STATUS=$(echo $RESPONSE | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+echo "GET /public → HTTP $STATUS"
+[ "$STATUS" == "200" ] && \
+  echo "✅ Public endpoint accessible without auth" || \
+  echo "ℹ️  Status: $STATUS (may need API deployed)"
+
+# Step 2: Test users endpoint without token (should fail)
+echo ""
+echo "[2] Testing /users without authorization token..."
+RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+  "$BASE_URL/users" \
+  -H "Content-Type: application/json" \
+  2>/dev/null)
+
+STATUS=$(echo $RESPONSE | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+echo "GET /users (no token) → HTTP $STATUS"
+[ "$STATUS" == "401" ] && \
+  echo "✅ Correctly returns 401 Unauthorized" || \
+  echo "ℹ️  Status: $STATUS"
+
+# Step 3: Test users endpoint with invalid token
+echo ""
+echo "[3] Testing /users with invalid token..."
+RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+  "$BASE_URL/users" \
+  -H "Authorization: Bearer invalid-token-xyz" \
+  -H "Content-Type: application/json" \
+  2>/dev/null)
+
+STATUS=$(echo $RESPONSE | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+echo "GET /users (invalid token) → HTTP $STATUS"
+[ "$STATUS" == "401" ] && \
+  echo "✅ Correctly returns 401 for invalid token" || \
+  echo "ℹ️  Status: $STATUS"
+
+# Step 4: Test with valid admin token
+echo ""
+echo "[4] Testing /users with valid admin token..."
+RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+  "$BASE_URL/users" \
+  -H "Authorization: Bearer admin-token-secret-123" \
+  -H "Content-Type: application/json" \
+  2>/dev/null)
+
+STATUS=$(echo $RESPONSE | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+BODY=$(echo $RESPONSE | sed 's/HTTP_STATUS:[0-9]*//')
+echo "GET /users (admin token) → HTTP $STATUS"
+[ "$STATUS" == "200" ] && \
+  echo "✅ Admin access granted" && \
+  echo "   Response: $BODY" || \
+  echo "ℹ️  Status: $STATUS"
+
+# Step 5: Test request validation on /login
+echo ""
+echo "[5] Testing request validation on POST /login..."
+
+# Test with missing required field (should fail)
+echo "   Test A: Missing password field..."
+RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+  -X POST "$BASE_URL/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "testuser"}' \
+  2>/dev/null)
+
+STATUS=$(echo $RESPONSE | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+echo "   POST /login (missing password) → HTTP $STATUS"
+[ "$STATUS" == "400" ] && \
+  echo "   ✅ Correctly returns 400 Bad Request" || \
+  echo "   ℹ️  Status: $STATUS"
+
+# Test with valid body
+echo "   Test B: Valid request body..."
+RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+  -X POST "$BASE_URL/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "testuser", "password": "Password123!"}' \
+  2>/dev/null)
+
+STATUS=$(echo $RESPONSE | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2)
+echo "   POST /login (valid body) → HTTP $STATUS"
+[ "$STATUS" == "200" ] && \
+  echo "   ✅ Valid request processed" || \
+  echo "   ℹ️  Status: $STATUS"
+
+# Step 6: Test admin endpoint (IAM auth)
+echo ""
+echo "[6] Testing /admin with IAM auth..."
+# Use AWS CLI signed request
+SIGNED_RESPONSE=$(aws apigateway test-invoke-method \
+  --rest-api-id $API_ID \
+  --resource-id $ADMIN_RESOURCE_ID \
+  --http-method GET \
+  --path-with-query-string "/admin" \
+  --query '{Status:status, Body:body}' \
+  --output table 2>/dev/null)
+
+echo "GET /admin (IAM signed via test-invoke):"
+echo "$SIGNED_RESPONSE"
+
+# Step 7: Test throttling behavior
+echo ""
+echo "[7] Throttling behavior reference..."
+cat << 'EOF'
+# Test throttling by sending rapid requests:
+for i in $(seq 1 25); do
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$BASE_URL/login" \
+    -H "Content-Type: application/json" \
+    -d '{"username":"u","password":"Password123!"}')
+  echo "Request $i: HTTP $STATUS"
+  [ "$STATUS" == "429" ] && echo "  ← THROTTLED!"
+done
+
+# Expected: after ~20 requests (burst=20),
+# subsequent requests return 429 Too Many Requests
+EOF
+
+# Step 8: Show all security controls summary
+echo ""
+echo "[8] API Security Controls Summary..."
+cat << EOF
+┌──────────────────────────────────────────────────────┐
+│           Lab104 API Security Summary                 │
+├────────────────┬─────────────────────────────────────┤
+│ Endpoint       │ Security Control                    │
+├────────────────┼─────────────────────────────────────┤
+│ GET /public    │ No auth (open)                      │
+│ GET /login     │ No auth + 10 RPS rate limit         │
+│ POST /login    │ No auth + body validation           │
+│ GET /users     │ Lambda Authorizer (TOKEN)           │
+│ GET /admin     │ IAM Authorization (SigV4)           │
+├────────────────┴─────────────────────────────────────┤
+│ Stage Controls                                        │
+│ ├── Global throttle: 1000 RPS, burst 2000            │
+│ ├── Resource policy: blocks 192.0.2.0/24             │
+│ ├── Access logs: CloudWatch (JSON)                   │
+│ ├── Execution logs: ERROR level                      │
+│ ├── X-Ray: Active tracing                            │
+│ └── API Key + Usage Plan (premium 500 RPS)           │
+└──────────────────────────────────────────────────────┘
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 5 Complete!"
+echo "Security controls tested:"
+echo "  ✅ Public endpoint accessible"
+echo "  ✅ Protected endpoint returns 401 without token"
+echo "  ✅ Invalid token rejected"
+echo "  ✅ Request validation returns 400"
+echo "  ✅ IAM test-invoke works"
+echo "================================================"
+```
+
+---
+
+## Part 6 — Private API Reference
+
+```bash
+#!/bin/bash
+# Lab 104 - Part 6: Private API Reference
+# Day 39 - AWS Security Specialist Study Plan
+
+source /tmp/lab104-env.sh
+
+echo "================================================"
+echo "  Part 6: Private API Reference"
+echo "================================================"
+
+echo ""
+echo "[1] Private API creation reference..."
+cat << 'EOF'
+# Step 1: Create Private REST API
+PRIVATE_API_ID=$(aws apigateway create-rest-api \
+  --name "Lab104-PrivateAPI" \
+  --endpoint-configuration \
+    types=PRIVATE \
+  --query 'id' \
+  --output text)
+
+# Step 2: Create VPC Interface Endpoint
+VPC_ENDPOINT_ID=$(aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-12345678 \
+  --vpc-endpoint-type Interface \
+  --service-name \
+    com.amazonaws.ap-south-1.execute-api \
+  --subnet-ids subnet-aaa subnet-bbb \
+  --security-group-ids sg-12345678 \
+  --private-dns-enabled \
+  --query 'VpcEndpoint.VpcEndpointId' \
+  --output text)
+
+# Step 3: Attach Resource Policy to Private API
+# CRITICAL: Both DENY (wrong VPC) + ALLOW (correct VPC)
+aws apigateway update-rest-api \
+  --rest-api-id $PRIVATE_API_ID \
+  --patch-operations \
+    op=replace,path=/policy,value='{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Deny",
+          "Principal": "*",
+          "Action": "execute-api:Invoke",
+          "Resource": "arn:aws:execute-api:*:*:*",
+          "Condition": {
+            "StringNotEquals": {
+              "aws:SourceVpce": "'"$VPC_ENDPOINT_ID"'"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Principal": "*",
+          "Action": "execute-api:Invoke",
+          "Resource": "arn:aws:execute-api:*:*:*"
+        }
+      ]
+    }'
+
+# Step 4: Deploy Private API
+aws apigateway create-deployment \
+  --rest-api-id $PRIVATE_API_ID \
+  --stage-name prod
+
+# Step 5: Test from inside VPC
+# (run on EC2 instance in same VPC)
+curl -v \
+  https://<api-id>.execute-api.ap-south-1.amazonaws.com/prod/resource
+# OR using VPC endpoint DNS:
+curl -v \
+  https://<api-id>-<vpce-id>.execute-api.ap-south-1.vpce.amazonaws.com/prod/resource
+EOF
+
+echo ""
+echo "[2] mTLS configuration reference..."
+cat << 'EOF'
+# Step 1: Generate CA and client certificates
+# Generate CA key and certificate
+openssl genrsa -out ca-key.pem 2048
+openssl req -new -x509 \
+  -key ca-key.pem \
+  -out ca-cert.pem \
+  -days 365 \
+  -subj "/CN=Lab104 CA/O=Lab104"
+
+# Generate client key and CSR
+openssl genrsa -out client-key.pem 2048
+openssl req -new \
+  -key client-key.pem \
+  -out client.csr \
+  -subj "/CN=partner-client/O=PartnerCo"
+
+# Sign client certificate with CA
+openssl x509 -req \
+  -in client.csr \
+  -CA ca-cert.pem \
+  -CAkey ca-key.pem \
+  -CAcreateserial \
+  -out client-cert.pem \
+  -days 365
+
+# Step 2: Upload CA cert as truststore to S3
+aws s3 cp ca-cert.pem \
+  s3://lab104-truststore/truststore.pem
+
+# Step 3: Create custom domain with mTLS
+aws apigateway create-domain-name \
+  --domain-name api.lab104.com \
+  --regional-certificate-arn <acm-cert-arn> \
+  --endpoint-configuration types=REGIONAL \
+  --mutual-tls-authentication \
+    truststoreUri=s3://lab104-truststore/truststore.pem
+
+# Step 4: Test with client certificate
+curl -v \
+  --cert client-cert.pem \
+  --key client-key.pem \
+  https://api.lab104.com/prod/resource
+EOF
+
+echo ""
+echo "[3] Cross-account API access reference..."
+cat << 'EOF'
+# Account A (API owner) - Resource Policy:
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::ACCOUNT_B:role/ServiceRole"
+      },
+      "Action": "execute-api:Invoke",
+      "Resource": "arn:aws:execute-api:region:ACCOUNT_A:api-id/*"
+    }
+  ]
+}
+
+# Account B (caller) - IAM Policy on ServiceRole:
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "execute-api:Invoke",
+      "Resource": "arn:aws:execute-api:region:ACCOUNT_A:api-id/*"
+    }
+  ]
+}
+
+# Account B - Make signed API call:
+import boto3
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+import requests
+
+session = boto3.Session()
+credentials = session.get_credentials()
+region = 'ap-south-1'
+
+url = 'https://api-id.execute-api.region.amazonaws.com/prod/resource'
+request = AWSRequest(method='GET', url=url)
+SigV4Auth(credentials, 'execute-api', region).add_auth(request)
+
+response = requests.get(
+    url,
+    headers=dict(request.headers)
+)
+print(response.json())
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 6 Complete!"
+echo "Reference documentation created for:"
+echo "  - Private API + VPC endpoint setup"
+echo "  - mTLS configuration"
+echo "  - Cross-account API access"
+echo "================================================"
+```
+
+---
+
+## Part 7 — Cleanup
+
+```bash
+#!/bin/bash
+# Lab 104 - Part 7: Cleanup
+# Day 39 - AWS Security Specialist Study Plan
+
+source /tmp/lab104-env.sh
+
+echo "================================================"
+echo "  Part 7: Lab Cleanup"
+echo "================================================"
+
+# Step 1: Delete Usage Plan and API Key
+echo ""
+echo "[1] Deleting Usage Plan and API Key..."
+aws apigateway delete-usage-plan-key \
+  --usage-plan-id $USAGE_PLAN_ID \
+  --key-id $API_KEY_ID \
+  2>/dev/null && echo "✅ API Key removed from plan"
+
+aws apigateway delete-usage-plan \
+  --usage-plan-id $USAGE_PLAN_ID \
+  2>/dev/null && echo "✅ Usage Plan deleted"
+
+aws apigateway delete-api-key \
+  --api-key $API_KEY_ID \
+  2>/dev/null && echo "✅ API Key deleted"
+
+# Step 2: Delete API Gateway
+echo ""
+echo "[2] Deleting REST API..."
+aws apigateway delete-rest-api \
+  --rest-api-id $API_ID \
+  2>/dev/null && \
+  echo "✅ REST API deleted" || \
+  echo "⚠️  Could not delete API"
+
+# Step 3: Delete Lambda functions
+echo ""
+echo "[3] Deleting Lambda functions..."
+for FUNC in \
+  "Lab104-BackendLambda" \
+  "Lab104-LambdaAuthorizer"; do
+  aws lambda delete-function \
+    --function-name $FUNC \
+    2>/dev/null && \
+    echo "✅ Deleted: $FUNC"
+done
+
+# Step 4: Delete IAM roles
+echo ""
+echo "[4] Cleaning up IAM roles..."
+
+# Backend Lambda role
+aws iam detach-role-policy \
+  --role-name "Lab104-BackendLambdaRole" \
+  --policy-arn \
+    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" \
+  2>/dev/null
+
+aws iam delete-role \
+  --role-name "Lab104-BackendLambdaRole" \
+  2>/dev/null && echo "✅ Backend Lambda role deleted"
+
+# Logging role
+aws iam detach-role-policy \
+  --role-name "Lab104-APIGWLoggingRole" \
+  --policy-arn \
+    "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs" \
+  2>/dev/null
+
+aws iam delete-role \
+  --role-name "Lab104-APIGWLoggingRole" \
+  2>/dev/null && echo "✅ Logging role deleted"
+
+# Step 5: Delete CloudWatch Log Groups
+echo ""
+echo "[5] Deleting CloudWatch Log Groups..."
+for LOG_GROUP in \
+  "API-Gateway-Execution-Logs_${API_ID}/prod" \
+  "/aws/apigateway/lab104-access-logs"; do
+  aws logs delete-log-group \
+    --log-group-name "$LOG_GROUP" \
+    2>/dev/null && \
+    echo "✅ Deleted: $LOG_GROUP"
+done
+
+# Step 6: Delete CloudWatch Alarms
+echo ""
+echo "[6] Deleting CloudWatch Alarms..."
+aws cloudwatch delete-alarms \
+  --alarm-names \
+    "Lab104-API-4XXErrors" \
+    "Lab104-API-5XXErrors" \
+    "Lab104-API-HighLatency" \
+  2>/dev/null && echo "✅ CloudWatch alarms deleted"
+
+# Step 7: Cleanup temp files
+echo ""
+echo "[7] Cleaning up temp files..."
+rm -f /tmp/lab104-env.sh \
+      /tmp/backend-trust.json \
+      /tmp/apigw-logging-trust.json \
+      /tmp/api-resource-policy.json
+rm -rf /tmp/lab104-lambda/
+echo "✅ Temp files cleaned"
+
+echo ""
+echo "================================================"
+echo "Lab 104 Cleanup Complete!"
+echo "All resources deleted."
+echo "================================================"
+```
+
+---
+
+## ✅ Lab 104 Verification Checklist
+
+```
+Lab 104 — Completion Checklist
+│
+├── Prerequisites
+│     ├── [ ] Verified identity and region
+│     └── [ ] Checked existing APIs and Lambdas
+│
+├── Part 1: REST API Creation
+│     ├── [ ] Created REST API (REGIONAL)
+│     ├── [ ] Created /users, /admin, /public, /login
+│     ├── [ ] Created backend Lambda function
+│     └── [ ] Added Lambda integration to resources
+│
+├── Part 2: Authorizers
+│     ├── [ ] Created Lambda TOKEN Authorizer
+│     ├── [ ] Applied Lambda Auth to /users GET
+│     ├── [ ] Applied IAM Auth to /admin GET
+│     └── [ ] Verified authorizer TTL (300s)
+│
+├── Part 3: Throttling & Validation
+│     ├── [ ] Created JSON schema model for login
+│     ├── [ ] Created request validator
+│     ├── [ ] POST /login with body validation
+│     ├── [ ] Stage throttle: 1000 RPS, burst 2000
+│     ├── [ ] /login method throttle: 10 RPS
+│     ├── [ ] Resource policy with IP blocklist
+│     └── [ ] API Key + Usage Plan (premium)
+│
+├── Part 4: Logging & Monitoring
+│     ├── [ ] Access logs (JSON, 90-day retention)
+│     ├── [ ] Execution logs (ERROR level, no body)
+│     ├── [ ] X-Ray active tracing
+│     ├── [ ] 4XX error alarm
+│     ├── [ ] 5XX error alarm
+│     └── [ ] p99 latency alarm
+│
+├── Part 5: Testing
+│     ├── [ ] Public endpoint returns 200
+│     ├── [ ] Protected endpoint returns 401 no token
+│     ├── [ ] Invalid token returns 401
+│     ├── [ ] Missing body field returns 400
+│     └── [ ] IAM test-invoke works on /admin
+│
+├── Part 6: Reference
+│     ├── [ ] Private API setup understood
+│     ├── [ ] mTLS configuration understood
+│     └── [ ] Cross-account access understood
+│
+└── Part 7: Cleanup
+      └── [ ] All resources deleted
+```
+
+---
+
+## 🔑 Lab 104 Key Takeaways
+
+| Concept | What You Practiced |
+|---|---|
+| REST API creation | REGIONAL endpoint with multiple resources |
+| Lambda TOKEN Authorizer | Custom token validation + context passing |
+| IAM Authorization | SigV4 signing for admin endpoints |
+| Request validation | JSON schema model — 400 before Lambda invoked |
+| Stage throttling | Global 1000 RPS + method-level 10 RPS on /login |
+| Resource policy | IP-based deny list on API |
+| Usage Plans | Per-key throttling for premium customers |
+| Access logging | JSON format with security-relevant fields |
+| Execution logging | ERROR only — no body logging (PCI DSS safe) |
+| X-Ray tracing | End-to-end request visibility |
+| Authorizer fail closed | Raise exception → 401 (not allow on error) |
+| Private API pattern | VPC endpoint + resource policy both required |
+
+---
+
+# 🎉 Day 39 — Fully Complete!
+
+All sections done at full depth with new format:
+- ✅ **Section 1** — Theory Block (Part A + Part B)
+- ✅ **Section 2** — Exam Deep Dive (Part A + Part B)
+- ✅ **Section 3** — Lab 104 (Part A + Part B)
+
+---
+
+## 📅 Day 40 Preview
+```
+Day 40: AWS Lambda Security (3 hours)
+├── Lambda execution roles and permissions
+├── Environment variable encryption
+├── VPC Lambda security
+├── Lambda layers security
+├── Code signing and integrity
+├── Lambda function URLs security
+└── Lab 105: Secure Lambda configuration
+```
+
+Ready when you are Pradeep! 💪

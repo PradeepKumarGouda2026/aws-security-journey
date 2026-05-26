@@ -1,0 +1,1351 @@
+# 📅 Day 37 — AWS WAF & Shield
+
+---
+
+# SECTION 1 — THEORY BLOCK
+
+---
+
+## 1.1 Service Overview & Purpose
+
+### What is AWS WAF?
+AWS WAF (Web Application Firewall) is a managed service that lets you **monitor, filter, and block HTTP/HTTPS requests** to your web applications based on rules you define. It protects against common web exploits and attacks at **Layer 7 (application layer)**.
+
+Think of WAF as a **smart security guard** at your application's front door — it inspects every incoming HTTP request and decides whether to allow, block, or count it based on your rules.
+
+### What is AWS Shield?
+AWS Shield is a **DDoS (Distributed Denial of Service) protection service** that safeguards your AWS applications against volumetric, protocol, and application-layer attacks. It operates at **Layers 3, 4, and 7**.
+
+Think of Shield as a **flood barrier** — it absorbs and deflects massive volumetric attacks before they reach your infrastructure.
+
+### Why Do They Exist?
+```
+Without WAF:
+├── SQL injection attacks reach your database
+├── XSS attacks execute in user browsers
+├── Bot traffic floods your application
+├── Scrapers steal your content at scale
+├── Credential stuffing attacks your login pages
+└── Known CVEs exploited before you patch
+
+Without Shield:
+├── SYN flood exhausts your server connections
+├── UDP flood saturates your bandwidth
+├── HTTP flood overwhelms your application
+├── Application becomes unavailable for legitimate users
+└── No DDoS response team support
+```
+
+```
+With WAF:
+├── SQL injection patterns blocked at edge
+├── XSS attempts filtered before reaching app
+├── Bot traffic identified and managed
+├── Rate limiting prevents abuse
+├── Managed rules cover OWASP Top 10 automatically
+└── Custom rules for your specific threats
+
+With Shield:
+├── Always-on DDoS detection and mitigation
+├── Automatic attack absorption (Standard)
+├── Advanced: 24/7 DDoS Response Team (SRT)
+├── Real-time attack visibility
+├── Cost protection for scaling during attacks
+└── Advanced: proactive engagement from AWS
+```
+
+### Exam Weight & Importance
+- Appears in **Domain 3: Infrastructure Security** (22%)
+- Expect **4–6 questions** involving WAF and Shield
+- Commonly tested: WAF rule evaluation order, Shield Advanced features, integration patterns, rate limiting
+
+---
+
+## 1.2 Core Architecture
+
+### WAF Architecture
+```
+┌──────────────────────────────────────────────────────────────┐
+│                       AWS WAF                                 │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │                    Web ACL                           │    │
+│  │                                                      │    │
+│  │  Rules evaluated in priority order (lowest first)   │    │
+│  │                                                      │    │
+│  │  Priority 1: IP Reputation Rule Group               │    │
+│  │  Priority 2: AWS Managed Rules (Core Rule Set)      │    │
+│  │  Priority 3: Rate Based Rule (1000 req/5min)        │    │
+│  │  Priority 4: Custom Geographic Block Rule           │    │
+│  │  Priority 5: Custom SQL Injection Rule              │    │
+│  │                                                      │    │
+│  │  Default Action: ALLOW (or BLOCK)                   │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+│  Actions per rule:                                           │
+│  ├── ALLOW  → Let request through                           │
+│  ├── BLOCK  → Return 403 (or custom response)              │
+│  ├── COUNT  → Count but don't block (monitoring mode)      │
+│  ├── CAPTCHA → Challenge with CAPTCHA                      │
+│  └── CHALLENGE → JavaScript challenge (bot detection)      │
+└──────────────────────────────────────────────────────────────┘
+          │
+          │ Attached to
+          ▼
+┌─────────────────────────────────────────┐
+│  ALB  │  CloudFront  │  API Gateway     │
+│  AppSync  │  Cognito User Pool          │
+│  App Runner  │  Verified Access         │
+└─────────────────────────────────────────┘
+```
+
+### Shield Architecture
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     AWS Shield                               │
+│                                                              │
+│  Shield Standard (FREE — automatic for all AWS customers)   │
+│  ├── Always-on network flow monitoring                       │
+│  ├── Automatic inline mitigations                           │
+│  ├── Protects against most common DDoS attacks              │
+│  └── No additional cost                                      │
+│                                                              │
+│  Shield Advanced ($3,000/month + data transfer fees)        │
+│  ├── Everything in Standard PLUS:                           │
+│  ├── Enhanced detection and mitigation                      │
+│  ├── DDoS Response Team (SRT) 24/7 access                  │
+│  ├── Real-time attack visibility and reporting              │
+│  ├── Cost protection (credits for scaling costs)           │
+│  ├── Proactive engagement from AWS                         │
+│  ├── WAF integration for L7 protection                     │
+│  └── Attack forensics reports                              │
+└──────────────────────────────────────────────────────────────┘
+          │
+          │ Protects
+          ▼
+┌─────────────────────────────────────────────────────────┐
+│  EC2  │  ELB  │  CloudFront  │  Route 53  │  Global     │
+│  Accelerator  │  Elastic IP                             │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 1.3 Deep Dive — Every Sub-Topic
+
+### A. WAF Web ACLs (Full Detail)
+
+#### Web ACL Scope
+```
+WAF Web ACLs have two scopes:
+├── REGIONAL
+│     ├── Protects: ALB, API Gateway, AppSync,
+│     │            Cognito, App Runner
+│     └── Must be created in same region as resource
+│
+└── CLOUDFRONT
+      ├── Protects: CloudFront distributions only
+      └── Must be created in us-east-1
+            (same as CloudFront certificates)
+```
+
+> ⚠️ **Exam critical:** WAF for CloudFront must be created in **us-east-1** regardless of where your origin is. Regional WAF cannot protect CloudFront.
+
+#### Web ACL Capacity Units (WCU)
+```
+Every WAF rule consumes WCU (Web ACL Capacity Units):
+├── Web ACL maximum: 5,000 WCU
+├── Simple rule: 1 WCU
+├── Regex match: 10 WCU
+├── SQL injection match: 20 WCU
+├── Managed rule group: varies (50-700 WCU)
+└── Rate-based rule: 2 WCU
+
+Pricing: $1.00 per million requests
+         + rule costs
+```
+
+#### Rule Evaluation Order
+```
+Rules evaluated by PRIORITY (lowest number first):
+
+Priority 0  → Evaluated first
+Priority 1  → Evaluated second
+Priority 2  → Evaluated third
+...
+Priority N  → Evaluated last
+Default Action → Applied if no rule matches
+
+FIRST MATCHING RULE WINS — evaluation stops
+```
+
+> ⚠️ **Critical exam point:** Rules are evaluated in **ascending priority order** (0 before 100). The **first rule that matches** terminates evaluation. No further rules are checked after a match.
+
+#### Rule Actions
+```
+ALLOW:
+├── Request passes through to application
+├── Remaining rules NOT evaluated (match terminates)
+└── Use for known-good IP allowlisting
+
+BLOCK:
+├── Request rejected with HTTP 403
+├── Custom response body/status code configurable
+├── Remaining rules NOT evaluated
+└── Use for known-bad IPs, attack patterns
+
+COUNT:
+├── Request counted in metrics but NOT blocked
+├── Evaluation CONTINUES to next rule
+├── Use for: testing new rules before enforcing
+│           monitoring without blocking
+└── Does not terminate rule evaluation
+
+CAPTCHA:
+├── Presents CAPTCHA challenge to user
+├── Valid CAPTCHA token = request allowed
+├── Invalid/missing token = request blocked
+└── Use for: suspected bot traffic, login pages
+
+CHALLENGE:
+├── Silent JavaScript challenge (no user interaction)
+├── Detects bots that don't execute JavaScript
+├── Valid challenge response = request allowed
+└── Use for: automated bot detection
+```
+
+---
+
+### B. WAF Rule Types (Full Detail)
+
+#### Type 1: Managed Rule Groups
+AWS provides pre-built rule groups maintained by AWS security teams:
+
+```
+AWS Managed Rule Groups (free with WAF):
+
+Core Rule Set (AWSManagedRulesCommonRuleSet):
+├── Protects against OWASP Top 10
+├── SQL injection, XSS, path traversal
+├── WCU: 700
+└── Most commonly used rule group
+
+Known Bad Inputs (AWSManagedRulesKnownBadInputsRuleSet):
+├── Blocks requests with known malicious patterns
+├── Log4Shell, SSRF patterns
+└── WCU: 200
+
+SQL Database (AWSManagedRulesSQLiRuleSet):
+├── SQLi-specific rules
+├── More comprehensive than Core Rule Set SQLi
+└── WCU: 200
+
+Linux OS (AWSManagedRulesLinuxRuleSet):
+├── Linux-specific attack patterns
+├── Command injection targeting Linux
+└── WCU: 200
+
+Windows OS (AWSManagedRulesWindowsRuleSet):
+├── Windows-specific attacks
+├── PowerShell injection patterns
+└── WCU: 200
+
+PHP Application (AWSManagedRulesPHPRuleSet):
+├── PHP-specific vulnerabilities
+└── WCU: 100
+
+WordPress (AWSManagedRulesWordPressRuleSet):
+├── WordPress-specific attack patterns
+└── WCU: 100
+
+Amazon IP Reputation List:
+├── Blocks IPs associated with bots and threats
+├── Updated continuously by AWS threat intel
+└── WCU: 25
+
+Anonymous IP List:
+├── Blocks Tor exit nodes, VPNs, proxies
+└── WCU: 50
+
+Bot Control (AWSManagedRulesBotControlRuleSet):
+├── Identifies and manages bot traffic
+├── Common bots: allowed (Google, Bing)
+├── Malicious bots: blocked
+├── Targeted bot inspection available
+└── WCU: 50 (Common) / 50+ (Targeted)
+
+Account Takeover Prevention (ATP):
+├── Protects login endpoints
+├── Credential stuffing detection
+├── Stolen credential checking
+└── WCU: 50
+```
+
+> ⚠️ **Exam tip:** Bot Control and ATP (Account Takeover Prevention) are **additional cost** managed rules — not free like the basic managed rules. This distinction appears in cost-optimization scenarios.
+
+#### Type 2: Rate-Based Rules
+```
+Rate-based rules automatically block IPs that exceed
+a request threshold within a 5-minute window:
+
+Configuration:
+├── Threshold: minimum 100 requests per 5 minutes
+├── Aggregation key:
+│     ├── IP address (most common)
+│     ├── Forwarded IP (behind proxy)
+│     ├── HTTP header value
+│     ├── Query argument value
+│     └── URI path
+├── Scope-down statement (optional):
+│     └── Only count requests matching a condition
+│           Example: only rate-limit /login endpoint
+└── Action: BLOCK (auto-unblocked when rate drops)
+
+Example use cases:
+├── Login endpoint: 10 attempts per 5 minutes
+├── API endpoint: 1000 requests per 5 minutes
+├── Search endpoint: 100 searches per 5 minutes
+└── Global: 2000 requests per 5 minutes per IP
+```
+
+#### Type 3: Custom Rules (Rule Statements)
+
+**IP Set Match:**
+```json
+{
+  "Name": "BlockBadIPs",
+  "Priority": 1,
+  "Statement": {
+    "IPSetReferenceStatement": {
+      "ARN": "arn:aws:wafv2:...:ipset/bad-ips/..."
+    }
+  },
+  "Action": {"Block": {}},
+  "VisibilityConfig": {
+    "SampledRequestsEnabled": true,
+    "CloudWatchMetricsEnabled": true,
+    "MetricName": "BlockBadIPs"
+  }
+}
+```
+
+**Geo Match:**
+```json
+{
+  "Name": "BlockCountries",
+  "Statement": {
+    "GeoMatchStatement": {
+      "CountryCodes": ["KP", "IR", "CU"]
+    }
+  },
+  "Action": {"Block": {}}
+}
+```
+
+**String Match:**
+```json
+{
+  "Name": "BlockSQLi",
+  "Statement": {
+    "ByteMatchStatement": {
+      "SearchString": "UNION SELECT",
+      "FieldToMatch": {"QueryString": {}},
+      "TextTransformations": [
+        {"Priority": 0, "Type": "URL_DECODE"},
+        {"Priority": 1, "Type": "LOWERCASE"}
+      ],
+      "PositionalConstraint": "CONTAINS"
+    }
+  },
+  "Action": {"Block": {}}
+}
+```
+
+**Label Match (Rule Chaining):**
+```
+Rule 1: Managed rule adds label "awswaf:managed:aws:core-rule-set:CrossSiteScripting_Body"
+Rule 2: Custom rule matches on that label → custom action
+
+This allows building logic based on managed rule detections
+without overriding the managed rule group behavior
+```
+
+#### Type 4: Rule Groups
+```
+Rule Groups = reusable collections of rules
+├── AWS Managed Rule Groups (AWS maintains)
+├── AWS Marketplace Rule Groups (third-party vendors)
+│     ├── Fortinet, F5, Imperva, etc.
+│     └── Additional subscription cost
+└── Custom Rule Groups (you create)
+      ├── Share across multiple Web ACLs
+      └── Centralize rule management
+```
+
+---
+
+### C. WAF Logging & Monitoring
+
+#### WAF Logging Options
+```
+Log destinations:
+├── Amazon S3 (via Kinesis Data Firehose)
+├── Amazon CloudWatch Logs
+└── Amazon Kinesis Data Firehose (direct)
+
+Log contents:
+├── Timestamp of request
+├── Source IP address
+├── HTTP method and URI
+├── Matched rule name and action
+├── Request headers (configurable)
+├── Query string
+└── Response code
+
+Log filtering:
+├── Log only BLOCK actions
+├── Log only COUNT actions
+├── Log based on label matches
+└── Reduce log volume for high-traffic apps
+```
+
+#### WAF Metrics in CloudWatch
+```
+Key metrics:
+├── AllowedRequests    → Requests that passed
+├── BlockedRequests    → Requests blocked
+├── CountedRequests    → Requests counted
+├── PassedRequests     → Passed default action
+└── RequestsWithValidCaptchaToken → CAPTCHA passed
+
+Per-rule metrics:
+└── Each rule has its own metric (if enabled)
+```
+
+---
+
+### D. WAF Deployment Patterns
+
+#### Pattern 1: ALB + WAF (Regional)
+```
+Internet
+    │
+    ▼
+Route 53 → ALB (ap-south-1)
+              │
+              │ WAF Web ACL (REGIONAL, ap-south-1)
+              │ Rules: Core Rule Set + Rate Limit
+              ▼
+          EC2 / ECS / Lambda
+```
+
+#### Pattern 2: CloudFront + WAF (Global)
+```
+Internet
+    │
+    ▼
+Route 53 → CloudFront (global edge)
+              │
+              │ WAF Web ACL (CLOUDFRONT, us-east-1)
+              │ Rules: Bot Control + Core Rule Set
+              ▼
+          ALB Origin (any region)
+              │
+              │ WAF Web ACL (REGIONAL) ← optional second layer
+              ▼
+          Application
+```
+
+#### Pattern 3: API Gateway + WAF
+```
+Client → API Gateway (REST/HTTP)
+              │
+              │ WAF Web ACL (REGIONAL)
+              │ Rules: Rate limit + API-specific rules
+              ▼
+          Lambda / ECS
+```
+
+#### Pattern 4: Multi-Layer Protection
+```
+Layer 1: Shield Advanced (DDoS protection)
+Layer 2: CloudFront + WAF (global L7 filtering)
+Layer 3: ALB + WAF (regional L7 filtering)
+Layer 4: Security Groups (L3/L4 filtering)
+Layer 5: Application-level validation
+
+Defense in depth — attacker must bypass all layers
+```
+
+---
+
+### E. AWS Shield — Deep Dive
+
+#### Shield Standard (Free)
+```
+Automatically enabled for ALL AWS customers:
+├── Network flow monitoring (24/7)
+├── Automatic inline mitigations for:
+│     ├── SYN/UDP/ICMP floods
+│     ├── Reflection attacks
+│     └── Other common volumetric attacks
+├── Protects:
+│     ├── EC2 instances
+│     ├── Elastic Load Balancers
+│     ├── CloudFront distributions
+│     ├── Route 53 hosted zones
+│     └── Global Accelerator
+└── No configuration required — always on
+```
+
+#### Shield Advanced ($3,000/month)
+```
+Everything in Standard PLUS:
+
+Enhanced Detection:
+├── Application-layer DDoS detection (L7)
+├── Near real-time attack visibility
+└── Historical attack reports (13 months)
+
+DDoS Response Team (SRT):
+├── 24/7 access to AWS DDoS experts
+├── Proactive engagement during attacks
+├── Custom mitigation rules during attacks
+└── Post-attack forensic analysis
+
+Cost Protection:
+├── Credits for AWS service scaling costs
+│     caused by DDoS attacks
+├── Covers: EC2, ELB, CloudFront, Route 53
+└── Protects against bill shock during attacks
+
+Protected Resources (must explicitly add):
+├── Elastic IPs
+├── ELB (ALB, NLB, CLB)
+├── CloudFront distributions
+├── Route 53 hosted zones
+├── Global Accelerator accelerators
+└── EC2 (via Elastic IP)
+
+Additional features:
+├── WAF included at no extra charge
+│     (for resources protected by Shield Advanced)
+├── Proactive engagement:
+│     AWS contacts YOU when attack detected
+└── SRT can pre-deploy mitigations
+```
+
+> ⚠️ **Exam critical:** With Shield Advanced, **WAF is included at no additional charge** for protected resources. This is a commonly tested cost optimization point.
+
+#### Shield Advanced Subscription Details
+```
+Pricing:
+├── $3,000/month consolidated billing
+│     (one subscription covers all accounts in org)
+├── 1-year subscription commitment
+├── Data transfer out fees apply
+└── WAF usage for protected resources = FREE
+
+Commitment:
+└── 1-year minimum — cannot cancel mid-year
+```
+
+#### DDoS Attack Types Covered
+
+| Attack Type | Layer | Shield Standard | Shield Advanced |
+|---|---|---|---|
+| SYN flood | L4 | ✅ | ✅ Enhanced |
+| UDP flood | L4 | ✅ | ✅ Enhanced |
+| ICMP flood | L3 | ✅ | ✅ Enhanced |
+| Reflection attacks | L3/L4 | ✅ | ✅ Enhanced |
+| HTTP flood | L7 | ❌ | ✅ (via WAF) |
+| DNS query flood | L7 | Partial | ✅ Enhanced |
+| SSL negotiation | L7 | ❌ | ✅ |
+| Slow read/POST | L7 | ❌ | ✅ |
+
+---
+
+### F. WAF Bot Control & Account Takeover Prevention
+
+#### Bot Control
+```
+Two inspection levels:
+
+Common Bot Control:
+├── Detects and manages common bots
+├── Verified bots (Google, Bing): ALLOW by default
+├── Unverified bots: configurable action
+├── Categories: scrapers, scanners, crawlers
+└── WCU: 50
+
+Targeted Bot Control (additional cost):
+├── Detects sophisticated bots
+├── Browser fingerprinting
+├── Session behavior analysis
+├── Detects bots that mimic human behavior
+└── WCU: varies
+```
+
+#### Account Takeover Prevention (ATP)
+```
+Protects login endpoints from:
+├── Credential stuffing attacks
+│     (using leaked username/password lists)
+├── Brute force attacks
+├── Password spraying
+
+How it works:
+├── Monitors login endpoint specifically
+├── Checks credentials against known
+│     compromised credential database
+├── Tracks failed login attempts
+├── Applies CAPTCHA/block on suspicious activity
+└── Detects anomalous login patterns
+
+Configuration:
+├── Specify login endpoint URI
+├── Specify username and password fields
+├── Configure threshold for failed attempts
+└── Set action: BLOCK or CAPTCHA
+```
+
+---
+
+### G. WAF Firewall Manager
+
+#### What is Firewall Manager?
+AWS Firewall Manager is a **security management service** that lets you centrally configure and manage firewall rules across multiple accounts and resources in your AWS Organization.
+
+```
+Use Firewall Manager to:
+├── Deploy WAF rules across all accounts automatically
+├── Ensure all ALBs in org have WAF attached
+├── Enforce Shield Advanced across all accounts
+├── Manage Security Groups centrally
+├── Deploy Network Firewall policies org-wide
+└── Get compliance reports for all accounts
+```
+
+#### Firewall Manager Prerequisites
+```
+Requirements:
+├── AWS Organizations must be enabled
+├── All Features must be enabled in Organizations
+├── Designate Firewall Manager administrator account
+└── AWS Config must be enabled in all accounts
+```
+
+#### Firewall Manager Policies
+```
+Policy types:
+├── WAF policy → Attach Web ACL to all matching resources
+├── Shield Advanced policy → Enable protection for resources
+├── Security Group policy → Enforce SG rules
+├── Network Firewall policy → Deploy Network Firewall
+└── DNS Firewall policy → DNS filtering rules
+```
+
+---
+
+## 1.4 Comparison Tables
+
+### WAF Rule Action Comparison
+
+| Action | Blocks Request | Stops Evaluation | Use Case |
+|---|---|---|---|
+| **ALLOW** | ❌ | ✅ | Whitelist known-good |
+| **BLOCK** | ✅ | ✅ | Block known-bad |
+| **COUNT** | ❌ | ❌ | Monitoring/testing |
+| **CAPTCHA** | Conditionally | ✅ | Suspect bots |
+| **CHALLENGE** | Conditionally | ✅ | Bot detection |
+
+### Shield Standard vs Advanced
+
+| Feature | Standard | Advanced |
+|---|---|---|
+| **Cost** | Free | $3,000/month |
+| **L3/L4 protection** | ✅ Basic | ✅ Enhanced |
+| **L7 protection** | ❌ | ✅ (via WAF) |
+| **DDoS Response Team** | ❌ | ✅ 24/7 |
+| **Real-time visibility** | ❌ | ✅ |
+| **Cost protection** | ❌ | ✅ |
+| **Proactive engagement** | ❌ | ✅ |
+| **Attack forensics** | ❌ | ✅ |
+| **WAF included** | ❌ | ✅ For protected resources |
+| **Commitment** | None | 1 year |
+
+### WAF vs Network Firewall vs Security Groups
+
+| Feature | WAF | Network Firewall | Security Groups |
+|---|---|---|---|
+| **Layer** | L7 (HTTP/S) | L3/L4/L7 | L3/L4 |
+| **Scope** | Web apps | VPC traffic | Instance level |
+| **SQL injection** | ✅ | ❌ | ❌ |
+| **Rate limiting** | ✅ | ❌ | ❌ |
+| **Geo blocking** | ✅ | ✅ | ❌ |
+| **OWASP rules** | ✅ | ❌ | ❌ |
+| **Stateful** | ✅ | ✅ | ✅ |
+| **Cost** | Per request | Per hour + data | Free |
+
+---
+
+## 1.5 Security & Compliance Angles
+
+### IAM Permissions for WAF
+
+```
+wafv2:CreateWebACL              → Create Web ACL
+wafv2:UpdateWebACL              → Update rules
+wafv2:DeleteWebACL              → Delete Web ACL
+wafv2:AssociateWebACL           → Attach to resource
+wafv2:DisassociateWebACL        → Detach from resource
+wafv2:GetWebACL                 → View Web ACL
+wafv2:ListWebACLs               → List Web ACLs
+wafv2:PutLoggingConfiguration   → Enable logging
+wafv2:CreateRuleGroup           → Create rule group
+wafv2:CreateIPSet               → Create IP set
+```
+
+### Common Misconfigurations
+
+| Misconfiguration | Risk | Fix |
+|---|---|---|
+| COUNT action on all rules | Nothing actually blocked | Switch tested rules to BLOCK |
+| No WAF logging | Cannot investigate attacks | Enable logging to S3/CW |
+| WAF in wrong region for CF | WAF not enforced | Create WAF in us-east-1 for CF |
+| No rate limiting | Brute force succeeds | Add rate-based rules on sensitive endpoints |
+| Default ALLOW without rules | All traffic passes | Add rules before going live |
+| Managed rules not tested | Legitimate traffic blocked | Test in COUNT mode first |
+| No geo-restriction | Global attack surface | Block unused countries |
+| Shield Advanced without SRT access | Cannot get help during attack | Configure SRT IAM role |
+
+### Compliance Relevance
+
+| Framework | WAF/Shield Relevance |
+|---|---|
+| **PCI DSS** | WAF required for web-facing apps handling card data |
+| **HIPAA** | Protection of PHI in web applications |
+| **ISO 27001** | DDoS protection, web application security |
+| **NIST 800-53** | SC-5 (Denial of Service), SI-3 (Malware Protection) |
+| **SOC 2** | Availability (DDoS protection), security controls |
+
+---
+
+## 1.6 Integration Patterns
+
+### Pattern 1: Complete WAF + Shield Architecture
+```
+Internet Traffic
+        │
+        ▼
+Route 53 (Shield Advanced protects)
+        │
+        ▼
+CloudFront (Shield Advanced + WAF us-east-1)
+        │  Bot Control + Core Rule Set
+        ▼
+ALB (Shield Advanced + WAF regional)
+        │  Rate limiting + App-specific rules
+        ▼
+Application (ECS/EC2/Lambda)
+```
+
+### Pattern 2: WAF Logging Pipeline
+```
+WAF → Kinesis Data Firehose → S3
+                    │
+                    └── Lambda transform
+                              │
+                              ▼
+                         Athena queries
+                         (analyze attack patterns)
+```
+
+### Pattern 3: Automated IP Blocking
+```
+WAF (COUNT mode detects attack pattern)
+        │
+        ▼
+CloudWatch metric alarm triggers
+        │
+        ▼
+Lambda function
+        │ Adds IP to WAF IP Set
+        ▼
+WAF blocks the IP automatically
+        │
+        ▼
+IP removed after TTL (optional automation)
+```
+
+### Pattern 4: Firewall Manager Centralized Deployment
+```
+Security Account (Firewall Manager Admin)
+        │ Defines WAF policy
+        ▼
+AWS Organizations
+        │ Policy automatically applied to all accounts
+        ├── Account A: All ALBs get WAF attached
+        ├── Account B: All ALBs get WAF attached
+        └── Account C: All ALBs get WAF attached
+
+New account joins org → WAF automatically applied
+```
+
+---
+
+Section 1 complete Pradeep! Full theory at exam depth covering all sub-topics.
+
+Shall I move to **Section 2 — Exam Deep Dive**? 🎯
+
+
+# 📅 Day 37 — Section 2: Exam Deep Dive
+
+---
+
+## 2.1 Scenario-Based Q&A (20 Questions)
+
+---
+
+### Question 1
+**A company has a WAF Web ACL with the following rules in order: Priority 1 — Block known bad IPs (IP Set), Priority 2 — AWS Core Rule Set (BLOCK), Priority 3 — Rate limit 1000 req/5min (BLOCK), Priority 10 — Allow corporate IPs (ALLOW). A request from a corporate IP that is also in the known bad IP set arrives. What happens?**
+
+A) Request is allowed because corporate IPs have priority
+B) Request is blocked because Priority 1 matches first
+C) Both rules match — the more specific rule wins
+D) Request is counted but not blocked
+
+**Answer: B**
+
+**Explanation:**
+- WAF evaluates rules in ascending priority order — lowest number first
+- Priority 1 (Block bad IPs) is evaluated before Priority 10 (Allow corporate)
+- The bad IP rule matches first → request is BLOCKED
+- Evaluation stops at first match — Priority 10 never evaluated
+- To fix: move corporate IP allowlist to Priority 0 (lower number = evaluated first)
+- This is the most common WAF rule ordering mistake in exam scenarios
+
+---
+
+### Question 2
+**A security team wants to test new WAF rules against production traffic without blocking legitimate users. Which WAF action should they use initially?**
+
+A) BLOCK with a custom response code of 200
+B) ALLOW with logging enabled
+C) COUNT
+D) CHALLENGE
+
+**Answer: C**
+
+**Explanation:**
+- COUNT action logs and counts matching requests but does NOT block them
+- Traffic flows normally to application — no user impact
+- Metrics accumulate in CloudWatch showing how many requests would have been blocked
+- Team analyzes COUNT metrics to verify rule accuracy before switching to BLOCK
+- After validation period → change action to BLOCK
+- COUNT is the standard WAF testing methodology — critical exam concept
+- CHALLENGE detects bots — not for rule testing
+
+---
+
+### Question 3
+**A company deploys WAF to protect their CloudFront distribution. They create the WAF Web ACL in ap-south-1 (Mumbai) where their ALB origin is located. CloudFront traffic is not being filtered by WAF. What is wrong?**
+
+A) CloudFront requires WAF to be attached at the ALB level not CloudFront
+B) WAF Web ACL for CloudFront must be created in us-east-1
+C) CloudFront only supports AWS Shield not WAF
+D) The WAF scope should be REGIONAL not CLOUDFRONT
+
+**Answer: B**
+
+**Explanation:**
+- WAF Web ACLs that protect CloudFront MUST be created in us-east-1
+- The ap-south-1 Web ACL cannot be associated with CloudFront
+- CloudFront is a global service managed from us-east-1 — WAF must match
+- WAF scope for CloudFront must be CLOUDFRONT (not REGIONAL)
+- The ALB WAF is separate and protects origin traffic independently
+- Fix: create new Web ACL in us-east-1 with CLOUDFRONT scope and associate with distribution
+
+---
+
+### Question 4
+**A company experiences a large DDoS attack targeting their EC2 instances directly via Elastic IPs. They have Shield Standard. The attack saturates their 10 Gbps uplink. What should they do to get immediate help?**
+
+A) Contact AWS Support — Shield Standard includes 24/7 DDoS response
+B) Upgrade to Shield Advanced to access the DDoS Response Team (SRT)
+C) Add WAF rules to block the attack traffic
+D) Scale up EC2 instances to absorb the additional traffic
+
+**Answer: B**
+
+**Explanation:**
+- Shield Standard provides automatic basic mitigations but NO human DDoS response team
+- Shield Advanced includes 24/7 access to the DDoS Response Team (SRT)
+- SRT can deploy custom mitigations during active attacks
+- Shield Advanced also provides cost protection for scaling costs during attacks
+- WAF operates at L7 (HTTP) — volumetric network floods are L3/L4 — WAF cannot help
+- Scaling EC2 wastes money and doesn't stop the attack — Shield Advanced provides cost credits
+- Shield Advanced upgrade takes effect quickly — SRT engagement is immediate
+
+---
+
+### Question 5
+**A WAF rate-based rule is configured to block IPs making more than 1000 requests in 5 minutes. A legitimate user behind a corporate NAT gateway (which has one public IP for 500 employees) gets blocked. What is the BEST solution?**
+
+A) Increase the rate limit to 100,000 requests per 5 minutes
+B) Use a scope-down statement to exclude the corporate IP from rate limiting
+C) Disable rate limiting entirely
+D) Add the corporate IP to a BLOCK list to prevent future blocking
+
+**Answer: B**
+
+**Explanation:**
+- Scope-down statements restrict which requests are counted by the rate-based rule
+- Create an IP set with the corporate NAT IP and use NOT match as scope-down
+- This means: rate-limit all IPs EXCEPT the corporate IP
+- Alternatively: add corporate IP to an ALLOW rule with higher priority than rate limit
+- Increasing limit to 100k defeats the purpose of rate limiting
+- Disabling rate limiting removes DDoS/brute force protection
+- Adding to BLOCK list would block legitimate users — completely wrong
+
+---
+
+### Question 6
+**A company wants to protect their login page from credential stuffing attacks where attackers use lists of compromised username/password combinations. Which WAF feature specifically addresses this?**
+
+A) AWS Managed Rules Core Rule Set
+B) Rate-based rules on the login endpoint
+C) Account Takeover Prevention (ATP) managed rule group
+D) Bot Control common inspection
+
+**Answer: C**
+
+**Explanation:**
+- ATP (Account Takeover Prevention) is specifically designed for credential stuffing
+- ATP checks credentials against known compromised credential databases
+- ATP tracks failed login attempts and applies CAPTCHA/block on suspicious patterns
+- Core Rule Set protects against OWASP vulnerabilities — not credential stuffing
+- Rate-based rules can slow brute force but don't detect credential stuffing patterns
+- Bot Control identifies bots generally but doesn't specifically address credential databases
+- ATP is the purpose-built solution for this exact threat
+
+---
+
+### Question 7
+**An organization uses AWS Firewall Manager to deploy WAF policies across 50 accounts. A new AWS account joins the organization. What happens to WAF protection for the new account?**
+
+A) The security admin must manually deploy WAF to the new account
+B) WAF policies are automatically applied to the new account if it matches policy scope
+C) The new account must opt-in to Firewall Manager policies
+D) WAF policies apply only to accounts created before Firewall Manager was configured
+
+**Answer: B**
+
+**Explanation:**
+- Firewall Manager continuously monitors the organization for new accounts
+- When a new account joins and matches the policy scope, WAF is automatically applied
+- This is the primary benefit of Firewall Manager — zero-touch enforcement
+- No manual deployment required — fully automated
+- Accounts cannot opt-out if the policy scope includes them
+- Policy scope can be: all accounts, specific OUs, or accounts with specific tags
+
+---
+
+### Question 8
+**A company has Shield Advanced enabled. During a DDoS attack, their ALB auto-scales causing their AWS bill to increase by $50,000. Can they recover these costs?**
+
+A) No — Shield Advanced only provides DDoS mitigation, not cost coverage
+B) Yes — Shield Advanced includes cost protection credits for scaling costs caused by DDoS attacks
+C) Only if they can prove the scaling was directly caused by the attack
+D) Yes but only up to $10,000 per incident
+
+**Answer: B**
+
+**Explanation:**
+- Shield Advanced includes cost protection — one of its key differentiators
+- AWS provides service credits for scaling costs (EC2, ELB, CloudFront, Route 53) during DDoS
+- No hard cap on credits — covers legitimate scaling caused by the attack
+- This is a major financial benefit of Shield Advanced for large-scale attacks
+- Credits require submitting a request after the attack with evidence
+- This feature prevents bill shock during attacks — a common exam scenario
+
+---
+
+### Question 9
+**A WAF Web ACL has a default action of ALLOW. The ACL has 5 rules — all with COUNT action. A malicious request matching all 5 rules arrives. What happens?**
+
+A) Request is blocked after matching 5 COUNT rules
+B) Request is allowed — COUNT never blocks
+C) Request triggers CAPTCHA after 3 matches
+D) WAF returns an error due to multiple rule matches
+
+**Answer: B**
+
+**Explanation:**
+- COUNT action NEVER blocks requests — it only counts and logs
+- Evaluation CONTINUES through all rules even after COUNT matches
+- After all 5 COUNT rules, no BLOCK action has been applied
+- Default action is ALLOW → request passes to application
+- This is why COUNT-only configurations are dangerous in production
+- All 5 COUNT rules execute and generate metrics — but traffic flows through
+- Fix: change rules from COUNT to BLOCK when testing is complete
+
+---
+
+### Question 10
+**A company needs to block all traffic from specific countries except for users from those countries who have a valid session cookie. Which WAF configuration achieves this?**
+
+A) Geo match block rule — no exceptions possible
+B) Priority 1: ALLOW rule matching valid session cookie, Priority 2: Geo match BLOCK rule
+C) Priority 1: Geo match BLOCK rule, Priority 2: ALLOW rule for session cookie
+D) Use CAPTCHA for geographic blocks
+
+**Answer: B**
+
+**Explanation:**
+- Rule evaluation stops at first match — order is critical
+- Priority 1 (ALLOW with session cookie) evaluated first
+- If user has valid cookie → ALLOWED → evaluation stops (geo block never evaluated)
+- If user has no valid cookie → Priority 1 doesn't match → Priority 2 geo block evaluated → BLOCKED
+- Option C (geo block first) would block ALL users from those countries — even with valid cookies
+- This is a classic WAF rule ordering pattern for exceptions to blocks
+
+---
+
+### Question 11
+**A security team wants to block requests containing SQL injection in query strings. They also want to handle URL-encoded and base64-encoded injection attempts. Which WAF feature handles encoding variations?**
+
+A) Multiple separate rules for each encoding type
+B) Text transformations in WAF rules
+C) Regular expression matching with encoding patterns
+D) AWS managed SQL injection rule group only
+
+**Answer: B**
+
+**Explanation:**
+- WAF text transformations normalize request content before matching
+- Available transformations: URL_DECODE, BASE64_DECODE, HTML_ENTITY_DECODE, LOWERCASE, COMPRESS_WHITE_SPACE, CMD_LINE, NONE
+- Apply multiple transformations in sequence by priority
+- Example: URL_DECODE first → then BASE64_DECODE → then check for SQL injection
+- This catches attackers who encode attacks to bypass simple pattern matching
+- Single rule with multiple transformations is more efficient than multiple rules
+- AWS Managed SQLi rules also use transformations internally
+
+---
+
+### Question 12
+**A company uses WAF with CloudFront. They want to ensure that their ALB origin only accepts traffic from CloudFront and not directly from the internet. WAF is applied at CloudFront level. Which additional control enforces this?**
+
+A) WAF rule on ALB blocking non-CloudFront IPs
+B) ALB security group allowing only CloudFront IP ranges
+C) NACLs blocking all traffic except from CloudFront
+D) Both B is correct — ALB security group with CloudFront managed prefix list
+
+**Answer: D**
+
+**Explanation:**
+- WAF at CloudFront level is bypassed if attackers hit ALB directly
+- ALB security group must restrict inbound to CloudFront IP ranges only
+- AWS maintains a managed prefix list for CloudFront: com.amazonaws.global.cloudfront.origin-facing
+- Security group inbound rule: allow HTTPS from CloudFront managed prefix list
+- Additionally: use custom header from CloudFront → verify at ALB level (WAF or app)
+- NACLs work but managed prefix list in security groups is more maintainable
+- This is defense-in-depth — WAF at edge + network control at origin
+
+---
+
+### Question 13
+**A company's WAF is blocking legitimate search engine crawlers (Googlebot, Bingbot) causing their website to lose search rankings. They use the Bot Control managed rule group. What should they do?**
+
+A) Disable the Bot Control rule group entirely
+B) Override the Bot Control rules for verified bots to ALLOW action
+C) Add Google and Bing IP ranges to an allowlist
+D) Switch to COUNT for the entire Bot Control rule group
+
+**Answer: B**
+
+**Explanation:**
+- Bot Control distinguishes between verified bots and unverified bots
+- Verified bots (Googlebot, Bingbot) are identified and can be explicitly ALLOWED
+- Override the specific verified bot rules to ALLOW while keeping malicious bot rules as BLOCK
+- WAF Bot Control allows per-rule action overrides within managed rule groups
+- Disabling entire Bot Control removes all bot protection
+- IP ranges for search engines change frequently — hard to maintain IP allowlist
+- COUNT for entire group means no bots are blocked — not the right fix
+
+---
+
+### Question 14
+**Which of the following resources can be protected by AWS Shield Advanced? (Select THREE)**
+
+A) Amazon S3 buckets
+B) Amazon CloudFront distributions
+C) Amazon Route 53 hosted zones
+D) Amazon RDS databases
+E) Elastic Load Balancers
+F) Amazon DynamoDB tables
+
+**Answer: B, C, E**
+
+**Explanation:**
+- Shield Advanced protects specific resource types:
+- ✅ CloudFront distributions — global CDN
+- ✅ Route 53 hosted zones — DNS infrastructure
+- ✅ Elastic Load Balancers (ALB, NLB, CLB) — ingress layer
+- ✅ EC2 Elastic IPs — compute
+- ✅ Global Accelerator — global routing
+- ❌ S3 — not a Shield Advanced protected resource type
+- ❌ RDS — database layer, not directly exposed
+- ❌ DynamoDB — database layer, not directly exposed
+- Shield protects the internet-facing ingress layer, not backend data services
+
+---
+
+### Question 15
+**A company wants to use WAF to protect multiple applications across 20 AWS accounts. They want consistent rules enforced everywhere with minimal management overhead. Which combination is BEST?**
+
+A) Create identical Web ACLs manually in each account
+B) Use AWS Firewall Manager with a WAF policy scoped to all accounts
+C) Share a single WAF Web ACL across all accounts via AWS RAM
+D) Use AWS Config rules to enforce WAF association
+
+**Answer: B**
+
+**Explanation:**
+- Firewall Manager centrally manages WAF policies across all accounts
+- Define rules once → automatically deployed to all matching resources in all accounts
+- New accounts automatically get WAF applied — zero manual work
+- Creating identical Web ACLs manually is error-prone and doesn't scale
+- WAF Web ACLs cannot be shared via AWS RAM — they must exist per account
+- AWS Config can detect missing WAF but cannot deploy it — not preventive
+
+---
+
+### Question 16
+**A WAF Web ACL has these rules: Priority 0 — Allow IP set (known good IPs), Priority 5 — Core Rule Set (BLOCK), Priority 10 — Rate limit (BLOCK). Default action: BLOCK. A request arrives from an unknown IP that doesn't trigger Core Rule Set or rate limit. What happens?**
+
+A) Request is allowed because it passed all rules
+B) Request is blocked by default action
+C) Request is counted by default action
+D) Request triggers CAPTCHA
+
+**Answer: B**
+
+**Explanation:**
+- Priority 0 (Allow) doesn't match — IP not in known good set
+- Priority 5 (Core Rule Set) doesn't match — no attack patterns
+- Priority 10 (Rate limit) doesn't match — under threshold
+- No rules matched → default action applies → BLOCK
+- Default action of BLOCK means allowlist-style WAF — only known good IPs allowed
+- This is a strict/paranoid WAF configuration — everything blocked by default
+- Common pattern for highly sensitive APIs where only known clients should connect
+
+---
+
+### Question 17
+**A company wants to prevent their WAF from being bypassed by attackers who discover their ALB endpoint directly. In addition to security groups, they want WAF to verify requests came through CloudFront. Which approach works at the WAF level?**
+
+A) WAF geo-restriction rules
+B) CloudFront adds a secret custom header — WAF rule on ALB verifies header presence
+C) WAF IP set with CloudFront IP ranges
+D) WAF rate limiting prevents direct ALB access
+
+**Answer: B**
+
+**Explanation:**
+- CloudFront can be configured to add a custom header with a secret value
+- WAF rule on ALB checks for this custom header with the correct secret value
+- Requests without the header (direct to ALB) are blocked by WAF
+- Rotate the secret periodically for security
+- IP sets with CloudFront ranges require frequent updates as ranges change
+- Geo-restriction doesn't prevent same-country direct access
+- Rate limiting doesn't distinguish CloudFront traffic from direct traffic
+- Secret header is the most reliable WAF-level origin protection
+
+---
+
+### Question 18
+**An organization subscribes to Shield Advanced with a 1-year commitment. After 3 months, they decide the protection is unnecessary and want to cancel. What happens?**
+
+A) They can cancel immediately with a pro-rated refund
+B) They must continue paying for the remaining 9 months — 1-year commitment is binding
+C) They can cancel but lose all DDoS Response Team access immediately
+D) AWS allows one cancellation per year with 30 days notice
+
+**Answer: B**
+
+**Explanation:**
+- Shield Advanced requires a 1-year subscription commitment
+- Cannot cancel mid-year — must pay for full commitment period
+- This is an important cost consideration when recommending Shield Advanced
+- Organizations should carefully evaluate need before subscribing
+- After the 1-year period, subscription auto-renews unless cancelled
+- This commitment model is frequently tested in cost optimization scenarios
+- Alternative: Shield Standard (free, always on) for organizations not needing SRT
+
+---
+
+### Question 19
+**A company's WAF logs show a large volume of requests being blocked by the Core Rule Set rule "CrossSiteScripting_BODY". The security team suspects some of these are legitimate requests from their mobile app. What is the BEST approach to investigate without impacting security?**
+
+A) Disable the CrossSiteScripting_BODY rule entirely
+B) Override the CrossSiteScripting_BODY rule to COUNT and analyze sampled requests
+C) Create an exception for all mobile app traffic
+D) Switch the entire Core Rule Set to COUNT mode
+
+**Answer: B**
+
+**Explanation:**
+- Overriding a specific rule to COUNT allows investigation without removing protection
+- WAF allows per-rule action overrides within managed rule groups
+- Sampled requests in WAF logs show actual request content causing the match
+- After analysis: if legitimate → create exception rule with higher priority ALLOW
+- Disabling the rule entirely removes XSS protection
+- Excepting all mobile app traffic is too broad — attackers could spoof mobile headers
+- Switching entire Core Rule Set to COUNT removes all OWASP protection
+- Per-rule override to COUNT is the surgical, safe approach
+
+---
+
+### Question 20
+**A company uses AWS WAF with rate-based rules. An attacker distributes their attack across 10,000 different IP addresses, each sending only 50 requests per 5 minutes (well under the 1000 request threshold). The rate-based rule does not block the attack. What additional WAF capability should they implement?**
+
+A) Increase the rate limit to catch distributed attacks
+B) Use WAF Bot Control with targeted bot inspection to detect distributed bot attacks
+C) Deploy Shield Standard which handles distributed attacks
+D) Block all traffic and only allow known IPs
+
+**Answer: B**
+
+**Explanation:**
+- Distributed attacks use many IPs to evade per-IP rate limiting
+- Bot Control targeted inspection uses behavioral signals beyond just IP address
+- Browser fingerprinting, session analysis, request patterns identify coordinated bot activity
+- Even at low per-IP rates, Bot Control can identify the distributed attack pattern
+- Increasing rate limit doesn't help — each IP stays under any reasonable threshold
+- Shield Standard handles volumetric L3/L4 attacks — not distributed L7 bot attacks
+- Blocking all traffic defeats the purpose of having a public application
+- Bot Control targeted inspection is the correct solution for sophisticated distributed bots
+
+---
+
+## 2.2 Common Exam Traps & Distractors
+
+### Trap 1: Higher Priority Number = Evaluated First
+> ❌ **Wrong:** "Rule with Priority 100 is evaluated before Priority 1"
+> ✅ **Right:** Lower number = higher priority = evaluated FIRST (Priority 0 before Priority 100)
+
+### Trap 2: COUNT Blocks After Threshold
+> ❌ **Wrong:** "COUNT action blocks request after matching 3 rules"
+> ✅ **Right:** COUNT NEVER blocks — it only counts and logs, evaluation continues
+
+### Trap 3: WAF for CloudFront Can Be in Any Region
+> ❌ **Wrong:** "Create WAF in same region as CloudFront origin"
+> ✅ **Right:** WAF for CloudFront MUST be in **us-east-1** with CLOUDFRONT scope
+
+### Trap 4: Shield Standard Includes DDoS Response Team
+> ❌ **Wrong:** "Contact the DDoS Response Team via Shield Standard"
+> ✅ **Right:** DRT access requires **Shield Advanced** only
+
+### Trap 5: Shield Advanced Can Be Cancelled Anytime
+> ❌ **Wrong:** "Cancel Shield Advanced if attack stops"
+> ✅ **Right:** Shield Advanced has a **1-year binding commitment**
+
+### Trap 6: Rate-Based Rules Block Immediately
+> ❌ **Wrong:** "Rate-based rule blocks after first request over threshold"
+> ✅ **Right:** Rate is calculated over a **5-minute sliding window**
+
+### Trap 7: Default Action Evaluated Before Rules
+> ❌ **Wrong:** "Default BLOCK action prevents all unmatched traffic before rules run"
+> ✅ **Right:** Default action is LAST resort — only applied when NO rules match
+
+### Trap 8: WAF Web ACLs Shareable via RAM
+> ❌ **Wrong:** "Share WAF Web ACL across accounts using AWS RAM"
+> ✅ **Right:** WAF Web ACLs cannot be shared via RAM — use Firewall Manager for multi-account
+
+### Trap 9: Shield Advanced Costs Extra for WAF
+> ❌ **Wrong:** "Shield Advanced + WAF = $3,000/month + WAF charges"
+> ✅ **Right:** WAF is **included at no extra charge** for Shield Advanced protected resources
+
+### Trap 10: ALLOW Action Continues Rule Evaluation
+> ❌ **Wrong:** "ALLOW action counts the request and continues to next rule"
+> ✅ **Right:** ALLOW terminates rule evaluation — just like BLOCK. Only COUNT continues evaluation.
+
+---
+
+## 2.3 Key Facts Cheat Sheet
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│              AWS WAF & SHIELD — EXAM CHEAT SHEET               │
+├──────────────────────────────────┬─────────────────────────────┤
+│ WAF for CloudFront region        │ us-east-1 ONLY              │
+│ WAF for ALB/API GW scope         │ REGIONAL (same region)      │
+│ Rule evaluation order            │ Lowest priority # first     │
+│ First match behavior             │ Stops evaluation            │
+│ COUNT behavior                   │ Continues evaluation        │
+│ Web ACL max WCU                  │ 5,000                       │
+│ Rate-based rule window           │ 5 minutes sliding           │
+│ Rate-based rule minimum          │ 100 requests                │
+│ Default action timing            │ After all rules evaluated   │
+│ Shield Standard cost             │ Free                        │
+│ Shield Advanced cost             │ $3,000/month                │
+│ Shield Advanced commitment       │ 1 year minimum              │
+│ SRT access                       │ Shield Advanced only        │
+│ WAF included in Shield Adv       │ ✅ Free for protected res.  │
+│ Cost protection                  │ Shield Advanced only        │
+│ Shield Advanced protected types  │ EC2(EIP), ELB, CF, R53, GA │
+│ Firewall Manager prerequisite    │ AWS Organizations + Config  │
+│ WAF RAM sharing                  │ ❌ Not supported            │
+│ Multi-account WAF mgmt           │ AWS Firewall Manager        │
+│ Credential stuffing protection   │ ATP managed rule group      │
+│ Bot detection (sophisticated)    │ Bot Control targeted        │
+│ OWASP Top 10 coverage            │ Core Rule Set               │
+│ Testing new rules safely         │ COUNT mode first            │
+│ Log4Shell protection             │ Known Bad Inputs rule group │
+│ Text transformations use         │ Decode before pattern match │
+│ Verified bots (Google/Bing)      │ Bot Control can allow       │
+│ Custom response on block         │ Configurable status + body  │
+│ CloudFront origin protection     │ Secret custom header        │
+└──────────────────────────────────┴─────────────────────────────┘
+```
+
+---
+
+## 2.4 Elimination Strategies
+
+### Strategy 1: CloudFront WAF = us-east-1
+Any scenario with **CloudFront WAF** → eliminate other regions → must be **us-east-1 with CLOUDFRONT scope**
+
+### Strategy 2: Testing Rules = COUNT Mode
+Need to **test without impacting traffic** → eliminate BLOCK, ALLOW → **COUNT mode**
+
+### Strategy 3: DDoS Response Team = Shield Advanced
+Need **human DDoS response / SRT access** → eliminate Shield Standard → **Shield Advanced**
+
+### Strategy 4: Multi-Account WAF = Firewall Manager
+**Consistent WAF across multiple accounts** → eliminate manual deployment, RAM sharing → **AWS Firewall Manager**
+
+### Strategy 5: Credential Stuffing = ATP
+Protect **login endpoint from compromised credentials** → eliminate Core Rule Set, rate limiting → **Account Takeover Prevention (ATP)**
+
+### Strategy 6: Rule Order = First Match Wins
+**Exception to a block rule** → put ALLOW rule at **lower priority number** than BLOCK rule
+
+### Strategy 7: Distributed Bots = Bot Control Targeted
+Attack spread across **thousands of IPs** evading rate limits → eliminate rate-based rules → **Bot Control targeted inspection**
+
+### Strategy 8: Cost Protection During Attack = Shield Advanced
+**AWS bill increases during DDoS attack** → eliminate Shield Standard → **Shield Advanced cost protection**
+
+### Strategy 9: COUNT Never Blocks
+Any scenario asking if COUNT action blocks → answer is **never** — COUNT only logs/counts
+
+### Strategy 10: WAF Bypass Prevention = Secret Header
+Prevent attackers from **bypassing CloudFront WAF** by hitting ALB directly → **secret custom header from CloudFront + WAF verification on ALB**
+
+---
+
+Section 2 complete Pradeep! 20 scenario questions, 10 traps, full cheat sheet and elimination strategies. ✅
+
+Ready for **Section 3 — Lab 102**? 🧪
